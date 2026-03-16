@@ -20,7 +20,6 @@ import structlog
 from fastapi import FastAPI
 from fastapi.responses import RedirectResponse
 from orchestrator.db import init_database
-from orchestrator.llm_settings import llm_settings
 
 from orchestrator_agent.adapters import A2AApp, MCPApp
 from orchestrator_agent.agent import AgentAdapter
@@ -35,13 +34,11 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     """Application lifespan: DB init, migration, adapter startup/shutdown."""
     init_database(agent_settings)  # type: ignore[arg-type]  # AgentSettings has DATABASE_URI which is all init_database needs
 
-    agent_model = llm_settings.AGENT_MODEL
-
     a2a_url = f"{agent_settings.BASE_URL}/a2a/"
-    a2a = A2AApp(AgentAdapter(agent_model, debug=llm_settings.AGENT_DEBUG), url=a2a_url)
+    a2a = A2AApp(AgentAdapter(agent_settings.AGENT_MODEL, debug=agent_settings.AGENT_DEBUG), url=a2a_url)
     app.mount("/a2a", a2a.app)
 
-    mcp_app = MCPApp(AgentAdapter(agent_model, debug=llm_settings.AGENT_DEBUG))
+    mcp_app = MCPApp(AgentAdapter(agent_settings.AGENT_MODEL, debug=agent_settings.AGENT_DEBUG))
     app.mount("/mcp", mcp_app.app)
 
     # Manage adapter lifecycles
@@ -54,7 +51,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         "Agent adapters started",
         a2a_url=a2a_url,
         mcp_path="/mcp",
-        agent_model=agent_model,
+        agent_model=agent_settings.AGENT_MODEL,
     )
 
     yield

@@ -24,9 +24,6 @@ def get_agent(request: Request) -> AgentAdapter:
 
     The agent is built once and cached for the lifetime of the application.
     """
-    from orchestrator.llm_settings import llm_settings
+    from orchestrator_agent.settings import agent_settings
 
-    model = llm_settings.AGENT_MODEL
-    debug = llm_settings.AGENT_DEBUG
-
-    return AgentAdapter(model, debug=debug)
+    return AgentAdapter(agent_settings.AGENT_MODEL, debug=agent_settings.AGENT_DEBUG)

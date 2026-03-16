@@ -49,6 +49,8 @@ class AgentSettings(BaseSettings):
     DATABASE_URI: str = Field(description="PostgreSQL connection URI for WFO database")
     BASE_URL: str = Field(default="http://localhost:8000", description="Public URL of this agent service")
     ORCHESTRATOR_API_URL: str = Field(default="http://localhost:8080", description="URL of the orchestrator-core API")
+    AGENT_MODEL: str = Field(default="openai:gpt-4o", description="LLM model for the agent")
+    AGENT_DEBUG: bool = Field(default=False, description="Enable debug logging for agent execution")
     orchestrator_api_paths: OrchestratorAPIPaths = Field(default_factory=OrchestratorAPIPaths)
 
 
