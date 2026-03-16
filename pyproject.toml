@@ -6,7 +6,7 @@ license = "Apache-2.0"
 requires-python = ">=3.11,<3.14"
 dependencies = [
     "orchestrator-core[search]>=4.8.0",
-    "pydantic-ai-slim==1.12.0",
+    "pydantic-ai-slim==1.56.0",
     "ag-ui-protocol==0.1.10",
     "fasta2a==0.6.0",
     "mcp==1.26.0",
