@@ -18,7 +18,12 @@ from typing import AsyncIterator
 
 import structlog
 from fastapi import FastAPI
+from fastapi.responses import RedirectResponse
+from orchestrator.db import init_database
+from orchestrator.llm_settings import llm_settings
 
+from orchestrator_agent.adapters import A2AApp, MCPApp
+from orchestrator_agent.agent import AgentAdapter
 from orchestrator_agent.api.api import api_router
 from orchestrator_agent.settings import agent_settings
 
@@ -28,33 +33,16 @@ logger = structlog.get_logger(__name__)
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     """Application lifespan: DB init, migration, adapter startup/shutdown."""
-    from orchestrator.db import init_database
-
     init_database(agent_settings)  # type: ignore[arg-type]  # AgentSettings has DATABASE_URI which is all init_database needs
-
-    # Run search migration
-    from orchestrator.db import db
-    from orchestrator.search.llm_migration import run_migration
-
-    with db.engine.begin() as connection:
-        run_migration(connection)
-
-    logger.info("Database initialized and migration complete")
-
-    # Import adapters after DB is ready
-    from orchestrator.llm_settings import llm_settings
-
-    from orchestrator_agent.adapters import A2AApp, MCPApp
-    from orchestrator_agent.agent import AgentAdapter
 
     agent_model = llm_settings.AGENT_MODEL
 
-    a2a_url = f"{agent_settings.BASE_URL}/api/agent/a2a/"
+    a2a_url = f"{agent_settings.BASE_URL}/a2a/"
     a2a = A2AApp(AgentAdapter(agent_model, debug=llm_settings.AGENT_DEBUG), url=a2a_url)
-    app.mount("/api/agent/a2a", a2a.app)
+    app.mount("/a2a", a2a.app)
 
     mcp_app = MCPApp(AgentAdapter(agent_model, debug=llm_settings.AGENT_DEBUG))
-    app.mount("/api/agent/mcp", mcp_app.app)
+    app.mount("/mcp", mcp_app.app)
 
     # Manage adapter lifecycles
     stack = AsyncExitStack()
@@ -65,7 +53,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     logger.info(
         "Agent adapters started",
         a2a_url=a2a_url,
-        mcp_path="/api/agent/mcp",
+        mcp_path="/mcp",
         agent_model=agent_model,
     )
 
@@ -76,4 +64,10 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
 
 
 app = FastAPI(title="WFO Search Agent", lifespan=lifespan)
-app.include_router(api_router, prefix="/api")
+app.include_router(api_router)
+
+
+@app.get("/.well-known/agent-card.json", include_in_schema=False)
+async def well_known_agent_card() -> RedirectResponse:
+    """Redirect to A2A agent card (Standard agent discovery expects this at the root)."""
+    return RedirectResponse(url="/a2a/.well-known/agent-card.json")

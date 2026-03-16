@@ -3,13 +3,13 @@ name = "orchestrator-agent"
 version = "0.1.0"
 description = "Standalone WFO search agent for Kagent deployment"
 license = "Apache-2.0"
-requires-python = ">=3.11"
+requires-python = ">=3.11,<3.14"
 dependencies = [
-    "orchestrator-core[search]",
-    "pydantic-ai-slim>=1.56.0",
-    "ag-ui-protocol>=0.1.10",
-    "fasta2a>=0.1.0",
-    "mcp>=1.9.0",
+    "orchestrator-core[search]>=4.8.0",
+    "pydantic-ai-slim==1.12.0",
+    "ag-ui-protocol==0.1.10",
+    "fasta2a==0.6.0",
+    "mcp==1.26.0",
     "uvicorn[standard]>=0.30.0",
     "structlog>=24.0.0",
 ]
@@ -26,7 +26,7 @@ dev = [
     "ruff>=0.12.0",
 ]
 demo = [
-    "crewai[a2a]",
+    "crewai[a2a]==1.10.1",
 ]
 
 [build-system]
@@ -132,3 +132,10 @@ disallow_incomplete_defs = false
 
 [tool.uv]
 index-url = "https://pypi.org/simple"
+# crewai 1.10.1 and orchestrator-core have conflicting pydantic/click pins.
+# Both work fine at runtime with these widened ranges (we really only use the search module of the orchestrator-core).
+override-dependencies = [
+    "pydantic>=2.11.9,<2.13",
+    "pydantic-settings>=2.10.1,<2.13",
+    "click>=8.1.7",
+]

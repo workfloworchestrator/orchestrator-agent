@@ -9,19 +9,17 @@ cp .env.example .env
 # Edit .env with your DATABASE_URI and LLM settings
 
 uv sync
-uv run uvicorn orchestrator_agent.app:app --port 8080
+uv run uvicorn orchestrator_agent.app:app --port 8000
 ```
 
 ## Endpoints
 
 | Path                                   | Protocol | Description                  |
 | -------------------------------------- | -------- | ---------------------------- |
-| `POST /api/agent/`                     | AG-UI    | SSE streaming for frontend   |
-| `/api/agent/a2a/`                      | A2A      | Agent-to-agent protocol      |
-| `/api/agent/mcp/`                      | MCP      | Model Context Protocol tools |
-| `GET /api/search/queries/{id}/results` | REST     | Query results for frontend   |
-| `GET /api/search/queries/{id}/export`  | REST     | Export query results         |
-| `GET /health`                          | REST     | Health check                 |
+| `POST /agui`                     | AG-UI    | SSE streaming for frontend   |
+| `/a2a`                           | A2A      | Agent-to-agent protocol      |
+| `/mcp`                           | MCP      | Model Context Protocol tools |
+| `GET /health`                    | REST     | Health check                 |
 
 ## Docker
 

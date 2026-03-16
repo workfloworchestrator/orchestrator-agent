@@ -13,7 +13,7 @@ import uuid
 import httpx
 from ag_ui.core import EventType
 
-URL = "http://localhost:8080/api/agent/"
+URL = "http://localhost:8000/agui/"
 
 BUFFERED = {
     EventType.TEXT_MESSAGE_CONTENT,

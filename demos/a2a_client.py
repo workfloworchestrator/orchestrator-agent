@@ -5,10 +5,10 @@ Requires:
 
 Usage:
     uv run demos/a2a_client.py 25f4f60a-5dbc-4c72-ab57-a10815c4b67e
-    uv run demos/a2a_client.py 25f4f60a-5dbc-4c72-ab57-a10815c4b67e --base-url http://localhost:8080/api/agent/a2a
+    uv run demos/a2a_client.py 25f4f60a-5dbc-4c72-ab57-a10815c4b67e --base-url http://localhost:8000/api/agent/a2a
 
 CrewAI handles all A2A communication (discovery, messaging, polling) automatically
-via the A2AConfig.
+via the A2AClientConfig.
 """
 
 import sys
@@ -18,7 +18,8 @@ from dotenv import load_dotenv
 load_dotenv()
 
 from crewai import Agent, Crew, Task  # noqa: E402
-from crewai.a2a import A2AConfig  # noqa: E402
+from crewai.a2a import A2AClientConfig  # noqa: E402
+from crewai.a2a.updates import PollingConfig  # noqa: E402
 
 
 def run_troubleshoot(subscription_id: str, base_url: str) -> None:
@@ -33,10 +34,11 @@ def run_troubleshoot(subscription_id: str, base_url: str) -> None:
             "and synthesize a clear troubleshooting summary from the results."
         ),
         llm="gpt-4o-mini",
-        a2a=A2AConfig(
+        a2a=A2AClientConfig(
             endpoint=f"{base_url}/.well-known/agent-card.json",
             timeout=120,
             max_turns=10,
+            updates=PollingConfig(interval=2, max_polls=30),
         ),
         verbose=True,
     )
@@ -66,7 +68,7 @@ def main() -> None:
         sys.exit(1)
 
     subscription_id = sys.argv[1]
-    base_url = "http://localhost:8080/api/agent/a2a"
+    base_url = "http://localhost:8000/a2a"
     if "--base-url" in sys.argv:
         base_url = sys.argv[sys.argv.index("--base-url") + 1]
 

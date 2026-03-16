@@ -12,14 +12,12 @@
 # limitations under the License.
 
 import json
-from typing import Any
 from uuid import UUID
 
+import httpx
 import structlog
-from orchestrator.db import db
 from orchestrator.search.core.types import EntityType
 from orchestrator.search.query.results import ExportData
-from orchestrator.settings import app_settings
 from pydantic_ai import RunContext
 from pydantic_ai.ag_ui import StateDeps
 from pydantic_ai.exceptions import ModelRetry
@@ -28,6 +26,7 @@ from pydantic_ai.toolsets import FunctionToolset
 
 from orchestrator_agent.artifacts import DataArtifact, ExportArtifact
 from orchestrator_agent.memory import ToolStep
+from orchestrator_agent.settings import agent_settings
 from orchestrator_agent.state import SearchState
 
 logger = structlog.get_logger(__name__)
@@ -57,49 +56,16 @@ async def fetch_entity_details(
         entity_id=entity_id,
     )
 
-    from orchestrator.services.processes import _get_process, load_process
-    from orchestrator.utils.enrich_process import enrich_process
-    from orchestrator.utils.get_subscription_dict import get_subscription_dict
+    url = agent_settings.orchestrator_api_paths.entity_url(entity_type, entity_id)
 
-    uid = UUID(entity_id)
-    detailed: Any
+    async with httpx.AsyncClient() as client:
+        response = await client.get(url, timeout=30)
 
-    if entity_type == EntityType.SUBSCRIPTION:
-        subscription, _etag = await get_subscription_dict(uid)
-        detailed = subscription
-    elif entity_type == EntityType.PROCESS:
-        process = _get_process(uid)
-        p_stat = load_process(process)
-        detailed = enrich_process(process, p_stat)
-    elif entity_type == EntityType.PRODUCT:
-        from orchestrator.db import ProductTable
-        from sqlalchemy.orm import joinedload
+    if response.status_code == 404:
+        raise ModelRetry(f"No {entity_type.value} found with ID {entity_id}.")
+    response.raise_for_status()
 
-        product = db.session.scalars(
-            ProductTable.query.options(
-                joinedload(ProductTable.fixed_inputs),
-                joinedload(ProductTable.product_blocks),
-                joinedload(ProductTable.workflows),
-            ).filter(ProductTable.product_id == uid)
-        ).first()
-        if not product:
-            raise ModelRetry(f"No product found with ID {entity_id}.")
-
-        from orchestrator.schemas.product import ProductSchema
-
-        detailed = ProductSchema.model_validate(product).model_dump(mode="json")
-    elif entity_type == EntityType.WORKFLOW:
-        from orchestrator.db import WorkflowTable
-
-        workflow = db.session.get(WorkflowTable, uid)
-        if not workflow:
-            raise ModelRetry(f"No workflow found with ID {entity_id}.")
-
-        from orchestrator.schemas.workflow import WorkflowSchema
-
-        detailed = WorkflowSchema.model_validate(workflow).model_dump(mode="json")
-    else:
-        raise ModelRetry(f"Unsupported entity type: {entity_type}")
+    detailed = response.json()
 
     description = f"Fetched details for {entity_type.value} {entity_id}"
 
@@ -145,7 +111,7 @@ async def prepare_export(
         query_id=str(query_id),
     )
 
-    download_url = f"{app_settings.BASE_URL}/api/search/queries/{query_id}/export"
+    download_url = agent_settings.orchestrator_api_paths.export_url(str(query_id))
 
     export_data = ExportData(
         query_id=str(query_id),

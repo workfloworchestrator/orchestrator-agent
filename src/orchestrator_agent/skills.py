@@ -78,8 +78,8 @@ SKILLS: dict[TaskAction, Skill] = {
     TaskAction.RESULT_ACTIONS: Skill(
         action=TaskAction.RESULT_ACTIONS,
         name="Result Actions",
-        description="Export results or fetch entity details",
-        tags=["export", "details"],
+        description="Export results or fetch entity details by ID (subscription, product, workflow)",
+        tags=["export", "details", "lookup"],
         toolsets=[result_actions_toolset],
         get_prompt=get_result_actions_prompt,
         memory_scope=MemoryScope.MINIMAL,

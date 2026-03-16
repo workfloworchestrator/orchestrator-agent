@@ -10,6 +10,6 @@ RUN uv pip install --system --no-cache .
 
 ENV PYTHONUNBUFFERED=1
 
-EXPOSE 8080
+EXPOSE 8000
 
-CMD ["uvicorn", "orchestrator_agent.app:app", "--host", "0.0.0.0", "--port", "8080"]
+CMD ["uvicorn", "orchestrator_agent.app:app", "--host", "0.0.0.0", "--port", "8000"]

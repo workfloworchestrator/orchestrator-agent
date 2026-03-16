@@ -109,7 +109,10 @@ class AgentAdapter(Agent[StateDeps[SearchState], str]):
             ctx = RunContext(state=initial_state)
             planner = Planner(model=self.model_name, skills=self.skills, debug=self.debug)
 
+            has_inner_result = False
             async for event in planner.execute(ctx, target_action=target_action):
+                if isinstance(event, AgentRunResultEvent):
+                    has_inner_result = True
                 yield event
 
             ctx.state.memory.complete_turn(assistant_answer="Complete")
@@ -118,7 +121,8 @@ class AgentAdapter(Agent[StateDeps[SearchState], str]):
             if self._persistence:
                 await self._persistence.snapshot(ctx.state)
 
-            yield AgentRunResultEvent(result=AgentRunResult(output="Execution completed"))
+            if not has_inner_result:
+                yield AgentRunResultEvent(result=AgentRunResult(output="Execution completed"))
 
         except Exception as e:
             logger.error("AgentAdapter: Execution failed", error=str(e), exc_info=True)

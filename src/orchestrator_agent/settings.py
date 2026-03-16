@@ -11,8 +11,36 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+from orchestrator.search.core.types import EntityType
 from pydantic import Field
 from pydantic_settings import BaseSettings
+
+
+class OrchestratorAPIPaths(BaseSettings):
+    """Path templates for orchestrator-core API endpoints."""
+
+    SUBSCRIPTION: str = "/api/subscriptions/domain-model/{entity_id}"
+    PRODUCT: str = "/api/products/{entity_id}"
+    WORKFLOW: str = "/api/workflows/{entity_id}"
+    PROCESS: str = "/api/processes/{entity_id}"
+    EXPORT: str = "/api/search/queries/{query_id}/export"
+
+    _entity_map: dict[EntityType, str] = {
+        EntityType.SUBSCRIPTION: "SUBSCRIPTION",
+        EntityType.PRODUCT: "PRODUCT",
+        EntityType.WORKFLOW: "WORKFLOW",
+        EntityType.PROCESS: "PROCESS",
+    }
+
+    def entity_url(self, entity_type: EntityType, entity_id: str) -> str:
+        """Resolve full URL for an entity type."""
+        attr = self._entity_map[entity_type]
+        path = getattr(self, attr).format(entity_id=entity_id)
+        return f"{agent_settings.ORCHESTRATOR_API_URL}{path}"
+
+    def export_url(self, query_id: str) -> str:
+        """Resolve full URL for a query export."""
+        return f"{agent_settings.ORCHESTRATOR_API_URL}{self.EXPORT.format(query_id=query_id)}"
 
 
 class AgentSettings(BaseSettings):
@@ -20,6 +48,8 @@ class AgentSettings(BaseSettings):
 
     DATABASE_URI: str = Field(description="PostgreSQL connection URI for WFO database")
     BASE_URL: str = Field(default="http://localhost:8000", description="Public URL of this agent service")
+    ORCHESTRATOR_API_URL: str = Field(default="http://localhost:8080", description="URL of the orchestrator-core API")
+    orchestrator_api_paths: OrchestratorAPIPaths = Field(default_factory=OrchestratorAPIPaths)
 
 
 agent_settings = AgentSettings()  # type: ignore[call-arg]
