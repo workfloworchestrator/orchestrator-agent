@@ -52,4 +52,4 @@ class AgentSettings(BaseSettings):
     orchestrator_api_paths: OrchestratorAPIPaths = Field(default_factory=OrchestratorAPIPaths)
 
 
-agent_settings = AgentSettings()  # type: ignore[call-arg]
+agent_settings = AgentSettings()

@@ -50,7 +50,7 @@ class AgentAdapter(Agent[StateDeps[SearchState], str]):
 
     def __init__(
         self,
-        model: "Model | KnownModelName | str",  # type: ignore[valid-type]
+        model: "Model | KnownModelName | str",
         skills: dict[TaskAction, Skill] = SKILLS,
         *,
         deps_type: type[StateDeps[SearchState]] = StateDeps[SearchState],
