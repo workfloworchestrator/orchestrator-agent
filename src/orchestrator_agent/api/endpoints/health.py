@@ -13,21 +13,23 @@
 
 import structlog
 from fastapi import APIRouter
+from fastapi.responses import Response
 from orchestrator.db import db
 from sqlalchemy import text
 from sqlalchemy.exc import OperationalError
+from starlette.status import HTTP_200_OK, HTTP_503_SERVICE_UNAVAILABLE
 
 logger = structlog.get_logger(__name__)
 
 router = APIRouter()
 
 
-@router.get("/", response_model=str)
-def get_health() -> str:
+@router.get("/")
+def get_health() -> Response:
     """Health check — verifies database connectivity."""
     try:
         db.session.execute(text("SELECT 1"))
     except OperationalError as e:
         logger.warning("Health check failed", error=str(e))
-        raise
-    return "OK"
+        return Response(status_code=HTTP_503_SERVICE_UNAVAILABLE)
+    return Response(status_code=HTTP_200_OK)
