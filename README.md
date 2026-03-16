@@ -1,6 +1,5 @@
 # orchestrator-agent
 
-[![CI](https://github.com/workfloworchestrator/orchestrator-agent/actions/workflows/ci.yml/badge.svg)](https://github.com/workfloworchestrator/orchestrator-agent/actions/workflows/ci.yml)
 [![Container](https://ghcr-badge.egpl.dev/workfloworchestrator/orchestrator-agent/latest_tag?trim=major&label=container)](https://github.com/workfloworchestrator/orchestrator-agent/pkgs/container/orchestrator-agent)
 
 Standalone WFO search agent for deployment. Exposes the orchestration search agent via AG-UI, A2A, and MCP protocols.
@@ -17,12 +16,12 @@ uv run uvicorn orchestrator_agent.app:app --port 8000
 
 ## Endpoints
 
-| Path                                   | Protocol | Description                  |
-| -------------------------------------- | -------- | ---------------------------- |
-| `POST /agui`                     | AG-UI    | SSE streaming for frontend   |
-| `/a2a`                           | A2A      | Agent-to-agent protocol      |
-| `/mcp`                           | MCP      | Model Context Protocol tools |
-| `GET /health`                    | REST     | Health check                 |
+| Path          | Protocol | Description                  |
+| ------------- | -------- | ---------------------------- |
+| `POST /agui`  | AG-UI    | SSE streaming for frontend   |
+| `/a2a`        | A2A      | Agent-to-agent protocol      |
+| `/mcp`        | MCP      | Model Context Protocol tools |
+| `GET /health` | REST     | Health check                 |
 
 ## Docker
 
