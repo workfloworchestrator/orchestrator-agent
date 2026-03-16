@@ -21,8 +21,6 @@ from orchestrator_agent.utils import current_timestamp_ms
 pytestmark = pytest.mark.search
 
 
-
-
 def make_artifact_event(
     tool_name: str,
     artifact: ToolArtifact,
