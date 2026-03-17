@@ -21,7 +21,7 @@ from typing import AsyncIterator, Sequence, cast
 import structlog
 from fasta2a.applications import FastA2A
 from fasta2a.broker import InMemoryBroker
-from fasta2a.schema import Message, Part, Skill, TaskSendParams
+from fasta2a.schema import Message, Part, Skill, TaskSendParams, a2a_request_ta, a2a_response_ta
 from fasta2a.schema import TextPart as A2ATextPart
 from fasta2a.storage import InMemoryStorage
 from pydantic_ai._a2a import AgentWorker
@@ -34,6 +34,8 @@ from pydantic_ai.messages import (
 from pydantic_ai.messages import (
     TextPart as AiTextPart,
 )
+from starlette.requests import Request
+from starlette.responses import Response
 
 from orchestrator_agent.adapters.stream import collect_stream_output
 from orchestrator_agent.agent import AgentAdapter
@@ -154,6 +156,33 @@ class A2AWorker(AgentWorker):
         return ""
 
 
+class StreamingFastA2A(FastA2A):
+    """FastA2A subclass that handles ``message/stream`` requests.
+
+    fasta2a 0.6.0 only routes ``message/send``.  Many A2A clients default to
+    ``message/stream``.  Since the request schema is identical, we fall back to
+    the non-streaming ``send_message`` path and return the result as a normal
+    JSON response.
+    """
+
+    async def _agent_run_endpoint(self, request: Request) -> Response:
+        data = await request.body()
+        a2a_request = a2a_request_ta.validate_json(data)
+
+        method = a2a_request["method"]
+        if method in ("message/send", "message/stream"):
+            jsonrpc_response = await self.task_manager.send_message(a2a_request)
+        elif method == "tasks/get":
+            jsonrpc_response = await self.task_manager.get_task(a2a_request)
+        elif method == "tasks/cancel":
+            jsonrpc_response = await self.task_manager.cancel_task(a2a_request)
+        else:
+            raise NotImplementedError(f"Method {method} not implemented.")
+        return Response(
+            content=a2a_response_ta.dump_json(jsonrpc_response, by_alias=True), media_type="application/json"
+        )
+
+
 class A2AApp:
     """A2A adapter app: FastA2A server, worker, and lifecycle.
 
@@ -173,7 +202,7 @@ class A2AApp:
         async def _noop_lifespan(_app: FastA2A) -> AsyncIterator[None]:
             yield
 
-        self.app = FastA2A(
+        self.app = StreamingFastA2A(
             storage=storage,
             broker=broker,
             name="WFO Search Agent",
