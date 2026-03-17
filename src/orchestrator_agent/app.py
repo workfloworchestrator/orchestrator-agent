@@ -35,10 +35,10 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     init_database(agent_settings)  # type: ignore[arg-type]  # AgentSettings has DATABASE_URI which is all init_database needs
 
     a2a_url = f"{agent_settings.BASE_URL}/a2a/"
-    a2a = A2AApp(AgentAdapter(agent_settings.AGENT_MODEL, debug=agent_settings.AGENT_DEBUG), url=a2a_url)
+    a2a = A2AApp(AgentAdapter(agent_settings.create_model(), debug=agent_settings.AGENT_DEBUG), url=a2a_url)
     app.mount("/a2a", a2a.app)
 
-    mcp_app = MCPApp(AgentAdapter(agent_settings.AGENT_MODEL, debug=agent_settings.AGENT_DEBUG))
+    mcp_app = MCPApp(AgentAdapter(agent_settings.create_model(), debug=agent_settings.AGENT_DEBUG))
     app.mount("/mcp", mcp_app.app)
 
     # Manage adapter lifecycles

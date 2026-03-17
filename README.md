@@ -51,6 +51,39 @@ uv run demos/mcp_client.py search "active subscriptions"
 uv run demos/a2a_client.py <subscription-uuid>
 ```
 
+## Configuration
+
+| Variable | Default | Description |
+| --- | --- | --- |
+| `DATABASE_URI` | *(required)* | PostgreSQL connection URI for the WFO database |
+| `ORCHESTRATOR_API_URL` | `http://localhost:8080` | URL of the orchestrator-core API |
+| `BASE_URL` | `http://localhost:8000` | Public URL of this agent service |
+| `AGENT_MODEL` | `openai:gpt-4o` | LLM model in `provider:model` format |
+| `AGENT_API_BASE` | *(none)* | Custom base URL for the LLM provider (OpenAI-compatible) |
+| `AGENT_API_KEY` | *(none)* | API key for the LLM provider |
+| `AGENT_DEBUG` | `false` | Enable debug logging for agent execution |
+| `OAUTH2_ACTIVE` | `false` | Enable authenticated requests to the orchestrator |
+| `OAUTH2_TOKEN_ENDPOINT` | *(none)* | OAuth2 token endpoint URL (required when `OAUTH2_ACTIVE=true`) |
+| `OAUTH2_CLIENT_ID` | *(none)* | OAuth2 client ID (required when `OAUTH2_ACTIVE=true`) |
+| `OAUTH2_CLIENT_SECRET` | *(none)* | OAuth2 client secret (required when `OAUTH2_ACTIVE=true`) |
+
+### Custom LLM endpoint
+
+By default the agent uses the standard OpenAI API with the `OPENAI_API_KEY` environment variable. To use a custom OpenAI-compatible endpoint, set `AGENT_API_BASE` and/or `AGENT_API_KEY`:
+
+```bash
+# Local Ollama
+AGENT_MODEL=openai:llama3
+AGENT_API_BASE=http://localhost:11434/v1
+
+# Azure OpenAI or LiteLLM proxy
+AGENT_MODEL=openai:gpt-4o
+AGENT_API_BASE=https://my-proxy.example.com/v1
+AGENT_API_KEY=sk-custom-key
+```
+
+When neither `AGENT_API_BASE` nor `AGENT_API_KEY` is set, `AGENT_MODEL` is passed directly to pydantic-ai as a model string (existing behavior).
+
 ## Architecture
 
 This repo contains only the agent logic (planner, skills, tools, adapters, state, memory, prompts). The search infrastructure (query engine, filters, retrievers, indexing, DB models) lives in `orchestrator-core` and is imported as a dependency via `orchestrator-core[search]` (along with everything else for now).

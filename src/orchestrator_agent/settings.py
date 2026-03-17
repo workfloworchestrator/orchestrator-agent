@@ -11,9 +11,16 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+from __future__ import annotations
+
+from typing import TYPE_CHECKING
+
 from orchestrator.search.core.types import EntityType
 from pydantic import Field, model_validator
 from pydantic_settings import BaseSettings
+
+if TYPE_CHECKING:
+    from pydantic_ai.models import Model
 
 
 class OrchestratorAPIPaths(BaseSettings):
@@ -50,6 +57,10 @@ class AgentSettings(BaseSettings):
     BASE_URL: str = Field(default="http://localhost:8000", description="Public URL of this agent service")
     ORCHESTRATOR_API_URL: str = Field(default="http://localhost:8080", description="URL of the orchestrator-core API")
     AGENT_MODEL: str = Field(default="openai:gpt-4o", description="LLM model for the agent")
+    AGENT_API_BASE: str | None = Field(
+        default=None, description="Custom base URL for the LLM provider (OpenAI-compatible)"
+    )
+    AGENT_API_KEY: str | None = Field(default=None, description="API key for the LLM provider")
     AGENT_DEBUG: bool = Field(default=False, description="Enable debug logging for agent execution")
     orchestrator_api_paths: OrchestratorAPIPaths = Field(default_factory=OrchestratorAPIPaths)
 
@@ -60,8 +71,27 @@ class AgentSettings(BaseSettings):
     OAUTH2_CLIENT_ID: str | None = Field(default=None, description="OAuth2 client ID")
     OAUTH2_CLIENT_SECRET: str | None = Field(default=None, description="OAuth2 client secret")
 
+    def create_model(self) -> str | Model:
+        """Create a pydantic-ai model from settings.
+
+        Returns the plain model string when no custom endpoint/key is configured,
+        or an OpenAIChatModel with a custom provider when AGENT_API_BASE or AGENT_API_KEY is set.
+        """
+        if self.AGENT_API_BASE is None and self.AGENT_API_KEY is None:
+            return self.AGENT_MODEL
+
+        from pydantic_ai.models.openai import OpenAIChatModel
+        from pydantic_ai.providers.openai import OpenAIProvider
+
+        model_name = self.AGENT_MODEL
+        if ":" in model_name:
+            model_name = model_name.split(":", 1)[1]
+
+        provider = OpenAIProvider(base_url=self.AGENT_API_BASE, api_key=self.AGENT_API_KEY)
+        return OpenAIChatModel(model_name, provider=provider)
+
     @model_validator(mode="after")
-    def _validate_oauth2_settings(self) -> "AgentSettings":
+    def _validate_oauth2_settings(self) -> AgentSettings:
         if self.OAUTH2_ACTIVE:
             missing = [
                 name

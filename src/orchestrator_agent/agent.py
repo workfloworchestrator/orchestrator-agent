@@ -67,6 +67,7 @@ class AgentAdapter(Agent[StateDeps[SearchState], str]):
             instructions=instructions or [],
         )
         self.skills = skills
+        self._model_ref = model
         self.model_name = model if isinstance(model, str) else str(model)
         self._persistence: Any | None = None
         self.debug = debug
@@ -107,7 +108,7 @@ class AgentAdapter(Agent[StateDeps[SearchState], str]):
         try:
             initial_state = await self._prepare_state(deps)
             ctx = RunContext(state=initial_state)
-            planner = Planner(model=self.model_name, skills=self.skills, debug=self.debug)
+            planner = Planner(model=self._model_ref, skills=self.skills, debug=self.debug)
 
             has_inner_result = False
             async for event in planner.execute(ctx, target_action=target_action):

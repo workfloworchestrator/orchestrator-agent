@@ -33,6 +33,8 @@ from orchestrator_agent.state import ExecutionPlan, SearchState, Task, TaskActio
 from orchestrator_agent.utils import log_agent_request, log_execution_plan
 
 if TYPE_CHECKING:
+    from pydantic_ai.models import Model
+
     from orchestrator_agent.skills import Skill
 
 logger = structlog.get_logger(__name__)
@@ -46,7 +48,7 @@ class Planner:
     run SkillRunners, handle replanning on failure.
     """
 
-    model: str
+    model: str | Model
     skills: dict[TaskAction, Skill]
     debug: bool = False
 

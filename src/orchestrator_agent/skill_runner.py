@@ -27,6 +27,8 @@ from orchestrator_agent.state import SearchState
 from orchestrator_agent.utils import log_agent_request
 
 if TYPE_CHECKING:
+    from pydantic_ai.models import Model
+
     from orchestrator_agent.skills import Skill
 
 logger = structlog.get_logger(__name__)
@@ -41,7 +43,7 @@ class SkillRunner:
     """
 
     skill: Skill
-    model: str
+    model: str | Model
     debug: bool = False
     _tool_calls_in_current_run: list[str] = field(default_factory=list, init=False, repr=False)
     _last_run_result: Any | None = field(default=None, init=False, repr=False)

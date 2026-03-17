@@ -26,4 +26,4 @@ def get_agent(request: Request) -> AgentAdapter:
     """
     from orchestrator_agent.settings import agent_settings
 
-    return AgentAdapter(agent_settings.AGENT_MODEL, debug=agent_settings.AGENT_DEBUG)
+    return AgentAdapter(agent_settings.create_model(), debug=agent_settings.AGENT_DEBUG)
