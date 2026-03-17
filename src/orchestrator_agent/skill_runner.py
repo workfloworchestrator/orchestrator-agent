@@ -91,6 +91,8 @@ class SkillRunner:
             if isinstance(event, AgentRunResultEvent):
                 self._last_run_result = event.result
                 logger.debug(f"{step_name}: Captured final result with {len(event.result.new_messages())} new messages")
+            else:
+                logger.debug(f"{step_name}: Yielding event", event_type=type(event).__name__)
 
             yield event
 

@@ -85,6 +85,20 @@ class Turn:
         return self.assistant_answer is not None
 
 
+FALLBACK_MESSAGE = "Execution completed"
+
+
+def collect_tool_descriptions(steps: list[AgentStep]) -> str:
+    """Collect tool step descriptions from agent steps into a summary string.
+
+    Returns a period-separated summary, or FALLBACK_MESSAGE if no descriptions found.
+    """
+    descriptions = [tool_step.description for step in steps for tool_step in step.tool_steps if tool_step.description]
+    if descriptions:
+        return ". ".join(descriptions) + "."
+    return FALLBACK_MESSAGE
+
+
 class Memory(BaseModel):
     model_config = ConfigDict(arbitrary_types_allowed=True)
 

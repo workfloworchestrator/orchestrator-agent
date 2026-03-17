@@ -30,11 +30,25 @@ else:
     Model = Any
 
 from orchestrator_agent.events import RunContext
+from orchestrator_agent.memory import FALLBACK_MESSAGE, collect_tool_descriptions
 from orchestrator_agent.planner import Planner
 from orchestrator_agent.skills import SKILLS, Skill
 from orchestrator_agent.state import SearchState, TaskAction
 
 logger = structlog.get_logger(__name__)
+
+
+def _build_execution_summary(state: SearchState) -> str:
+    """Build a human-readable summary from the execution state's memory."""
+    turn = state.memory.current_turn
+    if not turn:
+        return FALLBACK_MESSAGE
+
+    all_steps = list(turn.steps)
+    if turn.current_step:
+        all_steps.append(turn.current_step)
+
+    return collect_tool_descriptions(all_steps)
 
 
 class AgentAdapter(Agent[StateDeps[SearchState], str]):
@@ -114,16 +128,22 @@ class AgentAdapter(Agent[StateDeps[SearchState], str]):
             async for event in planner.execute(ctx, target_action=target_action):
                 if isinstance(event, AgentRunResultEvent):
                     has_inner_result = True
+                    logger.debug("AgentAdapter: Captured AgentRunResultEvent", output=str(event.result.output)[:200])
+                else:
+                    logger.debug("AgentAdapter: Event", event_type=type(event).__name__)
                 yield event
 
-            ctx.state.memory.complete_turn(assistant_answer="Complete")
+            # Build summary BEFORE complete_turn (while current_turn still exists)
+            summary = _build_execution_summary(ctx.state)
+            ctx.state.memory.complete_turn(assistant_answer=summary)
             deps.state = ctx.state
 
             if self._persistence:
                 await self._persistence.snapshot(ctx.state)
 
             if not has_inner_result:
-                yield AgentRunResultEvent(result=AgentRunResult(output="Execution completed"))
+                logger.debug("AgentAdapter: No inner result, using state summary", summary=summary[:200])
+                yield AgentRunResultEvent(result=AgentRunResult(output=summary))
 
         except Exception as e:
             logger.error("AgentAdapter: Execution failed", error=str(e), exc_info=True)

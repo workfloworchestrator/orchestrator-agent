@@ -7,6 +7,7 @@ DB calls.
 
 from __future__ import annotations
 
+import json
 import os
 from typing import Any, AsyncIterator
 
@@ -91,3 +92,14 @@ async def mock_event_stream(*events: Any) -> AsyncIterator[Any]:
     """Async generator that yields the given events in order."""
     for event in events:
         yield event
+
+
+def parse_sse_events(raw_chunks: list[bytes]) -> list[dict]:
+    """Parse SSE event chunks into JSON objects."""
+    events = []
+    for chunk in raw_chunks:
+        text = chunk.decode()
+        for line in text.strip().split("\n"):
+            if line.startswith("data: "):
+                events.append(json.loads(line[6:]))
+    return events

@@ -21,13 +21,14 @@ from fasta2a.schema import Message, TaskSendParams
 from fasta2a.schema import TextPart as A2ATextPart
 from fasta2a.storage import InMemoryStorage
 
-from orchestrator_agent.adapters.a2a import A2AWorker, StreamingFastA2A
+from orchestrator_agent.adapters.a2a import A2AWorker, StreamingFastA2A, _build_state_fallback
 from orchestrator_agent.adapters.ag_ui import AGUIEventStream
 from orchestrator_agent.adapters.mcp import MCPWorker
 from orchestrator_agent.adapters.stream import NO_RESULTS, collect_stream_output
 from orchestrator_agent.artifacts import QueryArtifact
 from orchestrator_agent.events import AgentStepActiveEvent
-from orchestrator_agent.state import TaskAction
+from orchestrator_agent.memory import ToolStep
+from orchestrator_agent.state import SearchState, TaskAction
 
 from .conftest import (
     make_artifact_event,
@@ -36,6 +37,7 @@ from .conftest import (
     make_text_result_event,
     minimal_run_input,
     mock_event_stream,
+    parse_sse_events,
 )
 
 SAMPLE_ARTIFACT = QueryArtifact(
@@ -182,16 +184,6 @@ class TestA2AWorkerStreaming:
 
         return type("A2AFixture", (), {"worker": worker, "agent": agent, "storage": storage, "submit": submit})
 
-    @staticmethod
-    def _parse_sse_events(raw_chunks: list[bytes]) -> list[dict]:
-        events = []
-        for chunk in raw_chunks:
-            text = chunk.decode()
-            for line in text.strip().split("\n"):
-                if line.startswith("data: "):
-                    events.append(json.loads(line[6:]))
-        return events
-
     @pytest.mark.asyncio
     @patch("orchestrator.db.db")
     async def test_message_stream_yields_working_and_completed(self, _mock_db, a2a):
@@ -199,7 +191,7 @@ class TestA2AWorkerStreaming:
 
         task, context_id, msg = await a2a.submit()
         chunks = [chunk async for chunk in a2a.worker.run_task_streaming(task["id"], context_id, msg, "req-1")]
-        events = self._parse_sse_events(chunks)
+        events = parse_sse_events(chunks)
 
         assert len(events) == 2
         assert events[0]["result"]["kind"] == "status-update"
@@ -221,7 +213,7 @@ class TestA2AWorkerStreaming:
 
         task, context_id, msg = await a2a.submit()
         chunks = [chunk async for chunk in a2a.worker.run_task_streaming(task["id"], context_id, msg, "req-1")]
-        events = self._parse_sse_events(chunks)
+        events = parse_sse_events(chunks)
 
         kinds = [e["result"]["kind"] for e in events]
         assert kinds == ["status-update", "artifact-update", "status-update"]
@@ -238,7 +230,7 @@ class TestA2AWorkerStreaming:
 
         task, context_id, msg = await a2a.submit()
         chunks = [chunk async for chunk in a2a.worker.run_task_streaming(task["id"], context_id, msg, "req-1")]
-        events = self._parse_sse_events(chunks)
+        events = parse_sse_events(chunks)
 
         assert events[-1]["result"]["kind"] == "status-update"
         assert events[-1]["result"]["status"]["state"] == "failed"
@@ -308,6 +300,139 @@ class TestA2AWorkerStreaming:
         assert stored["status"]["state"] == "failed"
 
 
+def _make_state_with_tool_steps(*descriptions: str) -> SearchState:
+    """Create a SearchState with completed turn containing tool steps."""
+    state = SearchState(user_input="test query")
+    state.memory.start_turn("test query")
+    state.memory.start_step("Search")
+    for desc in descriptions:
+        state.memory.record_tool_step(ToolStep(step_type="run_search", description=desc))
+    state.memory.finish_step()
+    state.memory.complete_turn(assistant_answer="done")
+    return state
+
+
+class TestStateFallback:
+    """Tests for state-based fallback when event stream yields no useful output."""
+
+    def test_build_state_fallback_with_descriptions(self):
+        state = _make_state_with_tool_steps("Searched 5 subscriptions", "Fetched details for sub-1")
+        result = _build_state_fallback(state)
+        assert result == "Searched 5 subscriptions. Fetched details for sub-1."
+
+    def test_build_state_fallback_empty(self):
+        state = SearchState(user_input="test")
+        result = _build_state_fallback(state)
+        assert result == "Execution completed"
+
+
+class TestA2AWorkerStateFallback:
+    """Tests for A2A state-based fallback when events don't capture results."""
+
+    @pytest.fixture
+    def a2a(self):
+        storage = InMemoryStorage()
+        agent = AsyncMock()
+        worker = A2AWorker(agent=agent, broker=InMemoryBroker(), storage=storage)
+
+        async def submit(user_text="show subscriptions", skill_id=None):
+            msg: Message = Message(
+                role="user",
+                parts=[A2ATextPart(kind="text", text=user_text)],
+                kind="message",
+                message_id=str(uuid.uuid4()),
+            )
+            context_id = f"ctx-{uuid.uuid4()}"
+            task = await storage.submit_task(context_id, msg)
+            metadata = {"skill_id": skill_id} if skill_id else {}
+            return TaskSendParams(
+                id=task["id"],
+                context_id=context_id,
+                message={**msg, "metadata": metadata},
+            )
+
+        return type("A2AFixture", (), {"worker": worker, "agent": agent, "storage": storage, "submit": submit})
+
+    @pytest.mark.asyncio
+    @patch("orchestrator.db.db")
+    async def test_inline_state_fallback_over_execution_completed(self, _mock_db, a2a):
+        """When agent yields only 'Execution completed' but state has tool steps, use state."""
+
+        async def stream_with_state_mutation(*args, **kwargs):
+            deps = kwargs.get("deps")
+            if deps:
+                deps.state.memory.start_turn(deps.state.user_input)
+                deps.state.memory.start_step("Search")
+                deps.state.memory.record_tool_step(
+                    ToolStep(step_type="run_search", description="Searched 5 subscriptions")
+                )
+                deps.state.memory.finish_step()
+                deps.state.memory.complete_turn(assistant_answer="Searched 5 subscriptions.")
+            yield make_text_result_event("Execution completed")
+
+        a2a.agent.run_stream_events = MagicMock(side_effect=stream_with_state_mutation)
+
+        params = await a2a.submit()
+        await a2a.worker.run_task(params)
+
+        task = await a2a.storage.load_task(params["id"])
+        agent_msgs = [m for m in task["history"] if m["role"] == "agent"]
+        assert len(agent_msgs) == 1
+        assert "Searched 5 subscriptions" in agent_msgs[0]["parts"][0]["text"]
+        assert agent_msgs[0]["parts"][0]["text"] != "Execution completed"
+
+
+class TestA2AStreamingStateFallback:
+    """Tests for streaming state-based fallback."""
+
+    @pytest.fixture
+    def a2a(self):
+        storage = InMemoryStorage()
+        agent = AsyncMock()
+        worker = A2AWorker(agent=agent, broker=InMemoryBroker(), storage=storage)
+
+        async def submit(user_text="show subscriptions", skill_id=None):
+            msg: Message = Message(
+                role="user",
+                parts=[A2ATextPart(kind="text", text=user_text)],
+                kind="message",
+                message_id=str(uuid.uuid4()),
+            )
+            context_id = f"ctx-{uuid.uuid4()}"
+            task = await storage.submit_task(context_id, msg)
+            metadata = {"skill_id": skill_id} if skill_id else {}
+            return task, context_id, Message(**{**msg, "metadata": metadata})
+
+        return type("A2AFixture", (), {"worker": worker, "agent": agent, "storage": storage, "submit": submit})
+
+    @pytest.mark.asyncio
+    @patch("orchestrator.db.db")
+    async def test_streaming_state_fallback(self, _mock_db, a2a):
+        """Streaming: state fallback used when only 'Execution completed' is yielded."""
+
+        async def stream_with_state_mutation(*args, **kwargs):
+            deps = kwargs.get("deps")
+            if deps:
+                deps.state.memory.start_turn(deps.state.user_input)
+                deps.state.memory.start_step("Search")
+                deps.state.memory.record_tool_step(ToolStep(step_type="run_search", description="Found 3 workflows"))
+                deps.state.memory.finish_step()
+                deps.state.memory.complete_turn(assistant_answer="Found 3 workflows.")
+            yield make_text_result_event("Execution completed")
+
+        a2a.agent.run_stream_events = MagicMock(side_effect=stream_with_state_mutation)
+
+        task, context_id, msg = await a2a.submit()
+        chunks = [chunk async for chunk in a2a.worker.run_task_streaming(task["id"], context_id, msg, "req-1")]
+        events = parse_sse_events(chunks)
+
+        completed_event = events[-1]
+        assert completed_event["result"]["status"]["state"] == "completed"
+        message_text = completed_event["result"]["status"]["message"]["parts"][0]["text"]
+        assert "Found 3 workflows" in message_text
+        assert message_text != "Execution completed"
+
+
 class TestA2AEndpoint:
     """HTTP-level tests for StreamingFastA2A._agent_run_endpoint.
 
@@ -322,7 +447,7 @@ class TestA2AEndpoint:
         agent = AsyncMock()
         worker = A2AWorker(agent=agent, broker=broker, storage=storage)
 
-        @asynccontextmanager
+        @asynccontextmanager  # type: ignore[untyped-decorator]
         async def _noop_lifespan(_app: FastA2A) -> AsyncIterator[None]:
             yield
 

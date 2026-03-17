@@ -56,10 +56,20 @@ from starlette.responses import Response, StreamingResponse
 
 from orchestrator_agent.agent import AgentAdapter
 from orchestrator_agent.artifacts import ToolArtifact
+from orchestrator_agent.memory import FALLBACK_MESSAGE, collect_tool_descriptions
 from orchestrator_agent.skills import SKILLS
 from orchestrator_agent.state import SearchState, TaskAction
 
 logger = structlog.get_logger(__name__)
+
+
+def _build_state_fallback(state: SearchState) -> str:
+    """Build A2A output from execution state when event stream yielded nothing useful."""
+    completed = state.memory.completed_turns[-1:]
+    if completed:
+        return collect_tool_descriptions(completed[-1].steps)
+    return FALLBACK_MESSAGE
+
 
 A2A_SKILLS = [
     Skill(
@@ -97,15 +107,7 @@ class A2AWorker(AgentWorker):
         """
         agent = cast(AgentAdapter, self.agent)
 
-        metadata = message.get("metadata", {}) or {}
-        skill_id = metadata.get("skill_id") or metadata.get("skillId")
-        target_action: TaskAction | None = None
-        if skill_id:
-            try:
-                target_action = TaskAction(skill_id)
-                logger.debug("A2A: Routing to skill directly", target_action=target_action)
-            except ValueError:
-                logger.warning("A2A: Unknown skillId, falling back to planner", skill_id=skill_id)
+        target_action = self._parse_target_action(message)
 
         deps = StateDeps(SearchState(user_input=user_input))
 
@@ -122,6 +124,7 @@ class A2AWorker(AgentWorker):
         final_output = ""
 
         async for event in event_stream:
+            logger.debug("A2A _execute_agent: event", event_type=type(event).__name__)
             if isinstance(event, FunctionToolResultEvent):
                 result = event.result
                 if isinstance(result, ToolReturnPart) and isinstance(result.metadata, ToolArtifact):
@@ -139,6 +142,17 @@ class A2AWorker(AgentWorker):
             final_output = "\n\n".join(
                 part["text"] for a in artifacts for part in a["parts"] if part.get("kind") == "text"
             )
+
+        # State-based fallback: use tool step descriptions when events yielded nothing useful
+        if not artifacts and (not final_output or final_output in ("", FALLBACK_MESSAGE)):
+            final_output = _build_state_fallback(deps.state)
+
+        logger.debug(
+            "A2A _execute_agent: collection complete",
+            artifact_count=len(artifacts),
+            final_output=final_output[:200] if final_output else "",
+            query_id=str(deps.state.query_id) if deps.state.query_id else None,
+        )
 
         return artifacts, final_output
 
@@ -246,14 +260,7 @@ class A2AWorker(AgentWorker):
             )
         )
 
-        metadata = message.get("metadata", {}) or {}
-        skill_id = metadata.get("skill_id") or metadata.get("skillId")
-        target_action: TaskAction | None = None
-        if skill_id:
-            try:
-                target_action = TaskAction(skill_id)
-            except ValueError:
-                logger.warning("A2A stream: Unknown skillId, falling back to planner", skill_id=skill_id)
+        target_action = self._parse_target_action(message)
 
         user_input = self._extract_user_input([message])
         deps = StateDeps(SearchState(user_input=user_input))
@@ -272,6 +279,7 @@ class A2AWorker(AgentWorker):
             final_output = ""
 
             async for event in event_stream:
+                logger.debug("A2A stream: event", event_type=type(event).__name__)
                 if isinstance(event, FunctionToolResultEvent):
                     result = event.result
                     if isinstance(result, ToolReturnPart) and isinstance(result.metadata, ToolArtifact):
@@ -291,6 +299,10 @@ class A2AWorker(AgentWorker):
                         )
                 if isinstance(event, AgentRunResultEvent):
                     final_output = str(event.result.output)
+
+            # State-based fallback: use tool step descriptions when events yielded nothing useful
+            if not artifacts and (not final_output or final_output in ("", FALLBACK_MESSAGE)):
+                final_output = _build_state_fallback(deps.state)
 
             # Build final agent message
             if not final_output and artifacts:
@@ -344,6 +356,21 @@ class A2AWorker(AgentWorker):
                     final=True,
                 )
             )
+
+    @staticmethod
+    def _parse_target_action(message: Message) -> TaskAction | None:
+        """Extract target action from message metadata, if any."""
+        metadata = message.get("metadata", {}) or {}
+        skill_id = metadata.get("skill_id") or metadata.get("skillId")
+        if not skill_id:
+            return None
+        try:
+            action = TaskAction(skill_id)
+            logger.debug("A2A: Routing to skill directly", target_action=action)
+            return action
+        except ValueError:
+            logger.warning("A2A: Unknown skillId, falling back to planner", skill_id=skill_id)
+            return None
 
     @staticmethod
     def _extract_user_input(history: list[Message] | Sequence[Message]) -> str:
