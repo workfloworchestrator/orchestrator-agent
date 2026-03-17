@@ -6,6 +6,7 @@ No LLM calls, no DB calls — just adapter transformation logic.
 
 from __future__ import annotations
 
+import json
 import uuid
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -152,6 +153,117 @@ class TestA2AWorker:
             message_id="m1",
         )
         assert A2AWorker._extract_user_input([msg]) == "find active subs"
+
+
+class TestA2AWorkerStreaming:
+    """Tests for A2AWorker.run_task_streaming() — inline SSE event generation."""
+
+    @pytest.fixture
+    def a2a(self):
+        storage = InMemoryStorage()
+        agent = AsyncMock()
+        worker = A2AWorker(agent=agent, broker=InMemoryBroker(), storage=storage)
+
+        async def submit(user_text="show subscriptions", skill_id=None):
+            msg: Message = Message(
+                role="user",
+                parts=[A2ATextPart(kind="text", text=user_text)],
+                kind="message",
+                message_id=str(uuid.uuid4()),
+            )
+            context_id = f"ctx-{uuid.uuid4()}"
+            task = await storage.submit_task(context_id, msg)
+            metadata = {"skill_id": skill_id} if skill_id else {}
+            return task, context_id, Message(**{**msg, "metadata": metadata})
+
+        return type("A2AFixture", (), {"worker": worker, "agent": agent, "storage": storage, "submit": submit})
+
+    @staticmethod
+    def _parse_sse_events(raw_chunks: list[bytes]) -> list[dict]:
+        events = []
+        for chunk in raw_chunks:
+            text = chunk.decode()
+            for line in text.strip().split("\n"):
+                if line.startswith("data: "):
+                    events.append(json.loads(line[6:]))
+        return events
+
+    @pytest.mark.asyncio
+    @patch("orchestrator.db.db")
+    async def test_message_stream_yields_working_and_completed(self, _mock_db, a2a):
+        a2a.agent.run_stream_events = MagicMock(return_value=mock_event_stream(make_text_result_event("Done")))
+
+        task, context_id, msg = await a2a.submit()
+        chunks = [chunk async for chunk in a2a.worker.run_task_streaming(task["id"], context_id, msg, "req-1")]
+        events = self._parse_sse_events(chunks)
+
+        assert len(events) == 2
+        assert events[0]["result"]["kind"] == "status-update"
+        assert events[0]["result"]["status"]["state"] == "working"
+        assert events[0]["result"]["final"] is False
+        assert events[1]["result"]["kind"] == "status-update"
+        assert events[1]["result"]["status"]["state"] == "completed"
+        assert events[1]["result"]["final"] is True
+
+    @pytest.mark.asyncio
+    @patch("orchestrator.db.db")
+    async def test_message_stream_yields_artifact_events(self, _mock_db, a2a):
+        a2a.agent.run_stream_events = MagicMock(
+            return_value=mock_event_stream(
+                make_artifact_event("run_search", SAMPLE_ARTIFACT),
+                make_text_result_event("Execution completed"),
+            )
+        )
+
+        task, context_id, msg = await a2a.submit()
+        chunks = [chunk async for chunk in a2a.worker.run_task_streaming(task["id"], context_id, msg, "req-1")]
+        events = self._parse_sse_events(chunks)
+
+        kinds = [e["result"]["kind"] for e in events]
+        assert kinds == ["status-update", "artifact-update", "status-update"]
+        assert events[1]["result"]["artifact"]["parts"][0]["kind"] == "text"
+
+    @pytest.mark.asyncio
+    @patch("orchestrator.db.db")
+    async def test_message_stream_yields_failed_on_error(self, _mock_db, a2a):
+        async def failing_stream(*args, **kwargs):
+            raise RuntimeError("boom")
+            yield  # noqa: F401 — makes this an async generator
+
+        a2a.agent.run_stream_events = MagicMock(return_value=failing_stream())
+
+        task, context_id, msg = await a2a.submit()
+        chunks = [chunk async for chunk in a2a.worker.run_task_streaming(task["id"], context_id, msg, "req-1")]
+        events = self._parse_sse_events(chunks)
+
+        assert events[-1]["result"]["kind"] == "status-update"
+        assert events[-1]["result"]["status"]["state"] == "failed"
+        assert events[-1]["result"]["final"] is True
+
+    @pytest.mark.asyncio
+    @patch("orchestrator.db.db")
+    async def test_message_send_unchanged(self, _mock_db, a2a):
+        """Confirm message/send still works via the broker-based run_task path."""
+        a2a.agent.run_stream_events = MagicMock(return_value=mock_event_stream(make_text_result_event("Done")))
+
+        params = await a2a.storage.submit_task(
+            f"ctx-{uuid.uuid4()}",
+            Message(
+                role="user",
+                parts=[A2ATextPart(kind="text", text="hello")],
+                kind="message",
+                message_id=str(uuid.uuid4()),
+            ),
+        )
+        send_params = TaskSendParams(
+            id=params["id"],
+            context_id=params["context_id"],
+            message=params["history"][0],
+        )
+        await a2a.worker.run_task(send_params)
+
+        task = await a2a.storage.load_task(params["id"])
+        assert task["status"]["state"] == "completed"
 
 
 class TestMCPWorker:

@@ -16,29 +16,45 @@ from __future__ import annotations
 import uuid
 from contextlib import AsyncExitStack, asynccontextmanager
 from types import TracebackType
-from typing import AsyncIterator, Sequence, cast
+from typing import Any, AsyncIterator, Sequence, cast
 
 import structlog
 from fasta2a.applications import FastA2A
 from fasta2a.broker import InMemoryBroker
-from fasta2a.schema import Message, Part, Skill, TaskSendParams, a2a_request_ta, a2a_response_ta
+from fasta2a.schema import (
+    Artifact,
+    Message,
+    Part,
+    Skill,
+    TaskArtifactUpdateEvent,
+    TaskSendParams,
+    TaskStatus,
+    TaskStatusUpdateEvent,
+    a2a_request_ta,
+    a2a_response_ta,
+    stream_message_response_ta,
+)
 from fasta2a.schema import TextPart as A2ATextPart
 from fasta2a.storage import InMemoryStorage
 from pydantic_ai._a2a import AgentWorker
 from pydantic_ai.ag_ui import StateDeps
 from pydantic_ai.messages import (
+    FunctionToolResultEvent,
     ModelRequest,
     ModelResponse,
+    ToolReturnPart,
     UserPromptPart,
 )
 from pydantic_ai.messages import (
     TextPart as AiTextPart,
 )
+from pydantic_ai.run import AgentRunResultEvent
 from starlette.requests import Request
 from starlette.responses import Response, StreamingResponse
 
 from orchestrator_agent.adapters.stream import collect_stream_output
 from orchestrator_agent.agent import AgentAdapter
+from orchestrator_agent.artifacts import ToolArtifact
 from orchestrator_agent.skills import SKILLS
 from orchestrator_agent.state import SearchState, TaskAction
 
@@ -141,6 +157,132 @@ class A2AWorker(AgentWorker):
                 task["id"], state="completed", new_artifacts=artifacts, new_messages=a2a_messages
             )
 
+    async def run_task_streaming(
+        self, task_id: str, context_id: str, message: Message, jsonrpc_id: int | str | None
+    ) -> AsyncIterator[bytes]:
+        """Run the agent inline and yield SSE events for the full task lifecycle.
+
+        Unlike ``run_task()`` which is fire-and-forget via the broker, this method
+        streams ``TaskStatusUpdateEvent`` and ``TaskArtifactUpdateEvent`` SSE events
+        back to the client as the agent executes.
+        """
+        agent = cast(AgentAdapter, self.agent)
+
+        def _sse_encode(result: TaskStatusUpdateEvent | TaskArtifactUpdateEvent) -> bytes:
+            envelope = {"jsonrpc": "2.0", "id": jsonrpc_id, "result": result}
+            return b"data: " + stream_message_response_ta.dump_json(envelope, by_alias=True) + b"\n\n"
+
+        # 1. Mark working
+        await self.storage.update_task(task_id, state="working")
+        yield _sse_encode(
+            TaskStatusUpdateEvent(
+                task_id=task_id,
+                context_id=context_id,
+                kind="status-update",
+                status=TaskStatus(state="working"),
+                final=False,
+            )
+        )
+
+        metadata = message.get("metadata", {}) or {}
+        skill_id = metadata.get("skill_id") or metadata.get("skillId")
+        target_action: TaskAction | None = None
+        if skill_id:
+            try:
+                target_action = TaskAction(skill_id)
+            except ValueError:
+                logger.warning("A2A stream: Unknown skillId, falling back to planner", skill_id=skill_id)
+
+        user_input = self._extract_user_input([message])
+        deps = StateDeps(SearchState(user_input=user_input))
+
+        from orchestrator.db import db
+        from orchestrator.db.models import AgentRunTable
+
+        deps.state.run_id = uuid.uuid4()
+        agent_run = AgentRunTable(run_id=deps.state.run_id, thread_id=str(uuid.uuid4()), agent_type="a2a")
+        db.session.add(agent_run)
+        db.session.commit()
+
+        try:
+            event_stream = agent.run_stream_events(deps=deps, target_action=target_action)
+            artifacts: list[Artifact] = []
+            final_output = ""
+
+            async for event in event_stream:
+                if isinstance(event, FunctionToolResultEvent):
+                    result = event.result
+                    if isinstance(result, ToolReturnPart) and isinstance(result.metadata, ToolArtifact):
+                        artifact_id = str(uuid.uuid4())
+                        artifact = Artifact(
+                            artifact_id=artifact_id,
+                            parts=[A2ATextPart(kind="text", text=result.model_response_str())],
+                        )
+                        artifacts.append(artifact)
+                        yield _sse_encode(
+                            TaskArtifactUpdateEvent(
+                                task_id=task_id,
+                                context_id=context_id,
+                                kind="artifact-update",
+                                artifact=artifact,
+                            )
+                        )
+                if isinstance(event, AgentRunResultEvent):
+                    final_output = str(event.result.output)
+
+            # Build final agent message
+            if not final_output and artifacts:
+                final_output = "\n\n".join(
+                    part["text"] for a in artifacts for part in a["parts"] if part.get("kind") == "text"
+                )
+            agent_message = Message(
+                role="agent",
+                parts=[A2ATextPart(kind="text", text=final_output or "No results")],
+                kind="message",
+                message_id=str(uuid.uuid4()),
+            )
+
+            # Update storage
+            await self.storage.update_task(
+                task_id,
+                state="completed",
+                new_artifacts=artifacts,
+                new_messages=[agent_message],
+            )
+
+            # Update context for multi-turn
+            context_messages = await self.storage.load_context(context_id) or []
+            context_messages.extend(
+                [
+                    ModelRequest(parts=[UserPromptPart(content=user_input)]),
+                    ModelResponse(parts=[AiTextPart(content=final_output or "No results")]),
+                ]
+            )
+            await self.storage.update_context(context_id, context_messages)
+
+            # 2. Final completed event
+            yield _sse_encode(
+                TaskStatusUpdateEvent(
+                    task_id=task_id,
+                    context_id=context_id,
+                    kind="status-update",
+                    status=TaskStatus(state="completed", message=agent_message),
+                    final=True,
+                )
+            )
+        except Exception:
+            logger.exception("A2A stream: Task failed", task_id=task_id)
+            await self.storage.update_task(task_id, state="failed")
+            yield _sse_encode(
+                TaskStatusUpdateEvent(
+                    task_id=task_id,
+                    context_id=context_id,
+                    kind="status-update",
+                    status=TaskStatus(state="failed"),
+                    final=True,
+                )
+            )
+
     @staticmethod
     def _extract_user_input(history: list[Message] | Sequence[Message]) -> str:
         """Extract user input text from A2A task history messages."""
@@ -159,11 +301,14 @@ class A2AWorker(AgentWorker):
 class StreamingFastA2A(FastA2A):
     """FastA2A subclass that handles ``message/stream`` requests.
 
-    fasta2a 0.6.0 only routes ``message/send``.  Many A2A clients default to
-    ``message/stream``.  Since the request schema is identical, we submit the
-    task via ``send_message`` and return the result wrapped as an SSE stream
-    (``text/event-stream``), which is what A2A streaming clients expect.
+    For ``message/stream``, bypasses the broker and runs the agent inline
+    within the SSE generator, yielding ``TaskStatusUpdateEvent`` and
+    ``TaskArtifactUpdateEvent`` events as the agent executes.
     """
+
+    def __init__(self, *args: Any, worker: A2AWorker | None = None, **kwargs: Any) -> None:
+        super().__init__(*args, **kwargs)
+        self._worker = worker
 
     async def _agent_run_endpoint(self, request: Request) -> Response:
         data = await request.body()
@@ -171,13 +316,18 @@ class StreamingFastA2A(FastA2A):
 
         method = a2a_request["method"]
         if method == "message/stream":
-            jsonrpc_response = await self.task_manager.send_message(a2a_request)
-            response_bytes = a2a_response_ta.dump_json(jsonrpc_response, by_alias=True)
+            message = a2a_request["params"]["message"]
+            context_id = message.get("context_id") or str(uuid.uuid4())
+            task = await self.task_manager.storage.submit_task(context_id, message)
+            jsonrpc_id = a2a_request.get("id")
 
-            async def sse_generator() -> AsyncIterator[bytes]:
-                yield b"data: " + response_bytes + b"\n\n"
+            if self._worker is None:
+                raise RuntimeError("StreamingFastA2A requires a worker for message/stream")
 
-            return StreamingResponse(sse_generator(), media_type="text/event-stream")
+            return StreamingResponse(
+                self._worker.run_task_streaming(task["id"], context_id, message, jsonrpc_id),
+                media_type="text/event-stream",
+            )
         if method == "message/send":
             jsonrpc_response = await self.task_manager.send_message(a2a_request)
         elif method == "tasks/get":
@@ -213,6 +363,7 @@ class A2AApp:
         self.app = StreamingFastA2A(
             storage=storage,
             broker=broker,
+            worker=self.worker,
             name="WFO Search Agent",
             url=url,
             description="Search, filter and aggregate orchestration data",
