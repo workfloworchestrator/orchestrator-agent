@@ -35,7 +35,7 @@ from pydantic_ai.messages import (
     TextPart as AiTextPart,
 )
 from starlette.requests import Request
-from starlette.responses import Response
+from starlette.responses import Response, StreamingResponse
 
 from orchestrator_agent.adapters.stream import collect_stream_output
 from orchestrator_agent.agent import AgentAdapter
@@ -160,9 +160,9 @@ class StreamingFastA2A(FastA2A):
     """FastA2A subclass that handles ``message/stream`` requests.
 
     fasta2a 0.6.0 only routes ``message/send``.  Many A2A clients default to
-    ``message/stream``.  Since the request schema is identical, we fall back to
-    the non-streaming ``send_message`` path and return the result as a normal
-    JSON response.
+    ``message/stream``.  Since the request schema is identical, we submit the
+    task via ``send_message`` and return the result wrapped as an SSE stream
+    (``text/event-stream``), which is what A2A streaming clients expect.
     """
 
     async def _agent_run_endpoint(self, request: Request) -> Response:
@@ -170,7 +170,15 @@ class StreamingFastA2A(FastA2A):
         a2a_request = a2a_request_ta.validate_json(data)
 
         method = a2a_request["method"]
-        if method in ("message/send", "message/stream"):
+        if method == "message/stream":
+            jsonrpc_response = await self.task_manager.send_message(a2a_request)
+            response_bytes = a2a_response_ta.dump_json(jsonrpc_response, by_alias=True)
+
+            async def sse_generator() -> AsyncIterator[bytes]:
+                yield b"data: " + response_bytes + b"\n\n"
+
+            return StreamingResponse(sse_generator(), media_type="text/event-stream")
+        if method == "message/send":
             jsonrpc_response = await self.task_manager.send_message(a2a_request)
         elif method == "tasks/get":
             jsonrpc_response = await self.task_manager.get_task(a2a_request)
