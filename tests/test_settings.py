@@ -14,6 +14,8 @@
 from unittest.mock import patch
 
 from pydantic_ai.models.openai import OpenAIChatModel
+from pydantic_ai.providers.azure import AzureProvider
+from pydantic_ai.providers.openai import OpenAIProvider
 
 from orchestrator_agent.settings import AgentSettings
 
@@ -74,3 +76,39 @@ def test_create_model_no_prefix():
     result = settings.create_model()
     assert isinstance(result, OpenAIChatModel)
     assert result.model_name == "gpt-4o"
+
+
+def test_create_model_azure_prefix_uses_azure_provider():
+    settings = AgentSettings(
+        AGENT_MODEL="azure:gpt-4o",
+        AGENT_API_BASE="https://my-resource.openai.azure.com/",
+        AGENT_API_KEY="azure-key",
+        AGENT_API_VERSION="2024-12-01-preview",
+    )
+    result = settings.create_model()
+    assert isinstance(result, OpenAIChatModel)
+    assert result.model_name == "gpt-4o"
+    assert isinstance(result._provider, AzureProvider)
+
+
+def test_create_model_api_version_triggers_azure_provider():
+    settings = AgentSettings(
+        AGENT_MODEL="gpt-4o",
+        AGENT_API_BASE="https://my-resource.openai.azure.com/",
+        AGENT_API_KEY="azure-key",
+        AGENT_API_VERSION="2024-12-01-preview",
+    )
+    result = settings.create_model()
+    assert isinstance(result, OpenAIChatModel)
+    assert isinstance(result._provider, AzureProvider)
+
+
+def test_create_model_openai_provider_when_no_azure():
+    settings = AgentSettings(
+        AGENT_MODEL="openai:gpt-4o",
+        AGENT_API_BASE="https://proxy.example.com/v1",
+        AGENT_API_KEY="sk-test",
+    )
+    result = settings.create_model()
+    assert isinstance(result, OpenAIChatModel)
+    assert isinstance(result._provider, OpenAIProvider)

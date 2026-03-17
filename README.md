@@ -59,8 +59,9 @@ uv run demos/a2a_client.py <subscription-uuid>
 | `ORCHESTRATOR_API_URL` | `http://localhost:8080` | URL of the orchestrator-core API |
 | `BASE_URL` | `http://localhost:8000` | Public URL of this agent service |
 | `AGENT_MODEL` | `openai:gpt-4o` | LLM model in `provider:model` format |
-| `AGENT_API_BASE` | *(none)* | Custom base URL for the LLM provider (OpenAI-compatible) |
+| `AGENT_API_BASE` | *(none)* | Custom base URL for the LLM provider (OpenAI-compatible) or Azure endpoint |
 | `AGENT_API_KEY` | *(none)* | API key for the LLM provider |
+| `AGENT_API_VERSION` | *(none)* | API version for Azure OpenAI (e.g. `2024-12-01-preview`) |
 | `AGENT_DEBUG` | `false` | Enable debug logging for agent execution |
 | `OAUTH2_ACTIVE` | `false` | Enable authenticated requests to the orchestrator |
 | `OAUTH2_TOKEN_ENDPOINT` | *(none)* | OAuth2 token endpoint URL (required when `OAUTH2_ACTIVE=true`) |
@@ -76,13 +77,19 @@ By default the agent uses the standard OpenAI API with the `OPENAI_API_KEY` envi
 AGENT_MODEL=openai:llama3
 AGENT_API_BASE=http://localhost:11434/v1
 
-# Azure OpenAI or LiteLLM proxy
+# LiteLLM proxy or other OpenAI-compatible endpoint
 AGENT_MODEL=openai:gpt-4o
 AGENT_API_BASE=https://my-proxy.example.com/v1
 AGENT_API_KEY=sk-custom-key
+
+# Azure OpenAI
+AGENT_MODEL=azure:gpt-4o
+AGENT_API_BASE=https://my-resource.openai.azure.com/
+AGENT_API_KEY=azure-api-key
+AGENT_API_VERSION=2024-12-01-preview
 ```
 
-When neither `AGENT_API_BASE` nor `AGENT_API_KEY` is set, `AGENT_MODEL` is passed directly to pydantic-ai as a model string (existing behavior).
+The `azure:` prefix on `AGENT_MODEL` (or setting `AGENT_API_VERSION`) selects the Azure provider automatically. When none of `AGENT_API_BASE`, `AGENT_API_KEY`, or `AGENT_API_VERSION` is set, `AGENT_MODEL` is passed directly to pydantic-ai as a model string (existing behavior).
 
 ## Architecture
 

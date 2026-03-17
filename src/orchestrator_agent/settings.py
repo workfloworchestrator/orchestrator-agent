@@ -58,9 +58,12 @@ class AgentSettings(BaseSettings):
     ORCHESTRATOR_API_URL: str = Field(default="http://localhost:8080", description="URL of the orchestrator-core API")
     AGENT_MODEL: str = Field(default="openai:gpt-4o", description="LLM model for the agent")
     AGENT_API_BASE: str | None = Field(
-        default=None, description="Custom base URL for the LLM provider (OpenAI-compatible)"
+        default=None, description="Custom base URL for the LLM provider (OpenAI-compatible or Azure endpoint)"
     )
     AGENT_API_KEY: str | None = Field(default=None, description="API key for the LLM provider")
+    AGENT_API_VERSION: str | None = Field(
+        default=None, description="API version for Azure OpenAI (e.g. 2024-12-01-preview)"
+    )
     AGENT_DEBUG: bool = Field(default=False, description="Enable debug logging for agent execution")
     orchestrator_api_paths: OrchestratorAPIPaths = Field(default_factory=OrchestratorAPIPaths)
 
@@ -74,20 +77,34 @@ class AgentSettings(BaseSettings):
     def create_model(self) -> str | Model:
         """Create a pydantic-ai model from settings.
 
-        Returns the plain model string when no custom endpoint/key is configured,
-        or an OpenAIChatModel with a custom provider when AGENT_API_BASE or AGENT_API_KEY is set.
+        Returns the plain model string when no custom endpoint/key/version is configured.
+        When AGENT_API_BASE, AGENT_API_KEY, or AGENT_API_VERSION is set, constructs an
+        OpenAIChatModel with the appropriate provider (AzureProvider for ``azure:`` prefixed
+        models, OpenAIProvider otherwise).
         """
-        if self.AGENT_API_BASE is None and self.AGENT_API_KEY is None:
+        if self.AGENT_API_BASE is None and self.AGENT_API_KEY is None and self.AGENT_API_VERSION is None:
             return self.AGENT_MODEL
 
         from pydantic_ai.models.openai import OpenAIChatModel
-        from pydantic_ai.providers.openai import OpenAIProvider
 
         model_name = self.AGENT_MODEL
+        provider_prefix = None
         if ":" in model_name:
-            model_name = model_name.split(":", 1)[1]
+            provider_prefix, model_name = model_name.split(":", 1)
 
-        provider = OpenAIProvider(base_url=self.AGENT_API_BASE, api_key=self.AGENT_API_KEY)
+        if provider_prefix == "azure" or self.AGENT_API_VERSION is not None:
+            from pydantic_ai.providers.azure import AzureProvider
+
+            provider = AzureProvider(
+                azure_endpoint=self.AGENT_API_BASE,
+                api_version=self.AGENT_API_VERSION,
+                api_key=self.AGENT_API_KEY,
+            )
+        else:
+            from pydantic_ai.providers.openai import OpenAIProvider
+
+            provider = OpenAIProvider(base_url=self.AGENT_API_BASE, api_key=self.AGENT_API_KEY)  # type: ignore[assignment]
+
         return OpenAIChatModel(model_name, provider=provider)
 
     @model_validator(mode="after")
