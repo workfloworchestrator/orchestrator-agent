@@ -18,7 +18,6 @@ from typing import AsyncIterator
 
 import structlog
 from fastapi import FastAPI
-from fastapi.responses import RedirectResponse
 from orchestrator.db import init_database
 
 from orchestrator_agent.adapters import A2AApp, MCPApp
@@ -64,7 +63,7 @@ app = FastAPI(title="WFO Search Agent", lifespan=lifespan)
 app.include_router(api_router)
 
 
-@app.get("/.well-known/agent-card.json", include_in_schema=False)
-async def well_known_agent_card() -> RedirectResponse:
-    """Redirect to A2A agent card (Standard agent discovery expects this at the root)."""
-    return RedirectResponse(url="/a2a/.well-known/agent-card.json")
+# @app.get("/.well-known/agent-card.json", include_in_schema=False)
+# async def well_known_agent_card() -> RedirectResponse:
+#     """Redirect to A2A agent card (Standard agent discovery expects this at the root)."""
+#     return RedirectResponse(url="/a2a/.well-known/agent-card.json")
