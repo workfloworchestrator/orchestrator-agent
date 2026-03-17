@@ -25,7 +25,9 @@ from fasta2a.schema import (
     Artifact,
     Message,
     Part,
+    SendMessageResponse,
     Skill,
+    Task,
     TaskArtifactUpdateEvent,
     TaskSendParams,
     TaskStatus,
@@ -52,7 +54,6 @@ from pydantic_ai.run import AgentRunResultEvent
 from starlette.requests import Request
 from starlette.responses import Response, StreamingResponse
 
-from orchestrator_agent.adapters.stream import collect_stream_output
 from orchestrator_agent.agent import AgentAdapter
 from orchestrator_agent.artifacts import ToolArtifact
 from orchestrator_agent.skills import SKILLS
@@ -88,30 +89,23 @@ class A2AWorker(AgentWorker):
     that hint and passes it as ``target_action`` to skip the planner.
     """
 
-    async def run_task(self, params: TaskSendParams) -> None:
+    async def _execute_agent(self, user_input: str, message: Message) -> tuple[list[Artifact], str]:
+        """Run the agent and collect artifacts and final output.
+
+        Shared by ``run_task``, ``run_task_inline``, and ``run_task_streaming``.
+        Returns ``(artifacts, final_output)``.
+        """
         agent = cast(AgentAdapter, self.agent)
 
-        task = await self.storage.load_task(params["id"])
-        if task is None:
-            raise ValueError(f'Task {params["id"]} not found')
-
-        if task["status"]["state"] != "submitted":
-            raise ValueError(f'Task {params["id"]} has already been processed (state: {task["status"]["state"]})')
-
-        await self.storage.update_task(task["id"], state="working")
-
-        metadata = params["message"].get("metadata", {}) or {}
+        metadata = message.get("metadata", {}) or {}
         skill_id = metadata.get("skill_id") or metadata.get("skillId")
         target_action: TaskAction | None = None
-
         if skill_id:
             try:
                 target_action = TaskAction(skill_id)
                 logger.debug("A2A: Routing to skill directly", target_action=target_action)
             except ValueError:
                 logger.warning("A2A: Unknown skillId, falling back to planner", skill_id=skill_id)
-
-        user_input = self._extract_user_input(task.get("history", []))
 
         deps = StateDeps(SearchState(user_input=user_input))
 
@@ -123,39 +117,107 @@ class A2AWorker(AgentWorker):
         db.session.add(agent_run)
         db.session.commit()
 
+        event_stream = agent.run_stream_events(deps=deps, target_action=target_action)
+        artifacts: list[Artifact] = []
+        final_output = ""
+
+        async for event in event_stream:
+            if isinstance(event, FunctionToolResultEvent):
+                result = event.result
+                if isinstance(result, ToolReturnPart) and isinstance(result.metadata, ToolArtifact):
+                    artifact_id = str(uuid.uuid4())
+                    artifact = Artifact(
+                        artifact_id=artifact_id,
+                        parts=[A2ATextPart(kind="text", text=result.model_response_str())],
+                    )
+                    artifacts.append(artifact)
+            if isinstance(event, AgentRunResultEvent):
+                final_output = str(event.result.output)
+
+        # Prefer artifact content over LLM text (matches collect_stream_output behavior)
+        if artifacts:
+            final_output = "\n\n".join(
+                part["text"] for a in artifacts for part in a["parts"] if part.get("kind") == "text"
+            )
+
+        return artifacts, final_output
+
+    async def _finalize_task(
+        self,
+        task_id: str,
+        context_id: str,
+        user_input: str,
+        artifacts: list[Artifact],
+        final_output: str,
+    ) -> None:
+        """Update storage with completed task results and multi-turn context."""
+        final_text = final_output or "No results"
+        agent_message = Message(
+            role="agent",
+            parts=[A2ATextPart(kind="text", text=final_text)],
+            kind="message",
+            message_id=str(uuid.uuid4()),
+        )
+
+        await self.storage.update_task(
+            task_id, state="completed", new_artifacts=artifacts, new_messages=[agent_message]
+        )
+
+        context_messages = await self.storage.load_context(context_id) or []
+        context_messages.extend(
+            [
+                ModelRequest(parts=[UserPromptPart(content=user_input)]),
+                ModelResponse(parts=[AiTextPart(content=final_text)]),
+            ]
+        )
+        await self.storage.update_context(context_id, context_messages)
+
+    async def run_task(self, params: TaskSendParams) -> None:
+        task = await self.storage.load_task(params["id"])
+        if task is None:
+            raise ValueError(f'Task {params["id"]} not found')
+
+        if task["status"]["state"] != "submitted":
+            raise ValueError(f'Task {params["id"]} has already been processed (state: {task["status"]["state"]})')
+
+        await self.storage.update_task(task["id"], state="working")
+
+        user_input = self._extract_user_input(task.get("history", []))
         logger.debug("A2AWorker: Starting execution", task_id=task["id"])
 
         try:
-            event_stream = agent.run_stream_events(deps=deps, target_action=target_action)
-            final_output = await collect_stream_output(event_stream)
-
-            a2a_messages: list[Message] = [
-                Message(
-                    role="agent",
-                    parts=[A2ATextPart(kind="text", text=final_output)],
-                    kind="message",
-                    message_id=str(uuid.uuid4()),
-                )
-            ]
-
-            # Update context with synthetic message history so multi-turn works
-            context_messages = await self.storage.load_context(task["context_id"]) or []
-            context_messages.extend(
-                [
-                    ModelRequest(parts=[UserPromptPart(content=user_input)]),
-                    ModelResponse(parts=[AiTextPart(content=final_output)]),
-                ]
-            )
-            await self.storage.update_context(task["context_id"], context_messages)
-
-            artifacts = self.build_artifacts(final_output)
+            artifacts, final_output = await self._execute_agent(user_input, params["message"])
         except Exception:
             await self.storage.update_task(task["id"], state="failed")
             raise
-        else:
-            await self.storage.update_task(
-                task["id"], state="completed", new_artifacts=artifacts, new_messages=a2a_messages
-            )
+
+        await self._finalize_task(task["id"], task["context_id"], user_input, artifacts, final_output)
+
+    async def run_task_inline(self, task_id: str, context_id: str, message: Message) -> Task:
+        """Run the agent inline and return the completed task.
+
+        Unlike ``run_task()`` which is used by the broker, this method is called
+        directly from the ``message/send`` endpoint so the response contains
+        the completed task with artifacts and agent messages.
+        """
+        await self.storage.update_task(task_id, state="working")
+
+        user_input = self._extract_user_input([message])
+        logger.debug("A2AWorker: Starting inline execution", task_id=task_id)
+
+        try:
+            artifacts, final_output = await self._execute_agent(user_input, message)
+        except Exception:
+            logger.exception("A2A inline: Task failed", task_id=task_id)
+            await self.storage.update_task(task_id, state="failed")
+            raise
+
+        await self._finalize_task(task_id, context_id, user_input, artifacts, final_output)
+
+        task = await self.storage.load_task(task_id)
+        if task is None:
+            raise RuntimeError(f"Task {task_id} not found after inline execution")
+        return task
 
     async def run_task_streaming(
         self, task_id: str, context_id: str, message: Message, jsonrpc_id: int | str | None
@@ -329,7 +391,15 @@ class StreamingFastA2A(FastA2A):
                 media_type="text/event-stream",
             )
         if method == "message/send":
-            jsonrpc_response = await self.task_manager.send_message(a2a_request)
+            if self._worker is None:
+                raise RuntimeError("StreamingFastA2A requires a worker for message/send")
+
+            message = a2a_request["params"]["message"]
+            context_id = message.get("context_id") or str(uuid.uuid4())
+            task = await self.task_manager.storage.submit_task(context_id, message)
+            jsonrpc_id = a2a_request.get("id")
+            completed_task = await self._worker.run_task_inline(task["id"], context_id, message)
+            jsonrpc_response = SendMessageResponse(jsonrpc="2.0", id=jsonrpc_id, result=completed_task)
         elif method == "tasks/get":
             jsonrpc_response = await self.task_manager.get_task(a2a_request)
         elif method == "tasks/cancel":

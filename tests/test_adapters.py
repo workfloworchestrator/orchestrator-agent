@@ -8,16 +8,20 @@ from __future__ import annotations
 
 import json
 import uuid
+from contextlib import asynccontextmanager
+from typing import AsyncIterator
 from unittest.mock import AsyncMock, MagicMock, patch
 
+import httpx
 import pytest
 from ag_ui.core import ToolCallResultEvent
+from fasta2a.applications import FastA2A
 from fasta2a.broker import InMemoryBroker
 from fasta2a.schema import Message, TaskSendParams
 from fasta2a.schema import TextPart as A2ATextPart
 from fasta2a.storage import InMemoryStorage
 
-from orchestrator_agent.adapters.a2a import A2AWorker
+from orchestrator_agent.adapters.a2a import A2AWorker, StreamingFastA2A
 from orchestrator_agent.adapters.ag_ui import AGUIEventStream
 from orchestrator_agent.adapters.mcp import MCPWorker
 from orchestrator_agent.adapters.stream import NO_RESULTS, collect_stream_output
@@ -264,6 +268,136 @@ class TestA2AWorkerStreaming:
 
         task = await a2a.storage.load_task(params["id"])
         assert task["status"]["state"] == "completed"
+
+    @pytest.mark.asyncio
+    @patch("orchestrator.db.db")
+    async def test_message_send_returns_completed_task(self, _mock_db, a2a):
+        """run_task_inline returns a task with state=completed and artifacts."""
+        a2a.agent.run_stream_events = MagicMock(
+            return_value=mock_event_stream(
+                make_artifact_event("run_search", SAMPLE_ARTIFACT),
+                make_text_result_event("Execution completed"),
+            )
+        )
+
+        task, context_id, msg = await a2a.submit()
+        completed = await a2a.worker.run_task_inline(task["id"], context_id, msg)
+
+        assert completed["status"]["state"] == "completed"
+        assert len(completed["artifacts"]) == 1
+        assert completed["artifacts"][0]["parts"][0]["kind"] == "text"
+        agent_msgs = [m for m in completed["history"] if m["role"] == "agent"]
+        assert len(agent_msgs) == 1
+
+    @pytest.mark.asyncio
+    @patch("orchestrator.db.db")
+    async def test_message_send_returns_failed_on_error(self, _mock_db, a2a):
+        """run_task_inline marks the task as failed on exception."""
+
+        async def failing_stream(*args, **kwargs):
+            raise RuntimeError("boom")
+            yield  # noqa: F401 — makes this an async generator
+
+        a2a.agent.run_stream_events = MagicMock(return_value=failing_stream())
+
+        task, context_id, msg = await a2a.submit()
+        with pytest.raises(RuntimeError, match="boom"):
+            await a2a.worker.run_task_inline(task["id"], context_id, msg)
+
+        stored = await a2a.storage.load_task(task["id"])
+        assert stored["status"]["state"] == "failed"
+
+
+class TestA2AEndpoint:
+    """HTTP-level tests for StreamingFastA2A._agent_run_endpoint.
+
+    Verifies that message/send and message/stream both return completed results
+    (not fire-and-forget "submitted" status) when called via the A2A HTTP API.
+    """
+
+    @pytest.fixture
+    async def a2a_app(self):
+        storage = InMemoryStorage()
+        broker = InMemoryBroker()
+        agent = AsyncMock()
+        worker = A2AWorker(agent=agent, broker=broker, storage=storage)
+
+        @asynccontextmanager
+        async def _noop_lifespan(_app: FastA2A) -> AsyncIterator[None]:
+            yield
+
+        app = StreamingFastA2A(
+            storage=storage,
+            broker=broker,
+            worker=worker,
+            name="Test Agent",
+            url="http://localhost:8000",
+            description="Test",
+            lifespan=_noop_lifespan,
+        )
+
+        async with app.task_manager:
+            yield type("A2AAppFixture", (), {"app": app, "agent": agent, "worker": worker, "storage": storage})
+
+    @staticmethod
+    def _jsonrpc_request(method: str, user_text: str = "show subscriptions", req_id: int = 1) -> dict:
+        return {
+            "jsonrpc": "2.0",
+            "id": req_id,
+            "method": method,
+            "params": {
+                "message": {
+                    "role": "user",
+                    "parts": [{"kind": "text", "text": user_text}],
+                    "kind": "message",
+                    "messageId": str(uuid.uuid4()),
+                }
+            },
+        }
+
+    @pytest.mark.asyncio
+    @patch("orchestrator.db.db")
+    async def test_message_send_endpoint_returns_completed(self, _mock_db, a2a_app):
+        """HTTP message/send returns a JSON-RPC response with completed task and artifacts."""
+        a2a_app.agent.run_stream_events = MagicMock(
+            return_value=mock_event_stream(
+                make_artifact_event("run_search", SAMPLE_ARTIFACT),
+                make_text_result_event("Execution completed"),
+            )
+        )
+
+        transport = httpx.ASGITransport(app=a2a_app.app)
+        async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
+            resp = await client.post("/", json=self._jsonrpc_request("message/send"))
+
+        assert resp.status_code == 200
+        body = resp.json()
+        assert body["jsonrpc"] == "2.0"
+        assert body["id"] == 1
+        task = body["result"]
+        assert task["status"]["state"] == "completed"
+        assert len(task["artifacts"]) >= 1
+
+    @pytest.mark.asyncio
+    @patch("orchestrator.db.db")
+    async def test_message_stream_endpoint_returns_completed(self, _mock_db, a2a_app):
+        """HTTP message/stream returns SSE events ending with completed status."""
+        a2a_app.agent.run_stream_events = MagicMock(return_value=mock_event_stream(make_text_result_event("Done")))
+
+        transport = httpx.ASGITransport(app=a2a_app.app)
+        async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
+            resp = await client.post("/", json=self._jsonrpc_request("message/stream"))
+
+        assert resp.status_code == 200
+        events = []
+        for line in resp.text.strip().split("\n"):
+            if line.startswith("data: "):
+                events.append(json.loads(line[6:]))
+
+        assert len(events) >= 2
+        assert events[0]["result"]["status"]["state"] == "working"
+        assert events[-1]["result"]["status"]["state"] == "completed"
+        assert events[-1]["result"]["final"] is True
 
 
 class TestMCPWorker:
