@@ -25,6 +25,7 @@ from pydantic_ai.messages import ToolReturn
 from pydantic_ai.toolsets import FunctionToolset
 
 from orchestrator_agent.artifacts import DataArtifact, ExportArtifact
+from orchestrator_agent.auth import token_manager
 from orchestrator_agent.memory import ToolStep
 from orchestrator_agent.settings import agent_settings
 from orchestrator_agent.state import SearchState
@@ -58,8 +59,18 @@ async def fetch_entity_details(
 
     url = agent_settings.orchestrator_api_paths.entity_url(entity_type, entity_id)
 
+    headers: dict[str, str] = {}
+    token = await token_manager.get_token()
+    if token:
+        headers["Authorization"] = f"Bearer {token}"
+
     async with httpx.AsyncClient() as client:
-        response = await client.get(url, timeout=30)
+        response = await client.get(url, headers=headers, timeout=30)
+
+        if response.status_code in (401, 403) and token_manager.auth_enabled:
+            new_token = await token_manager.refresh_token()
+            headers["Authorization"] = f"Bearer {new_token}"
+            response = await client.get(url, headers=headers, timeout=30)
 
     if response.status_code == 404:
         raise ModelRetry(f"No {entity_type.value} found with ID {entity_id}.")

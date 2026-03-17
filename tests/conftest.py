@@ -7,7 +7,11 @@ DB calls.
 
 from __future__ import annotations
 
+import os
 from typing import Any, AsyncIterator
+
+# Set required env vars before any orchestrator_agent imports trigger Settings instantiation.
+os.environ.setdefault("DATABASE_URI", "postgresql://test:test@localhost:5432/test")
 
 import pytest
 from ag_ui.core import RunAgentInput, UserMessage
