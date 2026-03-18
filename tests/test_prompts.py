@@ -31,7 +31,7 @@ class TestGetSearchExecutionPrompt:
     def test_includes_filtering_rules(self):
         prompt = get_search_execution_prompt(_make_state())
         assert "Filtering Rules" in prompt
-        assert "NEVER GUESS PATHS" in prompt
+        assert "MANDATORY FIRST STEP" in prompt
 
 
 class TestGetAggregationExecutionPrompt:

@@ -22,13 +22,12 @@ AGENT_CONTEXT = """You are an agent that executes tasks in a plan, one step at a
 When tools complete successfully, results are immediately streamed to the user's UI in real-time."""
 
 FILTERING_RULES = f"""### Filtering Rules (if query requires filters)
+- **MANDATORY FIRST STEP**: You MUST call `{tools.discover_filter_paths.__name__}` BEFORE calling `{tools.set_filter_tree.__name__}`. Never skip this — filter paths are database-specific and cannot be guessed.
+- Pass simple field names to discovery (e.g. "status", "id", "start_date") — not dotted paths like "subscription.status"
+- **USE EXACT PATHS**: Only use paths returned by `{tools.discover_filter_paths.__name__}`. Do not modify or invent paths.
+- **MATCH OPERATORS**: Only use operators compatible with the field type as confirmed by `{tools.get_valid_operators.__name__}`
 - Temporal constraints like "in 2025", "between X and Y" require filters on datetime fields
-- **NEVER GUESS PATHS IN THE DATABASE**: You *must* verify every filter path by calling `{tools.discover_filter_paths.__name__}` first
-- **START WITH SIMPLE NAMES**: For "active subscriptions", try "status" first, not "subscription.status" or variations
-- Common filter examples: "status", "name", "description", "start_date", "end_date", "customer_id"
-- If a path does not exist, you may attempt to map the question to existing paths that are valid
-- **USE FULL PATHS**: Always use the full, unambiguous path returned by the discovery tool
-- **MATCH OPERATORS**: Only use operators compatible with the field type as confirmed by `{tools.get_valid_operators.__name__}`"""
+- If a discovered path does not match the user's intent, try alternative field names in a new discovery call"""
 
 
 def get_search_execution_prompt(state: SearchState) -> str:
@@ -54,7 +53,11 @@ def get_search_execution_prompt(state: SearchState) -> str:
 
         ## Steps
         1. Determine the entity_type for this search (SUBSCRIPTION, PRODUCT, WORKFLOW, or PROCESS)
-        2. If filters needed: Call {tools.discover_filter_paths.__name__}(field_names=[...], entity_type=...), {tools.get_valid_operators.__name__}, build FilterTree, call {tools.set_filter_tree.__name__}
+        2. If filters needed (almost always):
+           a. Call `{tools.discover_filter_paths.__name__}(field_names=[...], entity_type=...)` to get valid paths
+           b. Call `{tools.get_valid_operators.__name__}` to confirm valid operators for the field type
+           c. Build FilterTree using ONLY the exact paths from step 2a
+           d. Call `{tools.set_filter_tree.__name__}` with the validated FilterTree
         3. Call {tools.run_search.__name__}(entity_type=...) — you MUST pass entity_type
         4. Explain what you did in 1-2 sentences at most. DO NOT list the actual results, they are already shown to the user.
 
@@ -90,7 +93,11 @@ def get_aggregation_execution_prompt(state: SearchState) -> str:
 
         ## Steps
         1. Determine entity_type (SUBSCRIPTION, PRODUCT, WORKFLOW, or PROCESS) and query_operation (COUNT for counting, AGGREGATE for numeric calculations like SUM/AVG/MIN/MAX)
-        2. If filters needed: Call {tools.discover_filter_paths.__name__}(field_names=[...], entity_type=...), {tools.get_valid_operators.__name__}, build FilterTree, call {tools.set_filter_tree.__name__}
+        2. If filters needed:
+           a. Call `{tools.discover_filter_paths.__name__}(field_names=[...], entity_type=...)` to get valid paths
+           b. Call `{tools.get_valid_operators.__name__}` to confirm valid operators for the field type
+           c. Build FilterTree using ONLY the exact paths from step 2a
+           d. Call `{tools.set_filter_tree.__name__}` with the validated FilterTree
         3. Set grouping: Temporal ({tools.set_temporal_grouping.__name__}) or regular ({tools.set_grouping.__name__}) — you MUST pass entity_type and query_operation
         4. For AGGREGATE operation ONLY: Call {tools.set_aggregations.__name__}(entity_type=..., query_operation=...). For COUNT: Do NOT call (counting is automatic)
         5. Call {tools.run_aggregation.__name__}(entity_type=..., query_operation=..., visualization_type=...)
