@@ -16,12 +16,13 @@ uv run uvicorn orchestrator_agent.app:app --port 8000
 
 ## Endpoints
 
-| Path          | Protocol | Description                  |
-| ------------- | -------- | ---------------------------- |
-| `POST /agui`  | AG-UI    | SSE streaming for frontend   |
-| `/a2a`        | A2A      | Agent-to-agent protocol      |
-| `/mcp`        | MCP      | Model Context Protocol tools |
-| `GET /health` | REST     | Health check                 |
+| Path | Protocol | Description |
+| --- | --- | --- |
+| `POST /agui` | AG-UI | SSE streaming for frontend |
+| `POST /` | A2A | Agent-to-agent JSON-RPC (`message/send`, `message/stream`) |
+| `GET /.well-known/agent.json` | A2A | Agent card discovery |
+| `/mcp` | MCP | Model Context Protocol tools |
+| `GET /health` | REST | Health check |
 
 ## Docker
 
@@ -94,3 +95,13 @@ The `azure:` prefix on `AGENT_MODEL` (or setting `AGENT_API_VERSION`) selects th
 ## Architecture
 
 This repo contains only the agent logic (planner, skills, tools, adapters, state, memory, prompts). The search infrastructure (query engine, filters, retrievers, indexing, DB models) lives in `orchestrator-core` and is imported as a dependency via `orchestrator-core[search]` (along with everything else for now).
+
+```
+Request ──► AG-UI adapter ──► AgentAdapter.run_stream_events()
+         ──► A2A adapter  ──►   └─► Planner.execute()
+         ──► MCP adapter  ──►         └─► SkillRunner.run()
+```
+
+The **A2A adapter** uses [a2a-sdk](https://github.com/google/a2a-sdk) server primitives (`AgentExecutor`, `DefaultRequestHandler`, `A2AFastAPIApplication`). The SDK handles JSON-RPC routing, SSE streaming, task lifecycle, and agent card serving. The adapter implements a single `WFOAgentExecutor.execute()` method that drives the pydantic-ai event stream and publishes A2A events via `TaskUpdater`.
+
+The agent advertises skills (search, aggregation, result actions, text response) on the agent card. Clients can target a specific skill by passing `{"skill_id": "<action>"}` in the message metadata to bypass the planner.

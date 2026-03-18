@@ -11,14 +11,14 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-from orchestrator_agent.adapters.a2a import A2AApp, A2AWorker
+from orchestrator_agent.adapters.a2a import A2AAdapter, WFOAgentExecutor
 from orchestrator_agent.adapters.ag_ui import AGUIEventStream, AGUIWorker
 from orchestrator_agent.adapters.mcp import MCPApp, MCPWorker
 from orchestrator_agent.adapters.stream import NO_RESULTS, collect_stream_output
 
 __all__ = [
-    "A2AApp",
-    "A2AWorker",
+    "A2AAdapter",
+    "WFOAgentExecutor",
     "AGUIEventStream",
     "AGUIWorker",
     "MCPApp",

@@ -6,22 +6,34 @@ No LLM calls, no DB calls — just adapter transformation logic.
 
 from __future__ import annotations
 
+import asyncio
 import json
 import uuid
-from contextlib import asynccontextmanager
-from typing import AsyncIterator
+from typing import Any
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import httpx
 import pytest
+from a2a.server.agent_execution import RequestContext
+from a2a.server.apps.jsonrpc.fastapi_app import A2AFastAPIApplication
+from a2a.server.events import EventQueue
+from a2a.server.request_handlers.default_request_handler import DefaultRequestHandler
+from a2a.server.tasks import InMemoryTaskStore
+from a2a.types import (
+    AgentCapabilities,
+    AgentCard,
+    Message,
+    MessageSendParams,
+    Part,
+    Role,
+    TaskArtifactUpdateEvent,
+    TaskState,
+    TaskStatusUpdateEvent,
+    TextPart,
+)
 from ag_ui.core import ToolCallResultEvent
-from fasta2a.applications import FastA2A
-from fasta2a.broker import InMemoryBroker
-from fasta2a.schema import Message, TaskSendParams
-from fasta2a.schema import TextPart as A2ATextPart
-from fasta2a.storage import InMemoryStorage
 
-from orchestrator_agent.adapters.a2a import A2AWorker, StreamingFastA2A, _build_state_fallback
+from orchestrator_agent.adapters.a2a import A2A_SKILLS, WFOAgentExecutor, _build_state_fallback
 from orchestrator_agent.adapters.ag_ui import AGUIEventStream
 from orchestrator_agent.adapters.mcp import MCPWorker
 from orchestrator_agent.adapters.stream import NO_RESULTS, collect_stream_output
@@ -37,7 +49,6 @@ from .conftest import (
     make_text_result_event,
     minimal_run_input,
     mock_event_stream,
-    parse_sse_events,
 )
 
 SAMPLE_ARTIFACT = QueryArtifact(
@@ -97,36 +108,45 @@ class TestAGUIEventStream:
         assert results[0].content == "filters applied"
 
 
-class TestA2AWorker:
+def _make_request_context(user_text: str = "show subscriptions", skill_id: str | None = None) -> RequestContext:
+    """Create a RequestContext for testing."""
+    metadata = {}
+    if skill_id:
+        metadata["skill_id"] = skill_id
+    msg = Message(
+        role=Role.user,
+        parts=[Part(root=TextPart(text=user_text))],
+        message_id=str(uuid.uuid4()),
+        metadata=metadata or None,
+    )
+    params = MessageSendParams(message=msg)
+    return RequestContext(request=params)
+
+
+async def _collect_events(queue: EventQueue) -> list[Any]:
+    """Drain all events from an EventQueue after execute() completes."""
+    events = []
+    while True:
+        try:
+            event = queue.queue.get_nowait()
+            events.append(event)
+        except asyncio.QueueEmpty:
+            break
+    return events
+
+
+class TestWFOAgentExecutor:
     @pytest.fixture
-    def a2a(self):
-        """Provides a ready-to-use A2AWorker with mocked agent and DB."""
-        storage = InMemoryStorage()
+    def executor(self):
         agent = AsyncMock()
-        worker = A2AWorker(agent=agent, broker=InMemoryBroker(), storage=storage)
-
-        async def submit(user_text="show subscriptions", skill_id=None):
-            msg: Message = Message(
-                role="user",
-                parts=[A2ATextPart(kind="text", text=user_text)],
-                kind="message",
-                message_id=str(uuid.uuid4()),
-            )
-            context_id = f"ctx-{uuid.uuid4()}"
-            task = await storage.submit_task(context_id, msg)
-            metadata = {"skill_id": skill_id} if skill_id else {}
-            return TaskSendParams(
-                id=task["id"],
-                context_id=context_id,
-                message={**msg, "metadata": metadata},
-            )
-
-        return type("A2AFixture", (), {"worker": worker, "agent": agent, "storage": storage, "submit": submit})
+        return WFOAgentExecutor(agent), agent
 
     @pytest.mark.asyncio
     @patch("orchestrator.db.db")
-    async def test_task_output_contains_artifact_not_text(self, _mock_db, a2a):
-        a2a.agent.run_stream_events = MagicMock(
+    async def test_artifact_emitted_as_a2a_artifact(self, _mock_db, executor):
+        """Artifacts from agent stream become A2A TaskArtifactUpdateEvents."""
+        ex, agent = executor
+        agent.run_stream_events = MagicMock(
             return_value=mock_event_stream(
                 make_non_artifact_event("set_filters", content="filters applied"),
                 make_artifact_event("run_search", SAMPLE_ARTIFACT),
@@ -134,170 +154,124 @@ class TestA2AWorker:
             )
         )
 
-        params = await a2a.submit()
-        await a2a.worker.run_task(params)
+        ctx = _make_request_context()
+        queue = EventQueue()
+        await ex.execute(ctx, queue)
+        events = await _collect_events(queue)
 
-        task = await a2a.storage.load_task(params["id"])
-        agent_msgs = [m for m in task["history"] if m["role"] == "agent"]
-        assert len(agent_msgs) == 1
-        assert agent_msgs[0]["parts"][0]["text"] == SAMPLE_ARTIFACT.model_dump_json()
+        # Should have: working, artifact, completed
+        status_events = [e for e in events if isinstance(e, TaskStatusUpdateEvent)]
+        artifact_events = [e for e in events if isinstance(e, TaskArtifactUpdateEvent)]
+        assert len(artifact_events) == 1
+        assert artifact_events[0].artifact.parts[0].root.text == SAMPLE_ARTIFACT.model_dump_json()
+        assert status_events[0].status.state == TaskState.working
+        assert status_events[-1].status.state == TaskState.completed
+        # Completed message should contain artifact content, not generic "Execution completed"
+        completed_text = status_events[-1].status.message.parts[0].root.text
+        assert completed_text == SAMPLE_ARTIFACT.model_dump_json()
 
     @pytest.mark.asyncio
     @pytest.mark.parametrize(("skill_id", "expected"), [("search", TaskAction.SEARCH), ("nonexistent", None)])
     @patch("orchestrator.db.db")
-    async def test_skill_id_routing(self, _mock_db, a2a, skill_id, expected):
-        a2a.agent.run_stream_events = MagicMock(return_value=mock_event_stream(make_text_result_event("Done")))
-        params = await a2a.submit(skill_id=skill_id)
-        await a2a.worker.run_task(params)
-        assert a2a.agent.run_stream_events.call_args.kwargs["target_action"] == expected
+    async def test_skill_id_routing(self, _mock_db, executor, skill_id, expected):
+        ex, agent = executor
+        agent.run_stream_events = MagicMock(return_value=mock_event_stream(make_text_result_event("Done")))
 
-    def test_extracts_user_input(self):
-        msg: Message = Message(
-            role="user",
-            parts=[A2ATextPart(kind="text", text="find active subs")],
-            kind="message",
-            message_id="m1",
-        )
-        assert A2AWorker._extract_user_input([msg]) == "find active subs"
+        ctx = _make_request_context(skill_id=skill_id)
+        queue = EventQueue()
+        await ex.execute(ctx, queue)
+
+        assert agent.run_stream_events.call_args.kwargs["target_action"] == expected
+
+    @pytest.mark.asyncio
+    @patch("orchestrator.db.db")
+    async def test_completed_with_text_output(self, _mock_db, executor):
+        """Text-only output results in completed status with message."""
+        ex, agent = executor
+        agent.run_stream_events = MagicMock(return_value=mock_event_stream(make_text_result_event("Done")))
+
+        ctx = _make_request_context()
+        queue = EventQueue()
+        await ex.execute(ctx, queue)
+        events = await _collect_events(queue)
+
+        status_events = [e for e in events if isinstance(e, TaskStatusUpdateEvent)]
+        assert status_events[-1].status.state == TaskState.completed
+        assert status_events[-1].status.message.parts[0].root.text == "Done"
+
+    @pytest.mark.asyncio
+    @patch("orchestrator.db.db")
+    async def test_failed_on_error(self, _mock_db, executor):
+        """Exception during execution results in failed status."""
+        ex, agent = executor
+
+        async def failing_stream(*args, **kwargs):
+            raise RuntimeError("boom")
+            yield  # noqa: F401 — makes this an async generator
+
+        agent.run_stream_events = MagicMock(return_value=failing_stream())
+
+        ctx = _make_request_context()
+        queue = EventQueue()
+        await ex.execute(ctx, queue)
+        events = await _collect_events(queue)
+
+        status_events = [e for e in events if isinstance(e, TaskStatusUpdateEvent)]
+        assert status_events[-1].status.state == TaskState.failed
+
+    @pytest.mark.asyncio
+    @patch("orchestrator.db.db")
+    async def test_cancel(self, _mock_db, executor):
+        ex, _agent = executor
+        ctx = _make_request_context()
+        queue = EventQueue()
+        await ex.cancel(ctx, queue)
+        events = await _collect_events(queue)
+
+        assert len(events) == 1
+        assert isinstance(events[0], TaskStatusUpdateEvent)
+        assert events[0].status.state == TaskState.canceled
 
 
-class TestA2AWorkerStreaming:
-    """Tests for A2AWorker.run_task_streaming() — inline SSE event generation."""
+class TestWFOAgentExecutorStateFallback:
+    """Tests for state-based fallback when event stream yields no useful output."""
 
     @pytest.fixture
-    def a2a(self):
-        storage = InMemoryStorage()
+    def executor(self):
         agent = AsyncMock()
-        worker = A2AWorker(agent=agent, broker=InMemoryBroker(), storage=storage)
-
-        async def submit(user_text="show subscriptions", skill_id=None):
-            msg: Message = Message(
-                role="user",
-                parts=[A2ATextPart(kind="text", text=user_text)],
-                kind="message",
-                message_id=str(uuid.uuid4()),
-            )
-            context_id = f"ctx-{uuid.uuid4()}"
-            task = await storage.submit_task(context_id, msg)
-            metadata = {"skill_id": skill_id} if skill_id else {}
-            return task, context_id, Message(**{**msg, "metadata": metadata})
-
-        return type("A2AFixture", (), {"worker": worker, "agent": agent, "storage": storage, "submit": submit})
+        return WFOAgentExecutor(agent), agent
 
     @pytest.mark.asyncio
     @patch("orchestrator.db.db")
-    async def test_message_stream_yields_working_and_completed(self, _mock_db, a2a):
-        a2a.agent.run_stream_events = MagicMock(return_value=mock_event_stream(make_text_result_event("Done")))
+    async def test_state_fallback_over_execution_completed(self, _mock_db, executor):
+        """When agent yields only 'Execution completed' but state has tool steps, use state."""
+        ex, agent = executor
 
-        task, context_id, msg = await a2a.submit()
-        chunks = [chunk async for chunk in a2a.worker.run_task_streaming(task["id"], context_id, msg, "req-1")]
-        events = parse_sse_events(chunks)
+        async def stream_with_state_mutation(*args, **kwargs):
+            deps = kwargs.get("deps")
+            if deps:
+                deps.state.memory.start_turn(deps.state.user_input)
+                deps.state.memory.start_step("Search")
+                deps.state.memory.record_tool_step(
+                    ToolStep(step_type="run_search", description="Searched 5 subscriptions")
+                )
+                deps.state.memory.finish_step()
+                deps.state.memory.complete_turn(assistant_answer="Searched 5 subscriptions.")
+            yield make_text_result_event("Execution completed")
 
-        assert len(events) == 2
-        assert events[0]["result"]["kind"] == "status-update"
-        assert events[0]["result"]["status"]["state"] == "working"
-        assert events[0]["result"]["final"] is False
-        assert events[1]["result"]["kind"] == "status-update"
-        assert events[1]["result"]["status"]["state"] == "completed"
-        assert events[1]["result"]["final"] is True
+        agent.run_stream_events = MagicMock(side_effect=stream_with_state_mutation)
 
-    @pytest.mark.asyncio
-    @patch("orchestrator.db.db")
-    async def test_message_stream_yields_artifact_events(self, _mock_db, a2a):
-        a2a.agent.run_stream_events = MagicMock(
-            return_value=mock_event_stream(
-                make_artifact_event("run_search", SAMPLE_ARTIFACT),
-                make_text_result_event("Execution completed"),
-            )
-        )
+        ctx = _make_request_context()
+        queue = EventQueue()
+        await ex.execute(ctx, queue)
+        events = await _collect_events(queue)
 
-        task, context_id, msg = await a2a.submit()
-        chunks = [chunk async for chunk in a2a.worker.run_task_streaming(task["id"], context_id, msg, "req-1")]
-        events = parse_sse_events(chunks)
-
-        kinds = [e["result"]["kind"] for e in events]
-        assert kinds == ["status-update", "artifact-update", "status-update"]
-        assert events[1]["result"]["artifact"]["parts"][0]["kind"] == "text"
-
-    @pytest.mark.asyncio
-    @patch("orchestrator.db.db")
-    async def test_message_stream_yields_failed_on_error(self, _mock_db, a2a):
-        async def failing_stream(*args, **kwargs):
-            raise RuntimeError("boom")
-            yield  # noqa: F401 — makes this an async generator
-
-        a2a.agent.run_stream_events = MagicMock(return_value=failing_stream())
-
-        task, context_id, msg = await a2a.submit()
-        chunks = [chunk async for chunk in a2a.worker.run_task_streaming(task["id"], context_id, msg, "req-1")]
-        events = parse_sse_events(chunks)
-
-        assert events[-1]["result"]["kind"] == "status-update"
-        assert events[-1]["result"]["status"]["state"] == "failed"
-        assert events[-1]["result"]["final"] is True
-
-    @pytest.mark.asyncio
-    @patch("orchestrator.db.db")
-    async def test_message_send_unchanged(self, _mock_db, a2a):
-        """Confirm message/send still works via the broker-based run_task path."""
-        a2a.agent.run_stream_events = MagicMock(return_value=mock_event_stream(make_text_result_event("Done")))
-
-        params = await a2a.storage.submit_task(
-            f"ctx-{uuid.uuid4()}",
-            Message(
-                role="user",
-                parts=[A2ATextPart(kind="text", text="hello")],
-                kind="message",
-                message_id=str(uuid.uuid4()),
-            ),
-        )
-        send_params = TaskSendParams(
-            id=params["id"],
-            context_id=params["context_id"],
-            message=params["history"][0],
-        )
-        await a2a.worker.run_task(send_params)
-
-        task = await a2a.storage.load_task(params["id"])
-        assert task["status"]["state"] == "completed"
-
-    @pytest.mark.asyncio
-    @patch("orchestrator.db.db")
-    async def test_message_send_returns_completed_task(self, _mock_db, a2a):
-        """run_task_inline returns a task with state=completed and artifacts."""
-        a2a.agent.run_stream_events = MagicMock(
-            return_value=mock_event_stream(
-                make_artifact_event("run_search", SAMPLE_ARTIFACT),
-                make_text_result_event("Execution completed"),
-            )
-        )
-
-        task, context_id, msg = await a2a.submit()
-        completed = await a2a.worker.run_task_inline(task["id"], context_id, msg)
-
-        assert completed["status"]["state"] == "completed"
-        assert len(completed["artifacts"]) == 1
-        assert completed["artifacts"][0]["parts"][0]["kind"] == "text"
-        agent_msgs = [m for m in completed["history"] if m["role"] == "agent"]
-        assert len(agent_msgs) == 1
-
-    @pytest.mark.asyncio
-    @patch("orchestrator.db.db")
-    async def test_message_send_returns_failed_on_error(self, _mock_db, a2a):
-        """run_task_inline marks the task as failed on exception."""
-
-        async def failing_stream(*args, **kwargs):
-            raise RuntimeError("boom")
-            yield  # noqa: F401 — makes this an async generator
-
-        a2a.agent.run_stream_events = MagicMock(return_value=failing_stream())
-
-        task, context_id, msg = await a2a.submit()
-        with pytest.raises(RuntimeError, match="boom"):
-            await a2a.worker.run_task_inline(task["id"], context_id, msg)
-
-        stored = await a2a.storage.load_task(task["id"])
-        assert stored["status"]["state"] == "failed"
+        status_events = [e for e in events if isinstance(e, TaskStatusUpdateEvent)]
+        completed = status_events[-1]
+        assert completed.status.state == TaskState.completed
+        message_text = completed.status.message.parts[0].root.text
+        assert "Searched 5 subscriptions" in message_text
+        assert message_text != "Execution completed"
 
 
 def _make_state_with_tool_steps(*descriptions: str) -> SearchState:
@@ -326,143 +300,34 @@ class TestStateFallback:
         assert result == "Execution completed"
 
 
-class TestA2AWorkerStateFallback:
-    """Tests for A2A state-based fallback when events don't capture results."""
-
-    @pytest.fixture
-    def a2a(self):
-        storage = InMemoryStorage()
-        agent = AsyncMock()
-        worker = A2AWorker(agent=agent, broker=InMemoryBroker(), storage=storage)
-
-        async def submit(user_text="show subscriptions", skill_id=None):
-            msg: Message = Message(
-                role="user",
-                parts=[A2ATextPart(kind="text", text=user_text)],
-                kind="message",
-                message_id=str(uuid.uuid4()),
-            )
-            context_id = f"ctx-{uuid.uuid4()}"
-            task = await storage.submit_task(context_id, msg)
-            metadata = {"skill_id": skill_id} if skill_id else {}
-            return TaskSendParams(
-                id=task["id"],
-                context_id=context_id,
-                message={**msg, "metadata": metadata},
-            )
-
-        return type("A2AFixture", (), {"worker": worker, "agent": agent, "storage": storage, "submit": submit})
-
-    @pytest.mark.asyncio
-    @patch("orchestrator.db.db")
-    async def test_inline_state_fallback_over_execution_completed(self, _mock_db, a2a):
-        """When agent yields only 'Execution completed' but state has tool steps, use state."""
-
-        async def stream_with_state_mutation(*args, **kwargs):
-            deps = kwargs.get("deps")
-            if deps:
-                deps.state.memory.start_turn(deps.state.user_input)
-                deps.state.memory.start_step("Search")
-                deps.state.memory.record_tool_step(
-                    ToolStep(step_type="run_search", description="Searched 5 subscriptions")
-                )
-                deps.state.memory.finish_step()
-                deps.state.memory.complete_turn(assistant_answer="Searched 5 subscriptions.")
-            yield make_text_result_event("Execution completed")
-
-        a2a.agent.run_stream_events = MagicMock(side_effect=stream_with_state_mutation)
-
-        params = await a2a.submit()
-        await a2a.worker.run_task(params)
-
-        task = await a2a.storage.load_task(params["id"])
-        agent_msgs = [m for m in task["history"] if m["role"] == "agent"]
-        assert len(agent_msgs) == 1
-        assert "Searched 5 subscriptions" in agent_msgs[0]["parts"][0]["text"]
-        assert agent_msgs[0]["parts"][0]["text"] != "Execution completed"
-
-
-class TestA2AStreamingStateFallback:
-    """Tests for streaming state-based fallback."""
-
-    @pytest.fixture
-    def a2a(self):
-        storage = InMemoryStorage()
-        agent = AsyncMock()
-        worker = A2AWorker(agent=agent, broker=InMemoryBroker(), storage=storage)
-
-        async def submit(user_text="show subscriptions", skill_id=None):
-            msg: Message = Message(
-                role="user",
-                parts=[A2ATextPart(kind="text", text=user_text)],
-                kind="message",
-                message_id=str(uuid.uuid4()),
-            )
-            context_id = f"ctx-{uuid.uuid4()}"
-            task = await storage.submit_task(context_id, msg)
-            metadata = {"skill_id": skill_id} if skill_id else {}
-            return task, context_id, Message(**{**msg, "metadata": metadata})
-
-        return type("A2AFixture", (), {"worker": worker, "agent": agent, "storage": storage, "submit": submit})
-
-    @pytest.mark.asyncio
-    @patch("orchestrator.db.db")
-    async def test_streaming_state_fallback(self, _mock_db, a2a):
-        """Streaming: state fallback used when only 'Execution completed' is yielded."""
-
-        async def stream_with_state_mutation(*args, **kwargs):
-            deps = kwargs.get("deps")
-            if deps:
-                deps.state.memory.start_turn(deps.state.user_input)
-                deps.state.memory.start_step("Search")
-                deps.state.memory.record_tool_step(ToolStep(step_type="run_search", description="Found 3 workflows"))
-                deps.state.memory.finish_step()
-                deps.state.memory.complete_turn(assistant_answer="Found 3 workflows.")
-            yield make_text_result_event("Execution completed")
-
-        a2a.agent.run_stream_events = MagicMock(side_effect=stream_with_state_mutation)
-
-        task, context_id, msg = await a2a.submit()
-        chunks = [chunk async for chunk in a2a.worker.run_task_streaming(task["id"], context_id, msg, "req-1")]
-        events = parse_sse_events(chunks)
-
-        completed_event = events[-1]
-        assert completed_event["result"]["status"]["state"] == "completed"
-        message_text = completed_event["result"]["status"]["message"]["parts"][0]["text"]
-        assert "Found 3 workflows" in message_text
-        assert message_text != "Execution completed"
-
-
 class TestA2AEndpoint:
-    """HTTP-level tests for StreamingFastA2A._agent_run_endpoint.
-
-    Verifies that message/send and message/stream both return completed results
-    (not fire-and-forget "submitted" status) when called via the A2A HTTP API.
-    """
+    """HTTP-level tests for the A2A adapter via a2a-sdk."""
 
     @pytest.fixture
     async def a2a_app(self):
-        storage = InMemoryStorage()
-        broker = InMemoryBroker()
         agent = AsyncMock()
-        worker = A2AWorker(agent=agent, broker=broker, storage=storage)
-
-        @asynccontextmanager  # type: ignore[untyped-decorator]
-        async def _noop_lifespan(_app: FastA2A) -> AsyncIterator[None]:
-            yield
-
-        app = StreamingFastA2A(
-            storage=storage,
-            broker=broker,
-            worker=worker,
-            name="Test Agent",
-            url="http://localhost:8000",
-            description="Test",
-            lifespan=_noop_lifespan,
+        executor = WFOAgentExecutor(agent)
+        task_store = InMemoryTaskStore()
+        request_handler = DefaultRequestHandler(
+            agent_executor=executor,
+            task_store=task_store,
         )
+        agent_card = AgentCard(
+            name="Test Agent",
+            description="Test",
+            url="http://localhost:8000",
+            version="1.0.0",
+            capabilities=AgentCapabilities(streaming=True),
+            skills=A2A_SKILLS,
+            default_input_modes=["application/json"],
+            default_output_modes=["application/json"],
+        )
+        a2a = A2AFastAPIApplication(agent_card=agent_card, http_handler=request_handler)
+        from fastapi import FastAPI
 
-        async with app.task_manager:
-            yield type("A2AAppFixture", (), {"app": app, "agent": agent, "worker": worker, "storage": storage})
+        app = FastAPI()
+        a2a.add_routes_to_app(app)
+        yield type("A2AAppFixture", (), {"app": app, "agent": agent, "executor": executor})
 
     @staticmethod
     def _jsonrpc_request(method: str, user_text: str = "show subscriptions", req_id: int = 1) -> dict:
@@ -474,7 +339,6 @@ class TestA2AEndpoint:
                 "message": {
                     "role": "user",
                     "parts": [{"kind": "text", "text": user_text}],
-                    "kind": "message",
                     "messageId": str(uuid.uuid4()),
                 }
             },
@@ -499,9 +363,9 @@ class TestA2AEndpoint:
         body = resp.json()
         assert body["jsonrpc"] == "2.0"
         assert body["id"] == 1
-        task = body["result"]
-        assert task["status"]["state"] == "completed"
-        assert len(task["artifacts"]) >= 1
+        result = body["result"]
+        assert result["status"]["state"] == "completed"
+        assert len(result["artifacts"]) >= 1
 
     @pytest.mark.asyncio
     @patch("orchestrator.db.db")
@@ -520,9 +384,22 @@ class TestA2AEndpoint:
                 events.append(json.loads(line[6:]))
 
         assert len(events) >= 2
-        assert events[0]["result"]["status"]["state"] == "working"
-        assert events[-1]["result"]["status"]["state"] == "completed"
-        assert events[-1]["result"]["final"] is True
+        states = [e["result"]["status"]["state"] for e in events if "status" in e.get("result", {})]
+        assert "working" in states
+        assert "completed" in states
+
+    @pytest.mark.asyncio
+    async def test_agent_card_endpoint(self, a2a_app):
+        """GET /.well-known/agent.json returns the agent card."""
+        transport = httpx.ASGITransport(app=a2a_app.app)
+        async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
+            resp = await client.get("/.well-known/agent.json")
+
+        assert resp.status_code == 200
+        card = resp.json()
+        assert card["name"] == "Test Agent"
+        assert card["capabilities"]["streaming"] is True
+        assert len(card["skills"]) == len(A2A_SKILLS)
 
 
 class TestMCPWorker:

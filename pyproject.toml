@@ -8,7 +8,7 @@ dependencies = [
     "orchestrator-core[search]>=4.8.0",
     "pydantic-ai-slim==1.56.0",
     "ag-ui-protocol==0.1.10",
-    "fasta2a==0.6.0",
+    "a2a-sdk[http-server]>=0.3.25",
     "mcp==1.26.0",
     "uvicorn[standard]>=0.30.0",
     "structlog>=24.0.0",
