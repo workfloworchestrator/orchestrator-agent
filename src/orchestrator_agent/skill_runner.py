@@ -19,7 +19,7 @@ from typing import TYPE_CHECKING, Any, AsyncIterator
 import structlog
 from pydantic_ai import Agent
 from pydantic_ai.ag_ui import StateDeps
-from pydantic_ai.messages import FunctionToolCallEvent
+from pydantic_ai.messages import FunctionToolCallEvent, PartDeltaEvent
 from pydantic_ai.run import AgentRunResultEvent
 
 from orchestrator_agent.events import RunContext, make_step_active_event
@@ -91,7 +91,7 @@ class SkillRunner:
             if isinstance(event, AgentRunResultEvent):
                 self._last_run_result = event.result
                 logger.debug(f"{step_name}: Captured final result with {len(event.result.new_messages())} new messages")
-            else:
+            elif not isinstance(event, PartDeltaEvent):
                 logger.debug(f"{step_name}: Yielding event", event_type=type(event).__name__)
 
             yield event

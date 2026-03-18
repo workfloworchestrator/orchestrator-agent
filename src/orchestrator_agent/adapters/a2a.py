@@ -39,7 +39,7 @@ from a2a.types import (
 )
 from fastapi import FastAPI
 from pydantic_ai.ag_ui import StateDeps
-from pydantic_ai.messages import FunctionToolResultEvent, ToolReturnPart
+from pydantic_ai.messages import FunctionToolResultEvent, PartDeltaEvent, ToolReturnPart
 from pydantic_ai.run import AgentRunResultEvent
 
 from orchestrator_agent.agent import AgentAdapter
@@ -116,7 +116,8 @@ class WFOAgentExecutor(AgentExecutor):
             final_output = ""
 
             async for event in event_stream:
-                logger.debug("A2A execute: event", event_type=type(event).__name__)
+                if not isinstance(event, PartDeltaEvent):
+                    logger.debug("A2A execute: event", event_type=type(event).__name__)
 
                 if isinstance(event, FunctionToolResultEvent):
                     result = event.result
