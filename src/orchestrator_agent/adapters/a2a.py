@@ -126,7 +126,7 @@ class WFOAgentExecutor(AgentExecutor):
             # Prefer artifact content over LLM text (matches collect_stream_output behavior)
             if artifact_texts:
                 final_output = "\n\n".join(artifact_texts)
-            elif not final_output or final_output in ("", FALLBACK_MESSAGE):
+            elif not final_output or final_output == FALLBACK_MESSAGE:
                 final_output = _build_state_fallback(deps.state)
 
             await updater.complete(
