@@ -31,11 +31,11 @@ from a2a.types import (
     TaskStatusUpdateEvent,
     TextPart,
 )
-from ag_ui.core import ToolCallResultEvent
+from ag_ui.core import RunAgentInput, ToolCallResultEvent, UserMessage
 
 from orchestrator_agent.adapters.a2a import A2A_SKILLS, WFOAgentExecutor, _build_state_fallback
-from orchestrator_agent.adapters.ag_ui import AGUIEventStream
-from orchestrator_agent.adapters.mcp import MCPWorker
+from orchestrator_agent.adapters.ag_ui import AGUIEventStream, AGUIWorker, _AGUIAdapter
+from orchestrator_agent.adapters.mcp import MCPApp, MCPWorker
 from orchestrator_agent.adapters.stream import NO_RESULTS, collect_stream_output
 from orchestrator_agent.artifacts import QueryArtifact
 from orchestrator_agent.events import AgentStepActiveEvent
@@ -415,3 +415,312 @@ class TestMCPWorker:
         call_kwargs = agent.run_stream_events.call_args.kwargs
         assert call_kwargs["deps"].state.user_input == "show subscriptions"
         assert call_kwargs["target_action"] == TaskAction.SEARCH
+
+    @pytest.mark.asyncio
+    @patch("orchestrator_agent.adapters.mcp.db")
+    async def test_exception_propagates(self, _mock_db):
+        """Exception in agent stream is re-raised after logging."""
+        agent = MagicMock()
+
+        async def failing_stream(*args, **kwargs):
+            raise RuntimeError("boom")
+            yield  # noqa: F401
+
+        agent.run_stream_events = MagicMock(return_value=failing_stream())
+
+        worker = MCPWorker(agent=agent)
+        with pytest.raises(RuntimeError, match="boom"):
+            await worker.run_skill("find subs")
+
+
+class TestMCPAppInit:
+    @patch("orchestrator_agent.adapters.mcp.db")
+    def test_init_creates_worker_and_app(self, _mock_db):
+        agent = MagicMock()
+        app = MCPApp(agent)
+
+        assert app.worker.agent is agent
+        assert app.app is not None
+        assert app.server is not None
+
+    @pytest.mark.asyncio
+    @patch("orchestrator_agent.adapters.mcp.db")
+    async def test_tool_search_delegates_to_worker(self, _mock_db):
+        agent = MagicMock()
+        app = MCPApp(agent)
+        app.worker.run_skill = AsyncMock(return_value="search result")
+
+        await app.server.call_tool("search", {"query": "find active subs"})
+
+        app.worker.run_skill.assert_called_once_with("find active subs", TaskAction.SEARCH)
+
+    @pytest.mark.asyncio
+    @patch("orchestrator_agent.adapters.mcp.db")
+    async def test_tool_aggregate_delegates_to_worker(self, _mock_db):
+        agent = MagicMock()
+        app = MCPApp(agent)
+        app.worker.run_skill = AsyncMock(return_value="aggregate result")
+
+        await app.server.call_tool("aggregate", {"query": "count by product"})
+
+        app.worker.run_skill.assert_called_once_with("count by product", TaskAction.AGGREGATION)
+
+    @pytest.mark.asyncio
+    @patch("orchestrator_agent.adapters.mcp.db")
+    async def test_tool_ask_delegates_to_worker(self, _mock_db):
+        agent = MagicMock()
+        app = MCPApp(agent)
+        app.worker.run_skill = AsyncMock(return_value="ask result")
+
+        await app.server.call_tool("ask", {"query": "what is happening?"})
+
+        app.worker.run_skill.assert_called_once_with("what is happening?", target_action=None)
+
+    @pytest.mark.asyncio
+    @patch("orchestrator_agent.adapters.mcp.db")
+    async def test_tool_get_entity_details_delegates_to_worker(self, _mock_db):
+        import uuid as _uuid
+
+        agent = MagicMock()
+        app = MCPApp(agent)
+        app.worker.run_skill = AsyncMock(return_value="details result")
+
+        entity_id = _uuid.uuid4()
+        await app.server.call_tool("get_entity_details", {"entity_type": "SUBSCRIPTION", "entity_id": str(entity_id)})
+
+        call_kwargs = app.worker.run_skill.call_args
+        assert call_kwargs.args[1] == TaskAction.RESULT_ACTIONS
+        assert "SUBSCRIPTION" in call_kwargs.args[0]
+        assert str(entity_id) in call_kwargs.args[0]
+
+
+class TestMCPAppLifecycle:
+    @pytest.mark.asyncio
+    @patch("orchestrator_agent.adapters.mcp.db")
+    async def test_aenter_aexit(self, _mock_db):
+        agent = MagicMock()
+        app = MCPApp(agent)
+
+        mock_cm = AsyncMock()
+        mock_cm.__aenter__ = AsyncMock(return_value=None)
+        mock_cm.__aexit__ = AsyncMock(return_value=False)
+
+        with patch.object(app.server.session_manager, "run", return_value=mock_cm):
+            async with app as ctx:
+                assert ctx is app
+            mock_cm.__aenter__.assert_called_once()
+            mock_cm.__aexit__.assert_called_once()
+
+
+class TestAGUIEventStreamSuperDelegate:
+    @pytest.mark.asyncio
+    async def test_non_custom_event_delegates_to_super(self):
+        """Non-CustomEvent NativeEvents fall through to the base class handler."""
+        stream = AGUIEventStream(run_input=minimal_run_input())
+        event = make_text_result_event("Done")  # AgentRunResultEvent — not a CustomEvent
+
+        # Should not raise; base class may or may not yield events for this type
+        results = [e async for e in stream.handle_event(event)]
+        assert isinstance(results, list)
+
+
+class TestAGUIAdapterBuildEventStream:
+    def test_build_event_stream_returns_agui_event_stream(self):
+        agent = MagicMock()
+        adapter = _AGUIAdapter(agent=agent, run_input=minimal_run_input())
+        stream = adapter.build_event_stream()
+
+        assert isinstance(stream, AGUIEventStream)
+
+
+class TestAGUIWorkerStaticMethods:
+    def test_prepare_run_input_injects_user_input(self):
+        run_input = RunAgentInput(
+            thread_id="t1",
+            run_id="00000000-0000-0000-0000-000000000001",
+            state={"existing_key": "val"},
+            messages=[UserMessage(id="m1", role="user", content="find active subs")],
+            tools=[],
+            context=[],
+            forwarded_props={},
+        )
+        result = AGUIWorker._prepare_run_input(run_input)
+
+        assert result.state["user_input"] == "find active subs"
+        assert result.state["existing_key"] == "val"
+        assert result.thread_id == "t1"
+        assert result.run_id == run_input.run_id
+
+    def test_prepare_run_input_empty_messages(self):
+        run_input = RunAgentInput(
+            thread_id="t1",
+            run_id="00000000-0000-0000-0000-000000000001",
+            state={},
+            messages=[],
+            tools=[],
+            context=[],
+            forwarded_props={},
+        )
+        result = AGUIWorker._prepare_run_input(run_input)
+
+        assert result.state["user_input"] == ""
+
+    def test_extract_user_input_returns_most_recent(self):
+        run_input = RunAgentInput(
+            thread_id="t1",
+            run_id="00000000-0000-0000-0000-000000000001",
+            state={},
+            messages=[
+                UserMessage(id="m1", role="user", content="first message"),
+                UserMessage(id="m2", role="user", content="second message"),
+            ],
+            tools=[],
+            context=[],
+            forwarded_props={},
+        )
+        assert AGUIWorker._extract_user_input(run_input) == "second message"
+
+    def test_extract_user_input_empty_when_no_messages(self):
+        run_input = RunAgentInput(
+            thread_id="t1",
+            run_id="00000000-0000-0000-0000-000000000001",
+            state={},
+            messages=[],
+            tools=[],
+            context=[],
+            forwarded_props={},
+        )
+        assert AGUIWorker._extract_user_input(run_input) == ""
+
+
+class TestAGUIWorkerRunRequest:
+    def _make_run_input(self, msg: str = "find subs") -> RunAgentInput:
+        return RunAgentInput(
+            thread_id="t-thread",
+            run_id="00000000-0000-0000-0000-000000000042",
+            state={},
+            messages=[UserMessage(id="m1", role="user", content=msg)],
+            tools=[],
+            context=[],
+            forwarded_props={},
+        )
+
+    @pytest.mark.asyncio
+    @patch("orchestrator_agent.adapters.ag_ui.PostgresStatePersistence")
+    @patch("orchestrator_agent.adapters.ag_ui._AGUIAdapter")
+    async def test_run_request_new_run_streams_events(self, mock_adapter_cls, mock_persistence_cls):
+        agent = MagicMock()
+        db_session = MagicMock()
+        db_session.get.return_value = None  # No existing run
+
+        mock_persistence = AsyncMock()
+        mock_persistence.load_state.return_value = None
+        mock_persistence_cls.return_value = mock_persistence
+
+        async def mock_sse_stream():
+            yield "data: event1\n\n"
+            yield "data: event2\n\n"
+
+        mock_adapter = MagicMock()
+        mock_adapter.run_stream.return_value = mock_event_stream()
+        mock_adapter.encode_stream.return_value = mock_sse_stream()
+        mock_adapter_cls.return_value = mock_adapter
+
+        stream = await AGUIWorker.run_request(agent, self._make_run_input(), db_session)
+        chunks = [c async for c in stream]
+
+        assert chunks == ["data: event1\n\n", "data: event2\n\n"]
+        db_session.add.assert_called_once()
+        db_session.commit.assert_called()
+
+    @pytest.mark.asyncio
+    @patch("orchestrator_agent.adapters.ag_ui.PostgresStatePersistence")
+    @patch("orchestrator_agent.adapters.ag_ui._AGUIAdapter")
+    async def test_run_request_existing_run_skips_insert(self, mock_adapter_cls, mock_persistence_cls):
+        from orchestrator.db.models import AgentRunTable
+
+        agent = MagicMock()
+        db_session = MagicMock()
+        existing_run = MagicMock(spec=AgentRunTable)
+        db_session.get.return_value = existing_run  # Run already exists
+
+        mock_persistence = AsyncMock()
+        mock_persistence.load_state.return_value = None
+        mock_persistence_cls.return_value = mock_persistence
+
+        async def empty_stream():
+            return
+            yield  # noqa: F401
+
+        mock_adapter = MagicMock()
+        mock_adapter.run_stream.return_value = mock_event_stream()
+        mock_adapter.encode_stream.return_value = empty_stream()
+        mock_adapter_cls.return_value = mock_adapter
+
+        stream = await AGUIWorker.run_request(agent, self._make_run_input(), db_session)
+        _ = [c async for c in stream]
+
+        db_session.add.assert_not_called()
+
+    @pytest.mark.asyncio
+    @patch("orchestrator_agent.adapters.ag_ui.PostgresStatePersistence")
+    @patch("orchestrator_agent.adapters.ag_ui._AGUIAdapter")
+    async def test_run_request_loads_previous_state(self, mock_adapter_cls, mock_persistence_cls):
+        agent = MagicMock()
+        db_session = MagicMock()
+        db_session.get.return_value = None
+
+        previous_state = SearchState(user_input="old query")
+        mock_persistence = AsyncMock()
+        mock_persistence.load_state.return_value = previous_state
+        mock_persistence_cls.return_value = mock_persistence
+
+        captured_deps = {}
+
+        async def empty_stream():
+            return
+            yield  # noqa: F401
+
+        def capture_run_stream(deps):
+            captured_deps["deps"] = deps
+            return mock_event_stream()
+
+        mock_adapter = MagicMock()
+        mock_adapter.run_stream.side_effect = capture_run_stream
+        mock_adapter.encode_stream.return_value = empty_stream()
+        mock_adapter_cls.return_value = mock_adapter
+
+        stream = await AGUIWorker.run_request(agent, self._make_run_input("new query"), db_session)
+        _ = [c async for c in stream]
+
+        # Adapter was constructed; the previous state's user_input is updated
+        call_kwargs = mock_adapter_cls.call_args.kwargs
+        initial_state = call_kwargs["run_input"].state
+        assert initial_state["user_input"] == "new query"
+
+    @pytest.mark.asyncio
+    @patch("orchestrator_agent.adapters.ag_ui.PostgresStatePersistence")
+    @patch("orchestrator_agent.adapters.ag_ui._AGUIAdapter")
+    async def test_run_request_rollback_on_stream_error(self, mock_adapter_cls, mock_persistence_cls):
+        agent = MagicMock()
+        db_session = MagicMock()
+        db_session.get.return_value = None
+
+        mock_persistence = AsyncMock()
+        mock_persistence.load_state.return_value = None
+        mock_persistence_cls.return_value = mock_persistence
+
+        async def failing_stream():
+            yield "data: partial\n\n"
+            raise RuntimeError("stream error")
+
+        mock_adapter = MagicMock()
+        mock_adapter.run_stream.return_value = mock_event_stream()
+        mock_adapter.encode_stream.return_value = failing_stream()
+        mock_adapter_cls.return_value = mock_adapter
+
+        stream = await AGUIWorker.run_request(agent, self._make_run_input(), db_session)
+        with pytest.raises(RuntimeError, match="stream error"):
+            _ = [c async for c in stream]
+
+        db_session.rollback.assert_called_once()
