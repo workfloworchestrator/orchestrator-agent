@@ -444,37 +444,27 @@ class TestMCPAppInit:
         assert app.server is not None
 
     @pytest.mark.asyncio
+    @pytest.mark.parametrize(
+        ("tool", "query", "expected_action"),
+        [
+            ("search", "find active subs", TaskAction.SEARCH),
+            ("aggregate", "count by product", TaskAction.AGGREGATION),
+            ("ask", "what is happening?", None),
+        ],
+    )
     @patch("orchestrator_agent.adapters.mcp.db")
-    async def test_tool_search_delegates_to_worker(self, _mock_db):
+    async def test_tool_delegates_to_worker(self, _mock_db, tool, query, expected_action):
         agent = MagicMock()
         app = MCPApp(agent)
-        app.worker.run_skill = AsyncMock(return_value="search result")
+        app.worker.run_skill = AsyncMock(return_value="result")
 
-        await app.server.call_tool("search", {"query": "find active subs"})
+        await app.server.call_tool(tool, {"query": query})
 
-        app.worker.run_skill.assert_called_once_with("find active subs", TaskAction.SEARCH)
-
-    @pytest.mark.asyncio
-    @patch("orchestrator_agent.adapters.mcp.db")
-    async def test_tool_aggregate_delegates_to_worker(self, _mock_db):
-        agent = MagicMock()
-        app = MCPApp(agent)
-        app.worker.run_skill = AsyncMock(return_value="aggregate result")
-
-        await app.server.call_tool("aggregate", {"query": "count by product"})
-
-        app.worker.run_skill.assert_called_once_with("count by product", TaskAction.AGGREGATION)
-
-    @pytest.mark.asyncio
-    @patch("orchestrator_agent.adapters.mcp.db")
-    async def test_tool_ask_delegates_to_worker(self, _mock_db):
-        agent = MagicMock()
-        app = MCPApp(agent)
-        app.worker.run_skill = AsyncMock(return_value="ask result")
-
-        await app.server.call_tool("ask", {"query": "what is happening?"})
-
-        app.worker.run_skill.assert_called_once_with("what is happening?", target_action=None)
+        app.worker.run_skill.assert_called_once()
+        ca = app.worker.run_skill.call_args
+        assert ca.args[0] == query
+        actual_action = ca.args[1] if len(ca.args) > 1 else ca.kwargs.get("target_action")
+        assert actual_action == expected_action
 
     @pytest.mark.asyncio
     @patch("orchestrator_agent.adapters.mcp.db")
@@ -534,63 +524,57 @@ class TestAGUIAdapterBuildEventStream:
 
 
 class TestAGUIWorkerStaticMethods:
-    def test_prepare_run_input_injects_user_input(self):
+    _RUN_ID = "00000000-0000-0000-0000-000000000001"
+
+    @pytest.mark.parametrize(
+        ("messages", "expected_user_input"),
+        [
+            ([UserMessage(id="m1", role="user", content="find active subs")], "find active subs"),
+            ([], ""),
+        ],
+    )
+    def test_prepare_run_input(self, messages, expected_user_input):
         run_input = RunAgentInput(
             thread_id="t1",
-            run_id="00000000-0000-0000-0000-000000000001",
+            run_id=self._RUN_ID,
             state={"existing_key": "val"},
-            messages=[UserMessage(id="m1", role="user", content="find active subs")],
+            messages=messages,
             tools=[],
             context=[],
             forwarded_props={},
         )
         result = AGUIWorker._prepare_run_input(run_input)
 
-        assert result.state["user_input"] == "find active subs"
+        assert result.state["user_input"] == expected_user_input
         assert result.state["existing_key"] == "val"
         assert result.thread_id == "t1"
         assert result.run_id == run_input.run_id
 
-    def test_prepare_run_input_empty_messages(self):
+    @pytest.mark.parametrize(
+        ("messages", "expected"),
+        [
+            ([], ""),
+            ([UserMessage(id="m1", role="user", content="only message")], "only message"),
+            (
+                [
+                    UserMessage(id="m1", role="user", content="first message"),
+                    UserMessage(id="m2", role="user", content="second message"),
+                ],
+                "second message",
+            ),
+        ],
+    )
+    def test_extract_user_input(self, messages, expected):
         run_input = RunAgentInput(
             thread_id="t1",
-            run_id="00000000-0000-0000-0000-000000000001",
+            run_id=self._RUN_ID,
             state={},
-            messages=[],
+            messages=messages,
             tools=[],
             context=[],
             forwarded_props={},
         )
-        result = AGUIWorker._prepare_run_input(run_input)
-
-        assert result.state["user_input"] == ""
-
-    def test_extract_user_input_returns_most_recent(self):
-        run_input = RunAgentInput(
-            thread_id="t1",
-            run_id="00000000-0000-0000-0000-000000000001",
-            state={},
-            messages=[
-                UserMessage(id="m1", role="user", content="first message"),
-                UserMessage(id="m2", role="user", content="second message"),
-            ],
-            tools=[],
-            context=[],
-            forwarded_props={},
-        )
-        assert AGUIWorker._extract_user_input(run_input) == "second message"
-
-    def test_extract_user_input_empty_when_no_messages(self):
-        run_input = RunAgentInput(
-            thread_id="t1",
-            run_id="00000000-0000-0000-0000-000000000001",
-            state={},
-            messages=[],
-            tools=[],
-            context=[],
-            forwarded_props={},
-        )
-        assert AGUIWorker._extract_user_input(run_input) == ""
+        assert AGUIWorker._extract_user_input(run_input) == expected
 
 
 class TestAGUIWorkerRunRequest:
