@@ -88,11 +88,16 @@ class SkillRunner:
             except Exception as e:
                 logger.error(f"Error tracking tool call: {e}", exc_info=True)
 
-            if isinstance(event, AgentRunResultEvent):
-                self._last_run_result = event.result
-                logger.debug(f"{step_name}: Captured final result with {len(event.result.new_messages())} new messages")
-            elif not isinstance(event, PartDeltaEvent):
-                logger.debug(f"{step_name}: Yielding event", event_type=type(event).__name__)
+            match event:
+                case AgentRunResultEvent():
+                    self._last_run_result = event.result
+                    logger.debug(
+                        f"{step_name}: Captured final result with {len(event.result.new_messages())} new messages"
+                    )
+                case PartDeltaEvent():
+                    pass
+                case _:
+                    logger.debug(f"{step_name}: Yielding event", event_type=type(event).__name__)
 
             yield event
 

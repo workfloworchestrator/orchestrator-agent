@@ -116,8 +116,11 @@ class WFOAgentExecutor(AgentExecutor):
             final_output = ""
 
             async for event in event_stream:
-                if not isinstance(event, PartDeltaEvent):
-                    logger.debug("A2A execute: event", event_type=type(event).__name__)
+                match event:
+                    case PartDeltaEvent():
+                        pass
+                    case _:
+                        logger.debug("A2A execute: event", event_type=type(event).__name__)
 
                 if isinstance(event, FunctionToolResultEvent):
                     result = event.result
