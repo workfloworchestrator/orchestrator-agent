@@ -104,6 +104,13 @@ class WFOAgentExecutor(AgentExecutor):
             db.session.add(agent_run)
             db.session.commit()
 
+            logger.debug(
+                "A2A execute: starting",
+                task_id=task_id,
+                user_input=user_input[:100] if user_input else "",
+                target_action=target_action,
+            )
+
             event_stream = self.agent.run_stream_events(deps=deps, target_action=target_action)
             artifact_texts: list[str] = []
             final_output = ""
@@ -122,6 +129,14 @@ class WFOAgentExecutor(AgentExecutor):
 
                 if isinstance(event, AgentRunResultEvent):
                     final_output = str(event.result.output)
+
+            logger.debug(
+                "A2A execute: collection complete",
+                task_id=task_id,
+                artifact_count=len(artifact_texts),
+                final_output=final_output[:200] if final_output else "",
+                query_id=str(deps.state.query_id) if deps.state.query_id else None,
+            )
 
             # Prefer artifact content over LLM text (matches collect_stream_output behavior)
             if artifact_texts:
