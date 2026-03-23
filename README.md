@@ -11,7 +11,7 @@ cp .env.example .env
 # Edit .env with your DATABASE_URI and LLM settings
 
 uv sync
-uv run uvicorn orchestrator_agent.app:app --port 8000
+uv run uvicorn orchestrator_agent.app:app --port 8080
 ```
 
 ## Endpoints
@@ -58,7 +58,7 @@ uv run demos/a2a_client.py <subscription-uuid>
 | --- | --- | --- |
 | `DATABASE_URI` | *(required)* | PostgreSQL connection URI for the WFO database |
 | `ORCHESTRATOR_API_URL` | `http://localhost:8080` | URL of the orchestrator-core API |
-| `BASE_URL` | `http://localhost:8000` | Public URL of this agent service |
+| `BASE_URL` | `http://localhost:8080` | Public URL of this agent service |
 | `AGENT_MODEL` | `openai:gpt-4o` | LLM model in `provider:model` format |
 | `AGENT_API_BASE` | *(none)* | Custom base URL for the LLM provider (OpenAI-compatible) or Azure endpoint |
 | `AGENT_API_KEY` | *(none)* | API key for the LLM provider |

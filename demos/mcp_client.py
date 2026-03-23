@@ -14,7 +14,7 @@ import sys
 from mcp.client.session import ClientSession
 from mcp.client.streamable_http import streamablehttp_client
 
-URL = "http://localhost:8000/mcp"
+URL = "http://localhost:8080/mcp"
 SMOKE_TESTS = [
     ("search", {"query": "show me active subscriptions"}),
     ("aggregate", {"query": "count subscriptions by product"}),

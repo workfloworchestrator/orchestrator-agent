@@ -188,7 +188,7 @@ class A2AAdapter:
 
     Usage::
 
-        adapter = A2AAdapter(agent, url="http://localhost:8000/")
+        adapter = A2AAdapter(agent, url="http://localhost:8080/")
         adapter.add_routes(app)
         # In lifespan:
         async with adapter.agent:

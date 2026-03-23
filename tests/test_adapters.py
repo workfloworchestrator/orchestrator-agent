@@ -314,8 +314,8 @@ class TestA2AEndpoint:
         )
         agent_card = AgentCard(
             name="Test Agent",
+            url="http://localhost:8080",
             description="Test",
-            url="http://localhost:8000",
             version="1.0.0",
             capabilities=AgentCapabilities(streaming=True),
             skills=A2A_SKILLS,
