@@ -247,13 +247,20 @@ class Memory(BaseModel):
         return self._format_query_summary(steps, include_full_query=False)
 
     def get_message_history(
-        self, max_turns: int = 5, scope: MemoryScope = MemoryScope.FULL
+        self,
+        max_turns: int = 5,
+        scope: MemoryScope = MemoryScope.FULL,
+        *,
+        override_current_message: str | None = None,
     ) -> list[ModelRequest | ModelResponse]:
         """Get conversation history as pydantic-ai message objects for message_history parameter.
 
         Args:
             max_turns: Maximum number of recent turns to include
             scope: Memory scope controlling what details to include
+            override_current_message: If set, use this instead of the current turn's
+                user_question. Used by SkillRunner to scope the message to the
+                planner's task reasoning instead of the full user request.
 
         Returns:
             List of ModelRequest/ModelResponse messages for agent message_history
@@ -275,9 +282,10 @@ class Memory(BaseModel):
             if turn.assistant_answer is not None:
                 messages.append(ModelResponse(parts=[TextPart(content=turn.assistant_answer)]))
 
-        # Always add current turn's user question
+        # Add current turn's user question (or planner-scoped override)
         if self.current_turn:
-            messages.append(ModelRequest(parts=[UserPromptPart(content=self.current_turn.user_question)]))
+            user_msg = override_current_message or self.current_turn.user_question
+            messages.append(ModelRequest(parts=[UserPromptPart(content=user_msg)]))
 
         return messages
 

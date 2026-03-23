@@ -104,7 +104,7 @@ class Planner:
             runner = SkillRunner(skill=skill, model=self.model, debug=self.debug)
 
             try:
-                async for event in runner.run(ctx, reasoning=task.reasoning):
+                async for event in runner.run(ctx, reasoning=task.reasoning, planned=task.planned):
                     yield event
                 task.status = TaskStatus.COMPLETED
             except Exception as e:
@@ -125,7 +125,7 @@ class Planner:
             target_action: If set, skip planning and execute this single action directly
         """
         if target_action:
-            tasks = [Task(action_type=target_action, reasoning="Direct invocation")]
+            tasks = [Task(action_type=target_action, reasoning="", planned=False)]
         else:
             yield make_step_active_event("Planner")
             tasks = (await self._create_plan(ctx)).tasks

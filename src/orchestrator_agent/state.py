@@ -51,6 +51,9 @@ class Task(BaseModel):
     status: TaskStatus = Field(
         default=TaskStatus.PENDING, exclude=True, description="Task execution status (managed internally)"
     )
+    planned: bool = Field(
+        default=True, exclude=True, description="Whether this task was created by the planner (vs direct invocation)"
+    )
 
 
 class ExecutionPlan(BaseModel):
