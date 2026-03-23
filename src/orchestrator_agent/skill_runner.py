@@ -56,12 +56,13 @@ class SkillRunner:
             toolsets=self.skill.toolsets,
         )
 
-    async def run(self, ctx: RunContext, *, reasoning: str | None = None) -> AsyncIterator[Any]:
+    async def run(self, ctx: RunContext, *, reasoning: str | None = None, planned: bool = True) -> AsyncIterator[Any]:
         """Execute the skill: stream events from the LLM agent.
 
         Args:
             ctx: Current run context
             reasoning: Optional reasoning from the execution plan task
+            planned: Whether this task was created by the planner (vs direct invocation)
         """
         step_name = self.skill.name
         ctx.state.memory.start_step(step_name)
@@ -71,7 +72,12 @@ class SkillRunner:
         self._last_run_result = None
 
         prompt = self.skill.get_prompt(ctx.state)
-        message_history = ctx.state.memory.get_message_history(max_turns=5, scope=self.skill.memory_scope)
+        # Use the planner's task reasoning as the user message so each skill
+        # only sees its scoped task, not the full multi-part user request.
+        override = reasoning if planned else None
+        message_history = ctx.state.memory.get_message_history(
+            max_turns=5, scope=self.skill.memory_scope, override_current_message=override
+        )
         state_deps = StateDeps(ctx.state)
 
         if self.debug:
