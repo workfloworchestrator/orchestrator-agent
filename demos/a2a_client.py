@@ -35,7 +35,7 @@ def run_troubleshoot(subscription_id: str, base_url: str) -> None:
         ),
         llm="gpt-4o-mini",
         a2a=A2AClientConfig(
-            endpoint=f"{base_url}/.well-known/agent-card.json",
+            endpoint=f"{base_url}/.well-known/agent.json",
             timeout=120,
             max_turns=10,
             updates=PollingConfig(interval=2, max_polls=30),
@@ -68,7 +68,7 @@ def main() -> None:
         sys.exit(1)
 
     subscription_id = sys.argv[1]
-    base_url = "http://localhost:8080/a2a"
+    base_url = "http://localhost:8080"
     if "--base-url" in sys.argv:
         base_url = sys.argv[sys.argv.index("--base-url") + 1]
 
