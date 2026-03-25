@@ -23,6 +23,7 @@ from orchestrator.db import init_database
 from orchestrator_agent.adapters import A2AAdapter, MCPApp
 from orchestrator_agent.agent import AgentAdapter
 from orchestrator_agent.api.api import api_router
+from orchestrator_agent.security import AuthMiddleware, create_auth_manager
 from orchestrator_agent.settings import agent_settings
 
 logger = structlog.get_logger(__name__)
@@ -61,3 +62,4 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
 
 app = FastAPI(title="WFO Search Agent", lifespan=lifespan)
 app.include_router(api_router)
+app.add_middleware(AuthMiddleware, auth_manager=create_auth_manager())

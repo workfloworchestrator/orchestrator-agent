@@ -13,8 +13,7 @@
 
 import httpx
 import structlog
-
-from orchestrator_agent.settings import agent_settings
+from oauth2_lib.settings import oauth2lib_settings
 
 logger = structlog.get_logger(__name__)
 
@@ -27,7 +26,7 @@ class OAuthTokenManager:
 
     @property
     def auth_enabled(self) -> bool:
-        return agent_settings.OAUTH2_ACTIVE
+        return oauth2lib_settings.OAUTH2_ACTIVE
 
     async def get_token(self) -> str | None:
         if not self.auth_enabled:
@@ -37,24 +36,18 @@ class OAuthTokenManager:
         return await self._fetch_token()
 
     async def _fetch_token(self) -> str:
-        if (
-            not agent_settings.OAUTH2_TOKEN_ENDPOINT
-            or not agent_settings.OAUTH2_CLIENT_ID
-            or not agent_settings.OAUTH2_CLIENT_SECRET
-        ):
-            raise RuntimeError(
-                "OAuth2 settings are incomplete; ensure OAUTH2_TOKEN_ENDPOINT, OAUTH2_CLIENT_ID, and OAUTH2_CLIENT_SECRET are set"
-            )
+        if not oauth2lib_settings.OAUTH2_TOKEN_URL:
+            raise RuntimeError("OAuth2 settings are incomplete; ensure OAUTH2_TOKEN_URL is set")
 
-        logger.debug("Fetching OAuth2 token", endpoint=agent_settings.OAUTH2_TOKEN_ENDPOINT)
+        logger.debug("Fetching OAuth2 token", endpoint=oauth2lib_settings.OAUTH2_TOKEN_URL)
 
         async with httpx.AsyncClient() as client:
             response = await client.post(
-                agent_settings.OAUTH2_TOKEN_ENDPOINT,
+                oauth2lib_settings.OAUTH2_TOKEN_URL,
                 data={
                     "grant_type": "client_credentials",
-                    "client_id": agent_settings.OAUTH2_CLIENT_ID,
-                    "client_secret": agent_settings.OAUTH2_CLIENT_SECRET,
+                    "client_id": oauth2lib_settings.OAUTH2_RESOURCE_SERVER_ID,
+                    "client_secret": oauth2lib_settings.OAUTH2_RESOURCE_SERVER_SECRET,
                 },
                 timeout=30,
             )
