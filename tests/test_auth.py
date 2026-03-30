@@ -12,15 +12,15 @@ from orchestrator_agent.auth import OAuthTokenManager
 
 @pytest.fixture
 def _enable_oauth(monkeypatch):
-    monkeypatch.setattr("orchestrator_agent.auth.agent_settings.OAUTH2_ACTIVE", True)
-    monkeypatch.setattr("orchestrator_agent.auth.agent_settings.OAUTH2_TOKEN_ENDPOINT", "https://idp.example.com/token")
-    monkeypatch.setattr("orchestrator_agent.auth.agent_settings.OAUTH2_CLIENT_ID", "test-client")
-    monkeypatch.setattr("orchestrator_agent.auth.agent_settings.OAUTH2_CLIENT_SECRET", "test-secret")
+    monkeypatch.setattr("orchestrator_agent.auth.oauth2lib_settings.OAUTH2_ACTIVE", True)
+    monkeypatch.setattr("orchestrator_agent.auth.oauth2lib_settings.OAUTH2_TOKEN_URL", "https://idp.example.com/token")
+    monkeypatch.setattr("orchestrator_agent.auth.oauth2lib_settings.OAUTH2_RESOURCE_SERVER_ID", "test-client")
+    monkeypatch.setattr("orchestrator_agent.auth.oauth2lib_settings.OAUTH2_RESOURCE_SERVER_SECRET", "test-secret")
 
 
 @pytest.fixture
 def _disable_oauth(monkeypatch):
-    monkeypatch.setattr("orchestrator_agent.auth.agent_settings.OAUTH2_ACTIVE", False)
+    monkeypatch.setattr("orchestrator_agent.auth.oauth2lib_settings.OAUTH2_ACTIVE", False)
 
 
 def _make_response(status_code: int = 200, json: dict | None = None) -> httpx.Response:
@@ -100,25 +100,3 @@ class TestOAuthTokenManager:
             },
             timeout=30,
         )
-
-
-class TestSettingsValidation:
-    def test_oauth2_active_requires_all_fields(self, monkeypatch):
-        monkeypatch.setenv("DATABASE_URI", "postgresql://localhost/test")
-        monkeypatch.setenv("OAUTH2_ACTIVE", "true")
-        # Missing token endpoint, client id, client secret
-
-        from orchestrator_agent.settings import AgentSettings
-
-        with pytest.raises(ValueError, match="OAUTH2_TOKEN_ENDPOINT"):
-            AgentSettings()
-
-    def test_oauth2_inactive_allows_missing_fields(self, monkeypatch):
-        monkeypatch.setenv("DATABASE_URI", "postgresql://localhost/test")
-        monkeypatch.setenv("OAUTH2_ACTIVE", "false")
-
-        from orchestrator_agent.settings import AgentSettings
-
-        settings = AgentSettings()
-        assert settings.OAUTH2_ACTIVE is False
-        assert settings.OAUTH2_TOKEN_ENDPOINT is None

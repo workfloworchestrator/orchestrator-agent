@@ -16,7 +16,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 from orchestrator.search.core.types import EntityType
-from pydantic import Field, model_validator
+from pydantic import Field
 from pydantic_settings import BaseSettings
 
 if TYPE_CHECKING:
@@ -67,13 +67,6 @@ class AgentSettings(BaseSettings):
     AGENT_DEBUG: bool = Field(default=False, description="Enable debug logging for agent execution")
     orchestrator_api_paths: OrchestratorAPIPaths = Field(default_factory=OrchestratorAPIPaths)
 
-    OAUTH2_ACTIVE: bool = Field(
-        default=False, description="Toggle to enable authenticated requests to the orchestrator"
-    )
-    OAUTH2_TOKEN_ENDPOINT: str | None = Field(default=None, description="OAuth2 token endpoint URL")
-    OAUTH2_CLIENT_ID: str | None = Field(default=None, description="OAuth2 client ID")
-    OAUTH2_CLIENT_SECRET: str | None = Field(default=None, description="OAuth2 client secret")
-
     def create_model(self) -> str | Model:
         """Create a pydantic-ai model from settings.
 
@@ -106,18 +99,6 @@ class AgentSettings(BaseSettings):
             provider = OpenAIProvider(base_url=self.AGENT_API_BASE, api_key=self.AGENT_API_KEY)  # type: ignore[assignment]
 
         return OpenAIChatModel(model_name, provider=provider)
-
-    @model_validator(mode="after")
-    def _validate_oauth2_settings(self) -> AgentSettings:
-        if self.OAUTH2_ACTIVE:
-            missing = [
-                name
-                for name in ("OAUTH2_TOKEN_ENDPOINT", "OAUTH2_CLIENT_ID", "OAUTH2_CLIENT_SECRET")
-                if getattr(self, name) is None
-            ]
-            if missing:
-                raise ValueError(f"OAUTH2_ACTIVE is True but the following settings are not set: {', '.join(missing)}")
-        return self
 
 
 agent_settings = AgentSettings()
