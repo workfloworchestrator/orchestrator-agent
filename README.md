@@ -21,6 +21,7 @@ uv run uvicorn orchestrator_agent.app:app --port 8080
 | `POST /agui` | AG-UI | SSE streaming for frontend |
 | `POST /` | A2A | Agent-to-agent JSON-RPC (`message/send`, `message/stream`) |
 | `GET /.well-known/agent.json` | A2A | Agent card discovery |
+| `GET /.well-known/agent-card.json` | A2A | Agent card discovery (alias) |
 | `/mcp` | MCP | Model Context Protocol tools |
 | `GET /health` | REST | Health check |
 
@@ -64,10 +65,12 @@ uv run demos/a2a_client.py <subscription-uuid>
 | `AGENT_API_KEY` | *(none)* | API key for the LLM provider |
 | `AGENT_API_VERSION` | *(none)* | API version for Azure OpenAI (e.g. `2024-12-01-preview`) |
 | `AGENT_DEBUG` | `false` | Enable debug logging for agent execution |
-| `OAUTH2_ACTIVE` | `false` | Enable authenticated requests to the orchestrator |
-| `OAUTH2_TOKEN_ENDPOINT` | *(none)* | OAuth2 token endpoint URL (required when `OAUTH2_ACTIVE=true`) |
-| `OAUTH2_CLIENT_ID` | *(none)* | OAuth2 client ID (required when `OAUTH2_ACTIVE=true`) |
-| `OAUTH2_CLIENT_SECRET` | *(none)* | OAuth2 client secret (required when `OAUTH2_ACTIVE=true`) |
+| `OAUTH2_ACTIVE` | `true` | Enable OIDC authentication on incoming requests (via `oauth2_lib`) |
+| `OIDC_BASE_URL` | *(none)* | Base URL of the OIDC provider (required when `OAUTH2_ACTIVE=true`) |
+| `OIDC_CONF_URL` | *(none)* | OIDC discovery document URL (required when `OAUTH2_ACTIVE=true`) |
+| `OAUTH2_RESOURCE_SERVER_ID` | *(none)* | OAuth2 client ID / resource server ID (required when `OAUTH2_ACTIVE=true`) |
+| `OAUTH2_RESOURCE_SERVER_SECRET` | *(none)* | OAuth2 client secret / resource server secret (required when `OAUTH2_ACTIVE=true`) |
+| `OAUTH2_TOKEN_URL` | *(none)* | OAuth2 token endpoint for outgoing client-credentials requests |
 
 ### Custom LLM endpoint
 
