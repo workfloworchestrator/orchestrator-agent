@@ -87,9 +87,15 @@ class AgentAdapter(Agent[StateDeps[SearchState], str]):
         self.debug = debug
 
     async def _prepare_state(self, deps: StateDeps[SearchState]) -> SearchState:
-        """Load persisted state (if any) and start a new turn."""
+        """Load persisted state (if any) and start a new turn.
+
+        Per-turn adapter inputs (``user_input`` and ``adapter_metadata``) are
+        carried over from ``deps.state`` onto the loaded state — they describe
+        *this* turn, not the persisted history.
+        """
         initial_state = deps.state
         user_input = initial_state.user_input
+        adapter_metadata = initial_state.adapter_metadata
 
         if self._persistence:
             loaded = await self._persistence.load_state()
@@ -97,6 +103,7 @@ class AgentAdapter(Agent[StateDeps[SearchState], str]):
                 logger.debug("AgentAdapter: Resuming from previous state", run_id=self._persistence.run_id)
                 initial_state = loaded
                 initial_state.user_input = user_input
+                initial_state.adapter_metadata = adapter_metadata
 
         if not initial_state.memory.current_turn or initial_state.memory.current_turn.user_question != user_input:
             initial_state.memory.start_turn(user_input)

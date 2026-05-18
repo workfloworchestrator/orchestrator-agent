@@ -19,8 +19,12 @@ details).  Setup tools (filters, grouping, etc.) return plain types and are
 *not* wrapped in a ToolArtifact.
 """
 
+from typing import Any, Literal
+
 from orchestrator.search.query.results import VisualizationType
 from pydantic import BaseModel, Field
+
+FormFieldType = Literal["text", "int", "float", "bool", "select", "multiselect", "date", "uuid"]
 
 
 class ToolArtifact(BaseModel):
@@ -56,3 +60,37 @@ class ExportArtifact(ToolArtifact):
 
     query_id: str
     download_url: str
+
+
+class FormField(BaseModel):
+    """One field in a workflow form, derived from a JSON-Schema property."""
+
+    name: str
+    label: str
+    type: FormFieldType
+    required: bool = True
+    value: Any | None = None
+    options: list[dict[str, str]] | None = None
+    help_text: str | None = None
+    error: str | None = None
+    suggested_value: Any | None = None
+
+
+class RenderFormArtifact(ToolArtifact):
+    """A form page to be rendered by a surface adapter (Slack Block Kit, etc.)."""
+
+    form_id: str
+    title: str
+    fields: list[FormField]
+    submit_label: str = "Submit"
+    cancel_label: str | None = "Cancel"
+
+
+class ConfirmRequestArtifact(ToolArtifact):
+    """A confirmation prompt summarising accumulated form pages before commit."""
+
+    request_id: str
+    title: str
+    summary: str | dict[str, Any]
+    confirm_label: str = "Confirm"
+    cancel_label: str = "Cancel"

@@ -56,6 +56,30 @@ class AgentSettings(BaseSettings):
     DATABASE_URI: str = Field(default="", description="PostgreSQL connection URI for WFO database")
     BASE_URL: str = Field(default="http://localhost:8080", description="Public URL of this agent service")
     ORCHESTRATOR_API_URL: str = Field(default="http://localhost:8080", description="URL of the orchestrator-core API")
+    WFO_CORE_MCP_URL: str = Field(
+        default="http://localhost:8000/mcp/",
+        description="URL of the orchestrator-core MCP server (used by the workflow form-fill skill)",
+    )
+    IMS_AGENT_A2A_URL: str = Field(
+        default="",
+        description="A2A base URL of the IMS domain agent. Empty disables the ims_lookup skill.",
+    )
+    CIM_AGENT_A2A_URL: str = Field(
+        default="",
+        description="A2A base URL of the CIM domain agent. Empty disables the incident_lookup skill.",
+    )
+    JIRA_AGENT_A2A_URL: str = Field(
+        default="",
+        description="A2A base URL of the Jira domain agent. Empty disables the jira_operations skill.",
+    )
+    TELEMETRY_AGENT_A2A_URL: str = Field(
+        default="",
+        description="A2A base URL of the telemetry-agent (Influx). Empty disables the telemetry_query skill.",
+    )
+    ALARMING_AGENT_A2A_URL: str = Field(
+        default="",
+        description="A2A base URL of the alarming-agent (Zabbix). Empty disables the alarm_query skill.",
+    )
     AGENT_MODEL: str = Field(default="openai:gpt-4o", description="LLM model for the agent")
     AGENT_API_BASE: str | None = Field(
         default=None, description="Custom base URL for the LLM provider (OpenAI-compatible or Azure endpoint)"

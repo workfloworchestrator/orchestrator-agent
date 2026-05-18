@@ -17,8 +17,9 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, AsyncIterator
 
 import structlog
-from pydantic_ai import Agent
+from pydantic_ai import Agent, AgentRunResult
 from pydantic_ai.ag_ui import StateDeps
+from pydantic_ai.run import AgentRunResultEvent
 
 from orchestrator_agent.events import (
     PlanCreatedTaskValue,
@@ -27,9 +28,9 @@ from orchestrator_agent.events import (
     make_step_active_event,
 )
 from orchestrator_agent.memory import MemoryScope, ToolStep
-from orchestrator_agent.prompts import get_planning_prompt
+from orchestrator_agent.prompts import get_planning_prompt, get_synthesis_prompt
 from orchestrator_agent.skill_runner import SkillRunner
-from orchestrator_agent.state import ExecutionPlan, SearchState, Task, TaskAction, TaskStatus
+from orchestrator_agent.state import ExecutionPlan, FinalAnswer, SearchState, Task, TaskAction, TaskStatus
 from orchestrator_agent.utils import log_agent_request, log_execution_plan
 
 if TYPE_CHECKING:
@@ -53,11 +54,13 @@ class Planner:
     debug: bool = False
 
     def __post_init__(self) -> None:
+        # output_type is overridden per call: ExecutionPlan for the planning
+        # phase, FinalAnswer for the synthesis phase.
         self._agent = Agent(
             model=self.model,
             deps_type=StateDeps[SearchState],
             output_type=ExecutionPlan,
-            name="create_execution_plan",
+            name="planner",
             retries=2,
         )
 
@@ -88,8 +91,14 @@ class Planner:
 
         return plan
 
-    async def _run_tasks(self, ctx: RunContext, tasks: list[Task]) -> AsyncIterator[Any]:
-        """Execute tasks sequentially, yielding events. Sets task.status on each."""
+    async def _run_tasks(
+        self, ctx: RunContext, tasks: list[Task], task_results: list[tuple[Task, str]]
+    ) -> AsyncIterator[Any]:
+        """Execute tasks sequentially, yielding events. Sets task.status on each.
+
+        Appends ``(task, final_text)`` for each successful task to
+        ``task_results`` so the synthesis pass can read them.
+        """
         for task in tasks:
             skill = self.skills.get(task.action_type)
             if not skill:
@@ -107,6 +116,8 @@ class Planner:
                 async for event in runner.run(ctx, reasoning=task.reasoning, planned=task.planned):
                     yield event
                 task.status = TaskStatus.COMPLETED
+                if runner._last_run_result is not None:
+                    task_results.append((task, str(runner._last_run_result.output)))
             except Exception as e:
                 logger.error(f"Task failed: {task.action_type}", error=str(e))
                 task.status = TaskStatus.FAILED
@@ -117,26 +128,66 @@ class Planner:
                 )
                 break
 
+    async def _synthesize(
+        self, ctx: RunContext, tasks: list[Task], task_results: list[tuple[Task, str]]
+    ) -> AsyncIterator[Any]:
+        """Synthesis pass: produce a final answer from the executed plan's results.
+
+        Reuses the planner agent with ``FinalAnswer`` output. Skipped on
+        single-task plans — the task's own result (artifact or text) is the
+        answer, and adding a synthesizer reply on top would be redundant.
+        """
+        if len(tasks) <= 1:
+            return
+
+        ctx.state.memory.start_step("Synthesizer")
+        yield make_step_active_event("Synthesizer")
+
+        prompt = get_synthesis_prompt(ctx.state, tasks, task_results)
+        message_history = ctx.state.memory.get_message_history(max_turns=5, scope=MemoryScope.FULL)
+
+        if self.debug:
+            log_agent_request("Synthesizer", prompt, message_history)
+
+        result = await self._agent.run(
+            instructions=prompt,
+            message_history=message_history,
+            deps=StateDeps(ctx.state),
+            output_type=FinalAnswer,
+        )
+
+        answer = result.output.answer if isinstance(result.output, FinalAnswer) else str(result.output)
+        yield AgentRunResultEvent(result=AgentRunResult(output=answer))
+
     async def execute(self, ctx: RunContext, *, target_action: TaskAction | None = None) -> AsyncIterator[Any]:
-        """Create and execute a plan, streaming all events.
+        """Create and execute a plan, then synthesise a final answer if needed.
 
         Args:
             ctx: Current run context
-            target_action: If set, skip planning and execute this single action directly
+            target_action: If set, skip planning and execute this single action directly.
+                No synthesis runs in this path — the surface explicitly named the skill,
+                so its result is the answer.
         """
         if target_action:
             tasks = [Task(action_type=target_action, reasoning="", planned=False)]
-        else:
-            yield make_step_active_event("Planner")
-            tasks = (await self._create_plan(ctx)).tasks
+            task_results: list[tuple[Task, str]] = []
+            async for event in self._run_tasks(ctx, tasks, task_results):
+                yield event
+            return
 
-            # Yield full plan so frontend can render all steps as pending
-            plan_tasks = [
-                PlanCreatedTaskValue(skill_name=skill.name, reasoning=task.reasoning)
-                for task in tasks
-                if (skill := self.skills.get(task.action_type))
-            ]
-            yield make_plan_created_event(plan_tasks)
+        yield make_step_active_event("Planner")
+        tasks = (await self._create_plan(ctx)).tasks
 
-        async for event in self._run_tasks(ctx, tasks):
+        plan_tasks = [
+            PlanCreatedTaskValue(skill_name=skill.name, reasoning=task.reasoning)
+            for task in tasks
+            if (skill := self.skills.get(task.action_type))
+        ]
+        yield make_plan_created_event(plan_tasks)
+
+        task_results = []
+        async for event in self._run_tasks(ctx, tasks, task_results):
+            yield event
+
+        async for event in self._synthesize(ctx, tasks, task_results):
             yield event
