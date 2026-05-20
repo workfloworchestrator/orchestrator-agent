@@ -38,15 +38,14 @@ from a2a.types import (
     TextPart,
 )
 from fastapi import FastAPI
-from pydantic_ai.ag_ui import StateDeps
-from pydantic_ai.messages import FunctionToolResultEvent, PartDeltaEvent, ToolReturnPart
-from pydantic_ai.run import AgentRunResultEvent
-
 from orchestrator_agent.agent import AgentAdapter
 from orchestrator_agent.artifacts import ToolArtifact
 from orchestrator_agent.memory import FALLBACK_MESSAGE, collect_tool_descriptions
 from orchestrator_agent.skills import SKILLS
 from orchestrator_agent.state import SearchState, TaskAction
+from pydantic_ai.ag_ui import StateDeps
+from pydantic_ai.messages import FunctionToolResultEvent, PartDeltaEvent, ToolReturnPart
+from pydantic_ai.run import AgentRunResultEvent
 
 logger = structlog.get_logger(__name__)
 
@@ -95,8 +94,8 @@ class WFOAgentExecutor(AgentExecutor):
 
         deps = StateDeps(SearchState(user_input=user_input))
 
-        from orchestrator.db import db
-        from orchestrator.db.models import AgentRunTable
+        from orchestrator.core.db import db
+        from orchestrator.core.db.models import AgentRunTable
 
         try:
             deps.state.run_id = uuid.uuid4()

@@ -6,9 +6,8 @@ import os
 
 os.environ.setdefault("DATABASE_URI", "postgresql://test:test@localhost:5432/test")
 
-from orchestrator.search.core.types import EntityType, QueryOperation
-from orchestrator.search.query.queries import CountQuery, SelectQuery
-
+from orchestrator.core.search.core.types import EntityType, QueryOperation
+from orchestrator.core.search.query.queries import CountQuery, SelectQuery
 from orchestrator_agent.state import SearchState
 from orchestrator_agent.tools.filters import PathsResponse, ensure_query_initialized
 
@@ -53,8 +52,8 @@ class TestEnsureQueryInitialized:
         assert isinstance(state.query, CountQuery)
 
     def test_preserves_filters_from_existing_query(self):
-        from orchestrator.search.core.types import UIType
-        from orchestrator.search.filters import EqualityFilter, FilterTree, PathFilter
+        from orchestrator.core.search.core.types import UIType
+        from orchestrator.core.search.filters import EqualityFilter, FilterTree, PathFilter
 
         state = SearchState(user_input="test")
         ensure_query_initialized(state, EntityType.SUBSCRIPTION)
@@ -72,8 +71,8 @@ class TestEnsureQueryInitialized:
         assert state.query.filters is not None
 
     def test_uses_pending_filters(self):
-        from orchestrator.search.core.types import UIType
-        from orchestrator.search.filters import EqualityFilter, FilterTree, PathFilter
+        from orchestrator.core.search.core.types import UIType
+        from orchestrator.core.search.filters import EqualityFilter, FilterTree, PathFilter
 
         state = SearchState(user_input="test")
         state.pending_filters = FilterTree(

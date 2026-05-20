@@ -15,7 +15,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from orchestrator.search.core.types import EntityType
+from orchestrator.core.search.core.types import EntityType
 from pydantic import Field
 from pydantic_settings import BaseSettings
 

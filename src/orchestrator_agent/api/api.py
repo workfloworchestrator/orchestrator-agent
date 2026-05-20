@@ -12,7 +12,6 @@
 # limitations under the License.
 
 from fastapi.routing import APIRouter
-
 from orchestrator_agent.api.endpoints import agent, health
 
 api_router = APIRouter()

@@ -14,21 +14,20 @@
 from typing import Any
 
 import structlog
-from orchestrator.db import db
-from orchestrator.search.core.types import EntityType, FilterOp, QueryOperation, UIType
-from orchestrator.search.filters import FilterTree
-from orchestrator.search.filters.definitions import TypeDefinition, generate_definitions
-from orchestrator.search.query.builder import ComponentInfo, LeafInfo, build_paths_query, process_path_rows
-from orchestrator.search.query.exceptions import PathNotFoundError, QueryValidationError
-from orchestrator.search.query.queries import AggregateQuery, CountQuery, SelectQuery
-from orchestrator.search.query.validation import validate_filter_tree
+from orchestrator.core.db import db
+from orchestrator.core.search.core.types import EntityType, FilterOp, QueryOperation, UIType
+from orchestrator.core.search.filters import FilterTree
+from orchestrator.core.search.filters.definitions import TypeDefinition, generate_definitions
+from orchestrator.core.search.query.builder import ComponentInfo, LeafInfo, build_paths_query, process_path_rows
+from orchestrator.core.search.query.exceptions import PathNotFoundError, QueryValidationError
+from orchestrator.core.search.query.queries import AggregateQuery, CountQuery, SelectQuery
+from orchestrator.core.search.query.validation import validate_filter_tree
+from orchestrator_agent.state import SearchState
 from pydantic import BaseModel, ConfigDict
 from pydantic_ai import RunContext
 from pydantic_ai.ag_ui import StateDeps
 from pydantic_ai.exceptions import ModelRetry
 from pydantic_ai.toolsets import FunctionToolset
-
-from orchestrator_agent.state import SearchState
 
 logger = structlog.get_logger(__name__)
 
@@ -92,7 +91,7 @@ async def _list_paths(
 ) -> PathsResponse:
     """Query available filter paths from the database.
 
-    Inlined from orchestrator.api.api_v1.endpoints.search.list_paths to avoid
+    Inlined from orchestrator.core.api.api_v1.endpoints.search.list_paths to avoid
     depending on the API layer.
     """
     stmt = build_paths_query(entity_type=entity_type, prefix=prefix, q=q)
@@ -106,7 +105,7 @@ async def _list_paths(
 async def _get_definitions() -> dict[UIType, TypeDefinition]:
     """Get type definitions with operator mappings.
 
-    Inlined from orchestrator.api.api_v1.endpoints.search.get_definitions.
+    Inlined from orchestrator.core.api.api_v1.endpoints.search.get_definitions.
     """
     return generate_definitions()
 

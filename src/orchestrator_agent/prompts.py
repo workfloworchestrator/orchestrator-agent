@@ -13,8 +13,7 @@
 
 from textwrap import dedent
 
-from orchestrator.search.core.types import EntityType
-
+from orchestrator.core.search.core.types import EntityType
 from orchestrator_agent import tools
 from orchestrator_agent.state import SearchState
 

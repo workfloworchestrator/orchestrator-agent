@@ -14,7 +14,7 @@
 import structlog
 from fastapi import APIRouter
 from fastapi.responses import Response
-from orchestrator.db import db
+from orchestrator.core.db import db
 from sqlalchemy import text
 from sqlalchemy.exc import OperationalError
 from starlette.status import HTTP_200_OK, HTTP_503_SERVICE_UNAVAILABLE

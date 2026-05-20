@@ -14,11 +14,10 @@
 from dataclasses import dataclass
 
 from ag_ui.core import CustomEvent
-from pydantic import Field
-from typing_extensions import TypedDict
-
 from orchestrator_agent.state import SearchState
 from orchestrator_agent.utils import current_timestamp_ms
+from pydantic import Field
+from typing_extensions import TypedDict
 
 
 class AgentStepActiveValue(TypedDict, total=False):

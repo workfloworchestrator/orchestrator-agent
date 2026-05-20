@@ -32,7 +32,6 @@ from a2a.types import (
     TextPart,
 )
 from ag_ui.core import RunAgentInput, ToolCallResultEvent, UserMessage
-
 from orchestrator_agent.adapters.a2a import A2A_SKILLS, WFOAgentExecutor, _build_state_fallback
 from orchestrator_agent.adapters.ag_ui import AGUIEventStream, AGUIWorker, _AGUIAdapter
 from orchestrator_agent.adapters.mcp import MCPApp, MCPWorker
@@ -621,7 +620,7 @@ class TestAGUIWorkerRunRequest:
     @patch("orchestrator_agent.adapters.ag_ui.PostgresStatePersistence")
     @patch("orchestrator_agent.adapters.ag_ui._AGUIAdapter")
     async def test_run_request_existing_run_skips_insert(self, mock_adapter_cls, mock_persistence_cls):
-        from orchestrator.db.models import AgentRunTable
+        from orchestrator.core.db.models import AgentRunTable
 
         agent = MagicMock()
         db_session = MagicMock()

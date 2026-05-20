@@ -16,12 +16,11 @@ os.environ.setdefault("DATABASE_URI", "postgresql://test:test@localhost:5432/tes
 
 import pytest
 from ag_ui.core import RunAgentInput, UserMessage
-from pydantic_ai.messages import FunctionToolResultEvent, ToolReturnPart
-from pydantic_ai.run import AgentRunResult, AgentRunResultEvent
-
 from orchestrator_agent.artifacts import ToolArtifact
 from orchestrator_agent.events import AgentStepActiveEvent, AgentStepActiveValue
 from orchestrator_agent.utils import current_timestamp_ms
+from pydantic_ai.messages import FunctionToolResultEvent, ToolReturnPart
+from pydantic_ai.run import AgentRunResult, AgentRunResultEvent
 
 pytestmark = pytest.mark.search
 

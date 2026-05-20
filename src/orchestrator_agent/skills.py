@@ -14,8 +14,6 @@
 from dataclasses import dataclass
 from typing import Any, Callable
 
-from pydantic_ai.toolsets import AbstractToolset
-
 from orchestrator_agent.memory import MemoryScope
 from orchestrator_agent.prompts import (
     get_aggregation_execution_prompt,
@@ -31,6 +29,7 @@ from orchestrator_agent.tools import (
     result_actions_toolset,
     search_execution_toolset,
 )
+from pydantic_ai.toolsets import AbstractToolset
 
 
 @dataclass(frozen=True)

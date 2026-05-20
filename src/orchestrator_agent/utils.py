@@ -35,16 +35,16 @@ def log_execution_plan(plan: "ExecutionPlan | None") -> None:
         print("\n[EXECUTION PLAN] None")  # noqa: T201
         return
 
-    print(f"\n{'='*80}")  # noqa: T201
+    print(f"\n{'=' * 80}")  # noqa: T201
     print(f"[EXECUTION PLAN] {len(plan.tasks)} tasks")  # noqa: T201
-    print(f"{'='*80}")  # noqa: T201
+    print(f"{'=' * 80}")  # noqa: T201
 
     for i, task in enumerate(plan.tasks):
-        print(f"\n  [{i+1}] {task.status.value.upper()}")  # noqa: T201
+        print(f"\n  [{i + 1}] {task.status.value.upper()}")  # noqa: T201
         print(f"    Action: {task.action_type.value}")  # noqa: T201
         print(f"    Reasoning: {task.reasoning}")  # noqa: T201
 
-    print(f"\n{'='*80}\n")  # noqa: T201
+    print(f"\n{'=' * 80}\n")  # noqa: T201
 
 
 def log_agent_request(node_name: str, instructions: str, message_history: list) -> None:
@@ -55,9 +55,9 @@ def log_agent_request(node_name: str, instructions: str, message_history: list) 
         instructions: System instructions/prompt
         message_history: List of ModelRequest/ModelResponse messages
     """
-    print(f"\n{'='*80}")  # noqa: T201
+    print(f"\n{'=' * 80}")  # noqa: T201
     print(f"[{node_name}] LLM Request")  # noqa: T201
-    print(f"{'='*80}")  # noqa: T201
+    print(f"{'=' * 80}")  # noqa: T201
 
     # Print system instructions
     print("\n[INSTRUCTIONS]")  # noqa: T201
@@ -77,4 +77,4 @@ def log_agent_request(node_name: str, instructions: str, message_history: list) 
     else:
         print("\n[MESSAGE HISTORY] (empty)")  # noqa: T201
 
-    print(f"\n{'='*80}\n")  # noqa: T201
+    print(f"\n{'=' * 80}\n")  # noqa: T201

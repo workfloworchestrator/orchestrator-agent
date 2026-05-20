@@ -13,11 +13,10 @@
 
 from unittest.mock import patch
 
+from orchestrator_agent.settings import AgentSettings
 from pydantic_ai.models.openai import OpenAIChatModel
 from pydantic_ai.providers.azure import AzureProvider
 from pydantic_ai.providers.openai import OpenAIProvider
-
-from orchestrator_agent.settings import AgentSettings
 
 
 def test_create_model_returns_string_when_no_custom_config():

@@ -17,19 +17,17 @@ from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any, AsyncIterator
 
 import structlog
+from orchestrator_agent.events import RunContext, make_step_active_event
+from orchestrator_agent.state import SearchState
+from orchestrator_agent.utils import log_agent_request
 from pydantic_ai import Agent
 from pydantic_ai.ag_ui import StateDeps
 from pydantic_ai.messages import FunctionToolCallEvent, PartDeltaEvent
 from pydantic_ai.run import AgentRunResultEvent
 
-from orchestrator_agent.events import RunContext, make_step_active_event
-from orchestrator_agent.state import SearchState
-from orchestrator_agent.utils import log_agent_request
-
 if TYPE_CHECKING:
-    from pydantic_ai.models import Model
-
     from orchestrator_agent.skills import Skill
+    from pydantic_ai.models import Model
 
 logger = structlog.get_logger(__name__)
 

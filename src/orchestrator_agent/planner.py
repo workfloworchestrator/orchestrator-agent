@@ -17,9 +17,6 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, AsyncIterator
 
 import structlog
-from pydantic_ai import Agent
-from pydantic_ai.ag_ui import StateDeps
-
 from orchestrator_agent.events import (
     PlanCreatedTaskValue,
     RunContext,
@@ -31,11 +28,12 @@ from orchestrator_agent.prompts import get_planning_prompt
 from orchestrator_agent.skill_runner import SkillRunner
 from orchestrator_agent.state import ExecutionPlan, SearchState, Task, TaskAction, TaskStatus
 from orchestrator_agent.utils import log_agent_request, log_execution_plan
+from pydantic_ai import Agent
+from pydantic_ai.ag_ui import StateDeps
 
 if TYPE_CHECKING:
-    from pydantic_ai.models import Model
-
     from orchestrator_agent.skills import Skill
+    from pydantic_ai.models import Model
 
 logger = structlog.get_logger(__name__)
 
@@ -83,7 +81,7 @@ class Planner:
         logger.info(
             "Planner: Plan created",
             num_tasks=len(plan.tasks),
-            tasks=[f"{i+1}. {t.reasoning}" for i, t in enumerate(plan.tasks)],
+            tasks=[f"{i + 1}. {t.reasoning}" for i, t in enumerate(plan.tasks)],
         )
 
         return plan
