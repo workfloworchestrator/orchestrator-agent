@@ -14,6 +14,7 @@
 from orchestrator_agent.adapters.a2a import A2AAdapter, WFOAgentExecutor
 from orchestrator_agent.adapters.ag_ui import AGUIEventStream, AGUIWorker
 from orchestrator_agent.adapters.mcp import MCPApp, MCPWorker
+from orchestrator_agent.adapters.openai import OpenAIAdapter
 from orchestrator_agent.adapters.stream import NO_RESULTS, collect_stream_output
 
 __all__ = [
@@ -23,6 +24,7 @@ __all__ = [
     "AGUIWorker",
     "MCPApp",
     "MCPWorker",
+    "OpenAIAdapter",
     "NO_RESULTS",
     "collect_stream_output",
 ]

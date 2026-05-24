@@ -34,6 +34,7 @@ from a2a.types import (
     AgentCapabilities,
     AgentCard,
     AgentSkill,
+    Artifact,
     DataPart,
     Part,
     TextPart,
@@ -140,18 +141,30 @@ class WFOAgentExecutor(AgentExecutor):
 
                 if isinstance(event, FunctionToolResultEvent):
                     result = event.result
-                    if isinstance(result, ToolReturnPart) and isinstance(result.metadata, ToolArtifact):
-                        # Emit the artifact as a DataPart carrying the structured
-                        # payload (no JSON-string round-trip) and tag the Artifact's
-                        # ``name`` with the ToolArtifact class so surface adapters
-                        # can dispatch on type rather than shape-sniff.
-                        artifact_kind = type(result.metadata).__name__
-                        artifact_data = result.metadata.model_dump(mode="json")
-                        await updater.add_artifact(
-                            name=artifact_kind,
-                            parts=[Part(root=DataPart(data=artifact_data))],
-                        )
-                        artifact_count += 1
+                    if isinstance(result, ToolReturnPart):
+                        if isinstance(result.metadata, ToolArtifact):
+                            # Our own ToolArtifact: serialize as DataPart with the
+                            # subclass name as discriminator. ``by_alias=True`` so
+                            # field aliases (e.g. ``form_schema`` → wire name
+                            # ``schema``) match what the downstream renderer
+                            # expects — pydantic-forms reads ``schema``.
+                            artifact_kind = type(result.metadata).__name__
+                            artifact_data = result.metadata.model_dump(mode="json", by_alias=True)
+                            await updater.add_artifact(
+                                name=artifact_kind,
+                                parts=[Part(root=DataPart(data=artifact_data))],
+                            )
+                            artifact_count += 1
+                        elif isinstance(result.metadata, Artifact):
+                            # Artifact returned by a delegated remote A2A agent —
+                            # forward parts and name as-is so the surface receives
+                            # the same shape the remote agent emitted.
+                            await updater.add_artifact(
+                                name=result.metadata.name,
+                                parts=list(result.metadata.parts),
+                                metadata=result.metadata.metadata,
+                            )
+                            artifact_count += 1
 
                 if isinstance(event, AgentRunResultEvent):
                     final_output = str(event.result.output)

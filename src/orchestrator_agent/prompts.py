@@ -11,7 +11,6 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-import json
 from textwrap import dedent
 from typing import Any
 
@@ -148,67 +147,6 @@ def get_text_response_prompt(state: SearchState) -> str:
 
         {context}
     """
-    ).strip()
-
-
-def get_workflow_form_fill_prompt(state: SearchState) -> str:
-    """Prompt for the WORKFLOW_FORM_FILL skill.
-
-    Routes between four tools based on whether a session is active and what
-    the user/adapter has provided this turn.
-    """
-    context = state.memory.format_context_for_llm(state)
-    session = state.form_fill
-    submission = (state.adapter_metadata or {}).get("form_submission")
-
-    session_json = session.model_dump_json(indent=2) if session else "null"
-    submission_json = json.dumps(submission, indent=2) if submission else "null"
-
-    return dedent(
-        f"""
-        # Workflow Form Fill
-
-        {AGENT_CONTEXT}
-
-        ## Your Task
-        Drive an orchestrator-core workflow form to completion.
-
-        ## Tools
-        - `{tools.start_workflow_form.__name__}(workflow_key)` — begin a new form. Use when no session is active.
-        - `{tools.submit_workflow_page.__name__}(values=None)` — submit the current page and advance. Reads the submission's `values` when omitted.
-        - `{tools.confirm_and_create_workflow.__name__}()` — start the workflow once the user has confirmed the summary.
-        - `{tools.cancel_workflow_form.__name__}()` — abort and clear the session.
-
-        ## How to choose
-        1. If no active session AND the user just expressed intent: call `{tools.start_workflow_form.__name__}` with the inferred `workflow_key` (snake_case, e.g. `create_lightpath`).
-        2. If there is an active session and the form submission's `action == "submit"`: call `{tools.submit_workflow_page.__name__}` (no args; it reads the submission's values).
-        3. If the session is in `summary` and the submission's `action == "confirm"` (or user typed yes): call `{tools.confirm_and_create_workflow.__name__}`.
-        4. If the submission says cancel: call `{tools.cancel_workflow_form.__name__}`.
-
-        ## Response style after the tool call
-        The artifact (form / confirmation prompt) is *already* shown to the user — do NOT
-        describe what they can already see. Reply rules:
-
-        - When you called `{tools.start_workflow_form.__name__}` or `{tools.submit_workflow_page.__name__}`
-          and the tool emitted a form / confirmation artifact: reply with **exactly the empty
-          string** (no text at all). The artifact is the message.
-        - When you called `{tools.confirm_and_create_workflow.__name__}`: reply with the
-          tool's return_value **verbatim** — it contains the `process_id` the user needs.
-          Do not rephrase, summarize, or omit the process_id.
-        - When you called `{tools.cancel_workflow_form.__name__}`: reply with the tool's
-          return_value verbatim.
-
-        ## Current session
-        ```
-        form_fill = {session_json}
-        form_submission = {submission_json}
-        user_input = {state.user_input!r}
-        ```
-
-        ---
-
-        {context}
-        """
     ).strip()
 
 

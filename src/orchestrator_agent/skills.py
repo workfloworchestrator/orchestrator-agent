@@ -22,7 +22,6 @@ from orchestrator_agent.prompts import (
     get_result_actions_prompt,
     get_search_execution_prompt,
     get_text_response_prompt,
-    get_workflow_form_fill_prompt,
 )
 from orchestrator_agent.state import SearchState, TaskAction
 from orchestrator_agent.tools import (
@@ -31,7 +30,7 @@ from orchestrator_agent.tools import (
     filter_building_toolset,
     result_actions_toolset,
     search_execution_toolset,
-    workflow_forms_toolset,
+    workflow_form_fill_handler,
 )
 from orchestrator_agent.tools.a2a_delegate import DelegateHandler, make_a2a_delegate_handler
 
@@ -45,12 +44,12 @@ class Skill:
     surface that metadata. The difference between subtypes is *how the
     skill is executed*:
 
-    - :class:`InternalSkill` — the skill runs inside this agent: a pydantic-ai
-      Agent is spun up with the skill's toolsets and prompt, the LLM picks
-      tool calls.
-    - :class:`DelegationSkill` — the skill forwards a single query to a
-      remote domain agent over A2A. No LLM, no toolset, no prompt — the
-      planner already chose this skill and produced the query.
+    - :class:`InternalSkill` — runs inside this agent via a pydantic-ai
+      Agent with the skill's toolsets and prompt; the LLM picks tool calls.
+    - :class:`DelegationSkill` — direct-dispatch: a handler is called with
+      ``(state, reasoning)`` and its return is the skill's result. Used
+      both for A2A round-trips to a remote domain agent and for in-process
+      deterministic-routing skills (e.g. workflow form-fill).
     """
 
     action: TaskAction
@@ -70,11 +69,25 @@ class InternalSkill(Skill):
 
 @dataclass(frozen=True)
 class DelegationSkill(Skill):
-    """A skill that delegates to a domain agent via A2A.
+    """A skill executed by direct-dispatch — no LLM in the routing loop.
 
-    The handler receives ``(state, query)`` and performs the A2A round-trip.
-    ``query`` is ``Task.reasoning`` produced by the planner — a focused
-    English question phrased for the domain agent.
+    The handler receives ``(state, reasoning)`` and returns a ``ToolReturn``
+    directly. Two flavours of handler are supported under the same shape:
+
+    - **A2A delegation** (see :func:`make_a2a_delegate_handler`): handler
+      does the round-trip to a remote domain agent. ``reasoning`` is
+      forwarded verbatim as the remote's question.
+    - **In-process direct-dispatch** (see
+      :func:`orchestrator_agent.tools.workflow_forms.workflow_form_fill_handler`):
+      handler routes among deterministic tool implementations based on
+      ``state``. ``reasoning`` is typically ignored. The handler may still
+      use the LLM internally for narrow tasks (e.g. one structured-output
+      call to extract a workflow_key), but the *routing* is in code.
+
+    Compared to :class:`InternalSkill`, no pydantic-ai Agent is spun up
+    per skill turn — so no risk of OpenAI rejecting an empty post-tool
+    assistant message when the tool already produced the artifact the user
+    needs.
     """
 
     handler: DelegateHandler
@@ -117,14 +130,13 @@ SKILLS: dict[TaskAction, Skill] = {
         toolsets=[],
         get_prompt=get_text_response_prompt,
     ),
-    TaskAction.WORKFLOW_FORM_FILL: InternalSkill(
+    TaskAction.WORKFLOW_FORM_FILL: DelegationSkill(
         action=TaskAction.WORKFLOW_FORM_FILL,
         name="Workflow Form Fill",
         description="Walk a user through a multi-page workflow form and start the workflow",
         tags=["workflow", "form"],
         memory_scope=MemoryScope.FULL,
-        toolsets=[workflow_forms_toolset],
-        get_prompt=get_workflow_form_fill_prompt,
+        handler=workflow_form_fill_handler,
     ),
     TaskAction.IMS_LOOKUP: DelegationSkill(
         action=TaskAction.IMS_LOOKUP,

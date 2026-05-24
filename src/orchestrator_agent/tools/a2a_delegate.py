@@ -23,15 +23,18 @@ own kagent agent. This module provides:
   planner produced the query — the handler just executes the A2A call.
   No second LLM, no toolset, no prompt.
 
-Artifact forwarding is intentionally not wired yet — current delegates
-return plain text. When a domain agent eventually emits structured artifacts
-that need to surface to Slack / AG-UI, change the ``return ToolReturn(...)``
-line in ``_delegate`` to forward ``artifacts[0]`` as ``metadata``. The client
-already parses them.
+The handler returns a :class:`ToolReturn` whose ``metadata`` is the first
+artifact (for the surface adapter to render as Block Kit / AG-UI) and whose
+``return_value`` is the textual answer the planner will see in its next-turn
+memory. When the remote answered with a structured DataPart only (e.g.
+kagent's ``ask_user`` clarification), we JSON-serialize it into
+``return_value`` so the planner knows what was asked and can correlate the
+user's next reply against it.
 """
 
 from __future__ import annotations
 
+import json
 import uuid
 from typing import Awaitable, Callable
 
@@ -46,6 +49,7 @@ from a2a.types import (
     Role,
     Task,
     TaskArtifactUpdateEvent,
+    TaskState,
     TextPart,
 )
 from pydantic_ai.messages import ToolReturn
@@ -118,17 +122,28 @@ async def call_a2a(
     if result is None:
         return "", []
     final_text = _extract_final_text(result)
-    # Prefer artifacts collected from the event stream; fall back to whatever's on the Task
-    artifacts: list[Artifact] = streamed_artifacts or (
-        list(result.artifacts) if isinstance(result, Task) and result.artifacts else []
-    )
+    artifacts: list[Artifact] = list(streamed_artifacts)
+    if isinstance(result, Task):
+        if not artifacts and result.artifacts:
+            artifacts.extend(result.artifacts)
+        # Non-terminal status (e.g. input-required) carries the agent's response
+        # in ``status.message`` rather than ``artifacts``. Forward it as a
+        # synthesized Artifact so surface adapters can render it the same way.
+        if result.status.state != TaskState.completed and result.status.message is not None:
+            artifacts.append(
+                Artifact(
+                    artifact_id=str(uuid.uuid4()),
+                    name=f"a2a_status_{result.status.state.value}",
+                    parts=list(result.status.message.parts),
+                    metadata={"a2a_state": result.status.state.value},
+                )
+            )
     return final_text, artifacts
 
 
 def _part_text(part: Part) -> str | None:
     """Return the text payload of a Part if it's a TextPart, else None."""
-    root = part.root
-    return getattr(root, "text", None)
+    return getattr(part.root, "text", None)
 
 
 def _message_text(msg: Message | None) -> str:
@@ -141,15 +156,14 @@ def _message_text(msg: Message | None) -> str:
 def _extract_final_text(result: Task | Message) -> str:
     """Pull the user-facing answer out of an A2A response.
 
-    Handles both the standard A2A shape (text on ``Task.status.message``) and
-    kagent's ADK shape (no status message; the agent's reply lives in
-    ``Task.history`` with role=agent).
+    Returns text only. Non-text content (DataParts, e.g. kagent's ``ask_user``)
+    is surfaced as an Artifact by :func:`call_a2a` instead, so the surface
+    adapter can render it.
     """
     if isinstance(result, Message):
         return _message_text(result)
     if text := _message_text(result.status.message):
         return text
-    # kagent ADK fallback: walk history backwards, find last agent message with text.
     for msg in reversed(result.history or []):
         if msg.role == Role.agent and (text := _message_text(msg)):
             return text
@@ -183,23 +197,61 @@ def make_a2a_delegate_handler(
         thread_id = str(state.run_id) if state.run_id else f"delegate-{uuid.uuid4()}"
         final_text, artifacts = await call_a2a(url, thread_id=thread_id, text=query)
 
-        if artifacts:
-            # Forwarding not implemented yet — log so we notice when a delegate
-            # starts emitting structured output that we should pass through.
+        # Forward the first artifact (if any) via ToolReturn.metadata so the
+        # surface adapter can render it. Multi-artifact responses aren't
+        # common from the agents we delegate to; if they become so, ToolReturn
+        # would need a list shape or we'd emit multiple events.
+        first_artifact = artifacts[0] if artifacts else None
+        if len(artifacts) > 1:
             logger.warning(
-                "Domain agent returned artifacts; artifact forwarding is not yet wired",
+                "Domain agent returned multiple artifacts; only the first is forwarded",
                 short_name=short_name,
                 count=len(artifacts),
             )
 
+        # When the remote returned a DataPart-only response (e.g. kagent's
+        # ``ask_user`` clarification), ``_extract_final_text`` yields "". The
+        # planner needs to see *what* was asked, otherwise it can't correlate
+        # the user's next reply against an unanswered question and loops on
+        # the original query. Surface a JSON summary of the first artifact as
+        # the textual response so the planner records it in memory.
+        response_text = final_text or _summarize_artifact(first_artifact)
+
         state.memory.record_tool_step(
             ToolStep(
                 step_type=f"ask_{short_name}",
-                description=f"Delegated to {short_name}: {query[:80]}",
+                description=f"Asked {short_name}: {query[:80]} → {response_text[:300]}",
                 context={"short_name": short_name, "artifact_count": len(artifacts)},
             )
         )
 
-        return ToolReturn(return_value=final_text or "(no response)", metadata=None)
+        return ToolReturn(
+            return_value=response_text or "(no response)",
+            metadata=first_artifact,
+        )
 
     return _delegate
+
+
+def _summarize_artifact(artifact: Artifact | None) -> str:
+    """Best-effort text summary of an Artifact for the planner's memory.
+
+    Prefers TextParts; falls back to JSON-dumping the first DataPart so any
+    structured payload (typically kagent's ``ask_user`` questions/choices)
+    becomes visible to the planner without losing its shape. Surface
+    rendering is unaffected — the full artifact is still forwarded via
+    ``ToolReturn.metadata``.
+    """
+    if artifact is None:
+        return ""
+    for part in artifact.parts:
+        text = getattr(part.root, "text", None)
+        if text:
+            return str(text)
+        data = getattr(part.root, "data", None)
+        if data is not None:
+            try:
+                return json.dumps(data, ensure_ascii=False)
+            except (TypeError, ValueError):
+                return str(data)
+    return ""

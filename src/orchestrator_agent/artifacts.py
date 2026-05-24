@@ -19,12 +19,10 @@ details).  Setup tools (filters, grouping, etc.) return plain types and are
 *not* wrapped in a ToolArtifact.
 """
 
-from typing import Any, Literal
+from typing import Any
 
 from orchestrator.search.query.results import VisualizationType
-from pydantic import BaseModel, Field
-
-FormFieldType = Literal["text", "int", "float", "bool", "select", "multiselect", "date", "uuid"]
+from pydantic import BaseModel, ConfigDict, Field
 
 
 class ToolArtifact(BaseModel):
@@ -62,26 +60,31 @@ class ExportArtifact(ToolArtifact):
     download_url: str
 
 
-class FormField(BaseModel):
-    """One field in a workflow form, derived from a JSON-Schema property."""
-
-    name: str
-    label: str
-    type: FormFieldType
-    required: bool = True
-    value: Any | None = None
-    options: list[dict[str, str]] | None = None
-    help_text: str | None = None
-    error: str | None = None
-    suggested_value: Any | None = None
-
-
 class RenderFormArtifact(ToolArtifact):
-    """A form page to be rendered by a surface adapter (Slack Block Kit, etc.)."""
+    """A form page to be rendered by a schema-aware surface (LibreChat).
+
+    ``form_schema`` (serialized as ``schema``) is the raw pydantic-forms JSON
+    Schema returned by orchestrator-core's ``get_workflow_form`` MCP tool —
+    forwarded verbatim so renderers (the ``pydantic-forms`` npm package,
+    orchestrator-ui) consume it with full fidelity: conditional fields,
+    nested objects, custom widget metadata, the lot.
+
+    ``prefill`` carries LLM-extracted values keyed by field name (see
+    :mod:`orchestrator_agent.tools.form_prefill`). Renderers should apply
+    these as initial values without mutating the schema itself.
+
+    Note on the alias: the Python attribute is named ``form_schema`` to
+    avoid shadowing pydantic's deprecated ``BaseModel.schema()`` method,
+    but the JSON field name is ``schema`` to match what the pydantic-forms
+    renderer expects on the wire.
+    """
+
+    model_config = ConfigDict(populate_by_name=True)
 
     form_id: str
     title: str
-    fields: list[FormField]
+    form_schema: dict[str, Any] = Field(alias="schema")
+    prefill: dict[str, Any] | None = None
     submit_label: str = "Submit"
     cancel_label: str | None = "Cancel"
 

@@ -37,20 +37,12 @@ from orchestrator_agent.tools.search import (
     run_search,
     search_execution_toolset,
 )
-from orchestrator_agent.tools.workflow_forms import (
-    cancel_workflow_form,
-    confirm_and_create_workflow,
-    start_workflow_form,
-    submit_workflow_page,
-    workflow_forms_toolset,
-)
+from orchestrator_agent.tools.workflow_forms import workflow_form_fill_handler
 
 __all__ = [
     "ensure_query_initialized",
     "aggregation_execution_toolset",
     "aggregation_toolset",
-    "cancel_workflow_form",
-    "confirm_and_create_workflow",
     "discover_filter_paths",
     "fetch_entity_details",
     "filter_building_toolset",
@@ -64,7 +56,5 @@ __all__ = [
     "set_filter_tree",
     "set_grouping",
     "set_temporal_grouping",
-    "start_workflow_form",
-    "submit_workflow_page",
-    "workflow_forms_toolset",
+    "workflow_form_fill_handler",
 ]
