@@ -12,6 +12,7 @@
 # limitations under the License.
 
 from textwrap import dedent
+from typing import Any
 
 from orchestrator.search.core.types import EntityType
 
@@ -166,11 +167,52 @@ def get_planning_prompt(state: SearchState) -> str:
         1. **Check available context**: If results already exist from previous turns, you can act on them directly
         2. **Break into tasks**: Each task = one skill execution. Create as many tasks as needed to fulfill the request.
 
-        ## Example
+        ## Skill catalog
+
+        Built-in (WFO core, this agent):
+        - SEARCH — find subscriptions / products / workflows / processes by filters
+        - AGGREGATION — count / sum / avg with grouping
+        - RESULT_ACTIONS — export a query or fetch detailed data for a single entity by ID
+        - TEXT_RESPONSE — general questions about the system or this agent's capabilities
+        - WORKFLOW_FORM_FILL — drive a multi-page workflow form to completion (create / modify / terminate / validate / system tasks)
+
+        Delegated (other domain agents over A2A):
+        - IMS_LOOKUP — IMS network inventory: nodes, services, planned-works
+        - INCIDENT_LOOKUP — CIM customer incidents: read and create
+        - JIRA_OPERATIONS — Jira tickets, customers, locations: read, create, transition, comment, assign
+        - TELEMETRY_QUERY — InfluxDB telemetry: traffic counters, interface state, errors, optical metrics
+        - ALARM_QUERY — Zabbix alarms: events, problems, maintenance windows
+
+        ## Examples
         Request: "Find X and export them"
         Plan: {{"tasks": [{{"action_type": "search", "reasoning": "Search for X"}}, {{"action_type": "result_actions", "reasoning": "Export the results"}}]}}
 
-        Note: Getting detailed data for a single entity (by ID) or preparing an export require a RESULT_ACTIONS task, not SEARCH."""
+        Request: "ik wil een lichtpad" / "create a lightpath" / "I want to start workflow X"
+        Plan: {{"tasks": [{{"action_type": "workflow_form_fill", "reasoning": "User wants to start a workflow; drive the form to completion"}}]}}
+
+        Request: "what's the input/output bps of subscription X over the last hour"
+        Plan: {{"tasks": [{{"action_type": "telemetry_query", "reasoning": "Pure telemetry question; delegate to telemetry agent"}}]}}
+
+        Request: "are there any open alarms about node Y"
+        Plan: {{"tasks": [{{"action_type": "alarm_query", "reasoning": "Pure alarm question; delegate to alarming agent"}}]}}
+
+        Request: "what's the IMS planned maintenance on circuit C-123"
+        Plan: {{"tasks": [{{"action_type": "ims_lookup", "reasoning": "IMS-only lookup"}}]}}
+
+        Request: "what's wrong with subscription X" / "diagnose X"
+        Plan: {{"tasks": [
+          {{"action_type": "search", "reasoning": "Get the subscription details"}},
+          {{"action_type": "telemetry_query", "reasoning": "Check current traffic / interface health"}},
+          {{"action_type": "alarm_query", "reasoning": "Correlate with any open alarms"}},
+          {{"action_type": "jira_operations", "reasoning": "Look for an open ticket about it"}}
+        ]}}
+
+        Notes:
+        - Getting detailed data for a single entity (by ID) or preparing an export require a RESULT_ACTIONS task, not SEARCH.
+        - Any "create / start / I want a [workflow]" intent (English or Dutch) routes to WORKFLOW_FORM_FILL.
+        - Pick the most specific delegated skill; don't route a telemetry question through JIRA_OPERATIONS or vice versa.
+        - For diagnostic / cross-domain investigations, plan multiple delegated tasks in dependency order.
+        - For DELEGATED skills, `reasoning` is forwarded verbatim to the domain agent as its question. Phrase it as a focused, self-contained query that includes every ID / timestamp / filter the domain agent needs."""
 
     return dedent(
         f"""
@@ -186,6 +228,44 @@ def get_planning_prompt(state: SearchState) -> str:
         ---
 
         {context}
+        """
+    ).strip()
+
+
+def get_synthesis_prompt(state: SearchState, tasks: list[Any], task_results: list[tuple[Any, str]]) -> str:
+    """Prompt for the synthesis pass: same agent, fed the executed plan's results.
+
+    Only runs when the plan had more than one task. The synthesizer's job is
+    to weave the per-task results into a coherent user-facing answer. Any
+    artifacts emitted during task execution have already streamed to the
+    surface — the synthesizer is text-only and should refer to them rather
+    than repeat their contents.
+    """
+    pieces: list[str] = []
+    for task, output in task_results:
+        action = task.action_type.value if hasattr(task.action_type, "value") else str(task.action_type)
+        pieces.append(f"- **{action}** ({task.reasoning})\n  result: {output}")
+    body = "\n".join(pieces) if pieces else "(no task results captured)"
+
+    return dedent(
+        f"""
+        # Synthesis
+
+        You previously made a plan and the tasks have now executed.
+
+        ## User's original question
+        {state.user_input!r}
+
+        ## Plan results
+        {body}
+
+        ## Your task
+        Compose ONE coherent answer to the user's question from the results above.
+        Be concise. If artifacts have already been emitted by the executed tasks
+        (forms, tables, charts), reference them rather than repeat their contents
+        (e.g. "the table above shows…", "fill in the form below…"). Do not invent
+        details not present in the results. If the results are insufficient to
+        answer, say so plainly.
         """
     ).strip()
 

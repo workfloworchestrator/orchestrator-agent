@@ -18,9 +18,10 @@ from typing import AsyncIterator
 
 import structlog
 from fastapi import FastAPI
+from fastapi.middleware.cors import CORSMiddleware
 from orchestrator.db import init_database
 
-from orchestrator_agent.adapters import A2AAdapter, MCPApp
+from orchestrator_agent.adapters import A2AAdapter, MCPApp, OpenAIAdapter
 from orchestrator_agent.agent import AgentAdapter
 from orchestrator_agent.api.api import api_router
 from orchestrator_agent.security import AuthMiddleware, create_auth_manager
@@ -41,16 +42,21 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     mcp_app = MCPApp(AgentAdapter(agent_settings.create_model(), debug=agent_settings.AGENT_DEBUG))
     app.mount("/mcp", mcp_app.app)
 
+    openai_adapter = OpenAIAdapter(AgentAdapter(agent_settings.create_model(), debug=agent_settings.AGENT_DEBUG))
+    openai_adapter.add_routes(app)
+
     # Manage adapter lifecycles
     stack = AsyncExitStack()
     await stack.__aenter__()
     await stack.enter_async_context(a2a)
     await stack.enter_async_context(mcp_app)
+    await stack.enter_async_context(openai_adapter)
 
     logger.info(
         "Agent adapters started",
         a2a_url=a2a_url,
         mcp_path="/mcp",
+        openai_path="/v1/chat/completions",
         agent_model=agent_settings.AGENT_MODEL,
     )
 
@@ -63,3 +69,18 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
 app = FastAPI(title="WFO Search Agent", lifespan=lifespan)
 app.include_router(api_router)
 app.add_middleware(AuthMiddleware, auth_manager=create_auth_manager())
+
+# CORS for browser-side artifact renderers (LibreChat fork's Vite dev server
+# on :3090, the containerised api on :3080 reaching us via host.docker.internal).
+# Wide-open in dev; tighten via env when deploying.
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=[
+        "http://localhost:3080",
+        "http://localhost:3090",
+        "http://host.docker.internal:3080",
+    ],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)

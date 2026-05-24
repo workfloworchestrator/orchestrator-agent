@@ -2,7 +2,7 @@
 
 [![Container](https://ghcr-badge.egpl.dev/workfloworchestrator/orchestrator-agent/latest_tag?trim=major&label=container)](https://github.com/workfloworchestrator/orchestrator-agent/pkgs/container/orchestrator-agent)
 
-Standalone WFO search agent for deployment. Exposes the orchestration search agent via AG-UI, A2A, and MCP protocols.
+Standalone WFO search agent for deployment. Exposes the orchestration search agent via OpenAI chat-completions, AG-UI, A2A, and MCP protocols.
 
 ## Quick Start
 
@@ -14,15 +14,32 @@ uv sync
 uv run uvicorn orchestrator_agent.app:app --port 8080
 ```
 
+### Local development against kagent cluster
+
+The planner delegates to declarative domain agents (IMS, Jira, …) that run
+inside the kagent cluster. To exercise that path locally, port-forward the
+agents' A2A endpoints to your host:
+
+```bash
+./scripts/port-forward.sh
+```
+
+This exposes `ims-mcp-agent` on `localhost:9001` and `jira-mcp-agent` on
+`localhost:9002` (matching the `*_AGENT_A2A_URL` entries in `.env`). The
+local orchestrator-agent then delegates to them as if they were directly
+reachable. Requires VPN + `kubectl` context set to the dev cluster.
+
 ## Endpoints
 
 | Path | Protocol | Description |
 | --- | --- | --- |
+| `POST /v1/chat/completions` | OpenAI | Chat-completions endpoint for LibreChat and other OpenAI-compatible clients (streaming SSE; non-streaming title short-circuit when `model=orchestrator-agent-title`) |
 | `POST /agui` | AG-UI | SSE streaming for frontend |
 | `POST /` | A2A | Agent-to-agent JSON-RPC (`message/send`, `message/stream`) |
 | `GET /.well-known/agent.json` | A2A | Agent card discovery |
 | `GET /.well-known/agent-card.json` | A2A | Agent card discovery (alias) |
 | `/mcp` | MCP | Model Context Protocol tools |
+| `GET /queries/{query_id}/results` | REST | Aggregation/search result rows for a `QueryArtifact` (used by client-side renderers) |
 | `GET /health` | REST | Health check |
 
 ## Docker
@@ -100,9 +117,10 @@ The `azure:` prefix on `AGENT_MODEL` (or setting `AGENT_API_VERSION`) selects th
 This repo contains only the agent logic (planner, skills, tools, adapters, state, memory, prompts). The search infrastructure (query engine, filters, retrievers, indexing, DB models) lives in `orchestrator-core` and is imported as a dependency via `orchestrator-core[search]` (along with everything else for now).
 
 ```
-Request ──► AG-UI adapter ──► AgentAdapter.run_stream_events()
-         ──► A2A adapter  ──►   └─► Planner.execute()
-         ──► MCP adapter  ──►         └─► SkillRunner.run()
+Request ──► OpenAI adapter ──► AgentAdapter.run_stream_events()
+         ──► AG-UI adapter  ──►   └─► Planner.execute()
+         ──► A2A adapter    ──►         └─► SkillRunner.run()
+         ──► MCP adapter    ──►
 ```
 
 The **A2A adapter** uses [a2a-sdk](https://github.com/google/a2a-sdk) server primitives (`AgentExecutor`, `DefaultRequestHandler`, `A2AFastAPIApplication`). The SDK handles JSON-RPC routing, SSE streaming, task lifecycle, and agent card serving. The adapter implements a single `WFOAgentExecutor.execute()` method that drives the pydantic-ai event stream and publishes A2A events via `TaskUpdater`.

@@ -144,7 +144,14 @@ class TestWFOAgentExecutor:
     @pytest.mark.asyncio
     @patch("orchestrator.db.db")
     async def test_artifact_emitted_as_a2a_artifact(self, _mock_db, executor):
-        """Artifacts from agent stream become A2A TaskArtifactUpdateEvents."""
+        """Artifacts from agent stream become A2A TaskArtifactUpdateEvents.
+
+        Each ToolArtifact is emitted as an A2A Artifact whose ``name`` is the
+        ToolArtifact subclass and whose single Part is a DataPart with the
+        structured payload (no JSON-string round-trip).
+        """
+        from a2a.types import DataPart
+
         ex, agent = executor
         agent.run_stream_events = MagicMock(
             return_value=mock_event_stream(
@@ -159,16 +166,20 @@ class TestWFOAgentExecutor:
         await ex.execute(ctx, queue)
         events = await _collect_events(queue)
 
-        # Should have: working, artifact, completed
         status_events = [e for e in events if isinstance(e, TaskStatusUpdateEvent)]
         artifact_events = [e for e in events if isinstance(e, TaskArtifactUpdateEvent)]
         assert len(artifact_events) == 1
-        assert artifact_events[0].artifact.parts[0].root.text == SAMPLE_ARTIFACT.model_dump_json()
+        emitted = artifact_events[0].artifact
+        assert emitted.name == type(SAMPLE_ARTIFACT).__name__
+        first_part = emitted.parts[0].root
+        assert isinstance(first_part, DataPart)
+        assert first_part.data == SAMPLE_ARTIFACT.model_dump(mode="json")
         assert status_events[0].status.state == TaskState.working
         assert status_events[-1].status.state == TaskState.completed
-        # Completed message should contain artifact content, not generic "Execution completed"
+        # Completed message is now the final LLM/synthesizer text — generic when
+        # no explicit final answer is supplied by the mock stream.
         completed_text = status_events[-1].status.message.parts[0].root.text
-        assert completed_text == SAMPLE_ARTIFACT.model_dump_json()
+        assert completed_text == "Execution completed"
 
     @pytest.mark.asyncio
     @pytest.mark.parametrize(("skill_id", "expected"), [("search", TaskAction.SEARCH), ("nonexistent", None)])

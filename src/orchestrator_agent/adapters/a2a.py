@@ -34,6 +34,8 @@ from a2a.types import (
     AgentCapabilities,
     AgentCard,
     AgentSkill,
+    Artifact,
+    DataPart,
     Part,
     TextPart,
 )
@@ -45,6 +47,7 @@ from pydantic_ai.run import AgentRunResultEvent
 from orchestrator_agent.agent import AgentAdapter
 from orchestrator_agent.artifacts import ToolArtifact
 from orchestrator_agent.memory import FALLBACK_MESSAGE, collect_tool_descriptions
+from orchestrator_agent.persistence import PostgresStatePersistence
 from orchestrator_agent.skills import SKILLS
 from orchestrator_agent.state import SearchState, TaskAction
 
@@ -92,27 +95,41 @@ class WFOAgentExecutor(AgentExecutor):
         user_input = context.get_user_input()
         message = context.message
         target_action = self._parse_target_action(message) if message else None
-
-        deps = StateDeps(SearchState(user_input=user_input))
+        adapter_metadata: dict[str, Any] = dict(getattr(message, "metadata", None) or {}) if message else {}
 
         from orchestrator.db import db
         from orchestrator.db.models import AgentRunTable
 
         try:
-            deps.state.run_id = uuid.uuid4()
-            agent_run = AgentRunTable(run_id=deps.state.run_id, thread_id=context_id, agent_type="a2a")
+            run_id = uuid.uuid4()
+            agent_run = AgentRunTable(run_id=run_id, thread_id=context_id, agent_type="a2a")
             db.session.add(agent_run)
             db.session.commit()
+
+            persistence = PostgresStatePersistence(thread_id=context_id, run_id=run_id, session=db.session)
+            self.agent._persistence = persistence
+
+            # Pass per-turn inputs via deps; the agent's _prepare_state will load
+            # any persisted state and merge these in. The adapter is skill-agnostic:
+            # it forwards the surface's metadata opaquely and skills pull their own
+            # keys out of it (e.g. form-fill reads adapter_metadata["form_submission"]).
+            initial_state = SearchState(
+                user_input=user_input or "",
+                run_id=run_id,
+                adapter_metadata=adapter_metadata or None,
+            )
+            deps = StateDeps(initial_state)
 
             logger.debug(
                 "A2A execute: starting",
                 task_id=task_id,
                 user_input=user_input[:100] if user_input else "",
                 target_action=target_action,
+                adapter_metadata_keys=list(adapter_metadata.keys()) if adapter_metadata else [],
             )
 
             event_stream = self.agent.run_stream_events(deps=deps, target_action=target_action)
-            artifact_texts: list[str] = []
+            artifact_count = 0
             final_output = ""
 
             async for event in event_stream:
@@ -124,12 +141,30 @@ class WFOAgentExecutor(AgentExecutor):
 
                 if isinstance(event, FunctionToolResultEvent):
                     result = event.result
-                    if isinstance(result, ToolReturnPart) and isinstance(result.metadata, ToolArtifact):
-                        text = result.model_response_str()
-                        await updater.add_artifact(
-                            parts=[Part(root=TextPart(text=text))],
-                        )
-                        artifact_texts.append(text)
+                    if isinstance(result, ToolReturnPart):
+                        if isinstance(result.metadata, ToolArtifact):
+                            # Our own ToolArtifact: serialize as DataPart with the
+                            # subclass name as discriminator. ``by_alias=True`` so
+                            # field aliases (e.g. ``form_schema`` → wire name
+                            # ``schema``) match what the downstream renderer
+                            # expects — pydantic-forms reads ``schema``.
+                            artifact_kind = type(result.metadata).__name__
+                            artifact_data = result.metadata.model_dump(mode="json", by_alias=True)
+                            await updater.add_artifact(
+                                name=artifact_kind,
+                                parts=[Part(root=DataPart(data=artifact_data))],
+                            )
+                            artifact_count += 1
+                        elif isinstance(result.metadata, Artifact):
+                            # Artifact returned by a delegated remote A2A agent —
+                            # forward parts and name as-is so the surface receives
+                            # the same shape the remote agent emitted.
+                            await updater.add_artifact(
+                                name=result.metadata.name,
+                                parts=list(result.metadata.parts),
+                                metadata=result.metadata.metadata,
+                            )
+                            artifact_count += 1
 
                 if isinstance(event, AgentRunResultEvent):
                     final_output = str(event.result.output)
@@ -137,15 +172,12 @@ class WFOAgentExecutor(AgentExecutor):
             logger.debug(
                 "A2A execute: collection complete",
                 task_id=task_id,
-                artifact_count=len(artifact_texts),
+                artifact_count=artifact_count,
                 final_output=final_output[:200] if final_output else "",
                 query_id=str(deps.state.query_id) if deps.state.query_id else None,
             )
 
-            # Prefer artifact content over LLM text (matches collect_stream_output behavior)
-            if artifact_texts:
-                final_output = "\n\n".join(artifact_texts)
-            elif not final_output or final_output == FALLBACK_MESSAGE:
+            if not final_output or final_output == FALLBACK_MESSAGE:
                 final_output = _build_state_fallback(deps.state)
 
             await updater.complete(

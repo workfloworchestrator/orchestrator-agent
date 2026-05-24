@@ -37,6 +37,7 @@ from orchestrator_agent.tools.search import (
     run_search,
     search_execution_toolset,
 )
+from orchestrator_agent.tools.workflow_forms import workflow_form_fill_handler
 
 __all__ = [
     "ensure_query_initialized",
@@ -55,4 +56,5 @@ __all__ = [
     "set_filter_tree",
     "set_grouping",
     "set_temporal_grouping",
+    "workflow_form_fill_handler",
 ]
