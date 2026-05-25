@@ -141,7 +141,7 @@ class TestWFOAgentExecutor:
         return WFOAgentExecutor(agent), agent
 
     @pytest.mark.asyncio
-    @patch("orchestrator.db.db")
+    @patch("orchestrator.core.db.db")
     async def test_artifact_emitted_as_a2a_artifact(self, _mock_db, executor):
         """Artifacts from agent stream become A2A TaskArtifactUpdateEvents."""
         ex, agent = executor
@@ -171,7 +171,7 @@ class TestWFOAgentExecutor:
 
     @pytest.mark.asyncio
     @pytest.mark.parametrize(("skill_id", "expected"), [("search", TaskAction.SEARCH), ("nonexistent", None)])
-    @patch("orchestrator.db.db")
+    @patch("orchestrator.core.db.db")
     async def test_skill_id_routing(self, _mock_db, executor, skill_id, expected):
         ex, agent = executor
         agent.run_stream_events = MagicMock(return_value=mock_event_stream(make_text_result_event("Done")))
@@ -183,7 +183,7 @@ class TestWFOAgentExecutor:
         assert agent.run_stream_events.call_args.kwargs["target_action"] == expected
 
     @pytest.mark.asyncio
-    @patch("orchestrator.db.db")
+    @patch("orchestrator.core.db.db")
     async def test_completed_with_text_output(self, _mock_db, executor):
         """Text-only output results in completed status with message."""
         ex, agent = executor
@@ -199,7 +199,7 @@ class TestWFOAgentExecutor:
         assert status_events[-1].status.message.parts[0].root.text == "Done"
 
     @pytest.mark.asyncio
-    @patch("orchestrator.db.db")
+    @patch("orchestrator.core.db.db")
     async def test_failed_on_error(self, _mock_db, executor):
         """Exception during execution results in failed status."""
         ex, agent = executor
@@ -219,7 +219,7 @@ class TestWFOAgentExecutor:
         assert status_events[-1].status.state == TaskState.failed
 
     @pytest.mark.asyncio
-    @patch("orchestrator.db.db")
+    @patch("orchestrator.core.db.db")
     async def test_cancel(self, _mock_db, executor):
         ex, _agent = executor
         ctx = _make_request_context()
@@ -241,7 +241,7 @@ class TestWFOAgentExecutorStateFallback:
         return WFOAgentExecutor(agent), agent
 
     @pytest.mark.asyncio
-    @patch("orchestrator.db.db")
+    @patch("orchestrator.core.db.db")
     async def test_state_fallback_over_execution_completed(self, _mock_db, executor):
         """When agent yields only 'Execution completed' but state has tool steps, use state."""
         ex, agent = executor
@@ -344,7 +344,7 @@ class TestA2AEndpoint:
         }
 
     @pytest.mark.asyncio
-    @patch("orchestrator.db.db")
+    @patch("orchestrator.core.db.db")
     async def test_message_send_endpoint_returns_completed(self, _mock_db, a2a_app):
         """HTTP message/send returns a JSON-RPC response with completed task and artifacts."""
         a2a_app.agent.run_stream_events = MagicMock(
@@ -367,7 +367,7 @@ class TestA2AEndpoint:
         assert len(result["artifacts"]) >= 1
 
     @pytest.mark.asyncio
-    @patch("orchestrator.db.db")
+    @patch("orchestrator.core.db.db")
     async def test_message_stream_endpoint_returns_completed(self, _mock_db, a2a_app):
         """HTTP message/stream returns SSE events ending with completed status."""
         a2a_app.agent.run_stream_events = MagicMock(return_value=mock_event_stream(make_text_result_event("Done")))
