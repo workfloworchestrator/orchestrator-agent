@@ -16,7 +16,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 from orchestrator.core.search.core.types import EntityType
-from pydantic import Field
+from pydantic import Field, SecretStr
 from pydantic_settings import BaseSettings
 
 if TYPE_CHECKING:
@@ -53,7 +53,7 @@ class OrchestratorAPIPaths(BaseSettings):
 class AgentSettings(BaseSettings):
     """Settings for the standalone orchestrator agent."""
 
-    DATABASE_URI: str = Field(default="", description="PostgreSQL connection URI for WFO database")
+    DATABASE_URI: SecretStr = Field(default=SecretStr(""), description="PostgreSQL connection URI for WFO database")
     BASE_URL: str = Field(default="http://localhost:8080", description="Public URL of this agent service")
     ORCHESTRATOR_API_URL: str = Field(default="http://localhost:8080", description="URL of the orchestrator-core API")
     AGENT_MODEL: str = Field(default="openai:gpt-4o", description="LLM model for the agent")
