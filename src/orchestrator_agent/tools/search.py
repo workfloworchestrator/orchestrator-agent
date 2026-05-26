@@ -18,15 +18,16 @@ from orchestrator.core.db import db
 from orchestrator.core.search.core.types import EntityType
 from orchestrator.core.search.query.queries import Query, SelectQuery
 from orchestrator.core.search.query.results import QueryResultsResponse, ResultRow, VisualizationType
+from pydantic_ai import RunContext
+from pydantic_ai.ag_ui import StateDeps
+from pydantic_ai.messages import ToolReturn
+from pydantic_ai.toolsets import FunctionToolset
+
 from orchestrator_agent.artifacts import QueryArtifact
 from orchestrator_agent.handlers import execute_search_with_persistence
 from orchestrator_agent.memory import ToolStep
 from orchestrator_agent.state import SearchState
 from orchestrator_agent.tools.filters import ensure_query_initialized
-from pydantic_ai import RunContext
-from pydantic_ai.ag_ui import StateDeps
-from pydantic_ai.messages import ToolReturn
-from pydantic_ai.toolsets import FunctionToolset
 
 logger = structlog.get_logger(__name__)
 

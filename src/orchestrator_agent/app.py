@@ -19,6 +19,7 @@ from typing import AsyncIterator
 import structlog
 from fastapi import FastAPI
 from orchestrator.core.db import init_database
+
 from orchestrator_agent.adapters import A2AAdapter, MCPApp
 from orchestrator_agent.agent import AgentAdapter
 from orchestrator_agent.api.api import api_router

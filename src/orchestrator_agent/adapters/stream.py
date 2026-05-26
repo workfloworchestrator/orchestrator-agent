@@ -21,9 +21,10 @@ from __future__ import annotations
 
 from typing import Any, AsyncIterator
 
-from orchestrator_agent.artifacts import ToolArtifact
 from pydantic_ai.messages import FunctionToolResultEvent, ToolReturnPart
 from pydantic_ai.run import AgentRunResultEvent
+
+from orchestrator_agent.artifacts import ToolArtifact
 
 NO_RESULTS = "No results"
 

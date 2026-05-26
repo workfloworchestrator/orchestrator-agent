@@ -31,9 +31,6 @@ from uuid import UUID
 
 from ag_ui.core import BaseEvent, CustomEvent, EventType, RunAgentInput, ToolCallResultEvent
 from orchestrator.core.db.models import AgentRunTable
-from orchestrator_agent.artifacts import ToolArtifact
-from orchestrator_agent.persistence import PostgresStatePersistence
-from orchestrator_agent.state import SearchState
 from pydantic_ai.ag_ui import StateDeps
 from pydantic_ai.messages import FunctionToolResultEvent, ToolReturnPart
 from pydantic_ai.ui import NativeEvent
@@ -41,6 +38,10 @@ from pydantic_ai.ui.ag_ui import AGUIAdapter
 from pydantic_ai.ui.ag_ui import AGUIEventStream as _BaseAGUIEventStream
 from sqlalchemy.orm import Session
 from structlog import get_logger
+
+from orchestrator_agent.artifacts import ToolArtifact
+from orchestrator_agent.persistence import PostgresStatePersistence
+from orchestrator_agent.state import SearchState
 
 if __name__ != "__main__":
     from orchestrator_agent.agent import AgentAdapter

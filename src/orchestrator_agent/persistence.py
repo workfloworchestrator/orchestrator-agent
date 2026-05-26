@@ -14,10 +14,11 @@
 from uuid import UUID
 
 from orchestrator.core.db.models import GraphSnapshotTable
-from orchestrator_agent.state import SearchState
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 from structlog import get_logger
+
+from orchestrator_agent.state import SearchState
 
 logger = get_logger(__name__)
 

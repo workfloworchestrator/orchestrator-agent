@@ -16,8 +16,9 @@ from uuid import UUID
 
 from orchestrator.core.search.filters import FilterTree
 from orchestrator.core.search.query.queries import Query
-from orchestrator_agent.memory import Memory
 from pydantic import BaseModel, Field
+
+from orchestrator_agent.memory import Memory
 
 
 class TaskAction(str, Enum):

@@ -6,6 +6,7 @@ from unittest.mock import AsyncMock, patch
 
 import httpx
 import pytest
+
 from orchestrator_agent.auth import OAuthTokenManager
 
 

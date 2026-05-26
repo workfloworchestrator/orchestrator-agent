@@ -7,6 +7,8 @@ import os
 os.environ.setdefault("DATABASE_URI", "postgresql://test:test@localhost:5432/test")
 
 import pytest
+from pydantic_ai.messages import ModelRequest, ModelResponse
+
 from orchestrator_agent.memory import (
     FALLBACK_MESSAGE,
     AgentStep,
@@ -18,7 +20,6 @@ from orchestrator_agent.memory import (
     collect_tool_descriptions,
 )
 from orchestrator_agent.state import SearchState
-from pydantic_ai.messages import ModelRequest, ModelResponse
 
 
 class TestStep:

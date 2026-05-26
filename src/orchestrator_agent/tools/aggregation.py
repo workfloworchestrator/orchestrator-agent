@@ -27,17 +27,18 @@ from orchestrator.core.search.query.validation import (
     validate_order_by_fields,
     validate_temporal_grouping_field,
 )
-from orchestrator_agent.artifacts import QueryArtifact
-from orchestrator_agent.handlers import execute_aggregation_with_persistence
-from orchestrator_agent.memory import ToolStep
-from orchestrator_agent.state import SearchState
-from orchestrator_agent.tools.filters import ensure_query_initialized
 from pydantic import ValidationError
 from pydantic_ai import RunContext
 from pydantic_ai.ag_ui import StateDeps
 from pydantic_ai.exceptions import ModelRetry
 from pydantic_ai.messages import ToolReturn
 from pydantic_ai.toolsets import FunctionToolset
+
+from orchestrator_agent.artifacts import QueryArtifact
+from orchestrator_agent.handlers import execute_aggregation_with_persistence
+from orchestrator_agent.memory import ToolStep
+from orchestrator_agent.state import SearchState
+from orchestrator_agent.tools.filters import ensure_query_initialized
 
 logger = structlog.get_logger(__name__)
 

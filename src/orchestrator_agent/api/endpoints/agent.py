@@ -16,13 +16,14 @@ from typing import Annotated
 from ag_ui.core import RunAgentInput
 from fastapi import APIRouter, Depends, HTTPException, Request
 from orchestrator.core.db import db
-from orchestrator_agent.adapters import AGUIWorker
-from orchestrator_agent.agent import AgentAdapter
-from orchestrator_agent.api.dependencies import get_agent
 from pydantic import ValidationError
 from pydantic_ai.ag_ui import SSE_CONTENT_TYPE
 from starlette.responses import Response, StreamingResponse
 from structlog import get_logger
+
+from orchestrator_agent.adapters import AGUIWorker
+from orchestrator_agent.agent import AgentAdapter
+from orchestrator_agent.api.dependencies import get_agent
 
 router = APIRouter()
 logger = get_logger(__name__)

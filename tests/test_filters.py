@@ -8,6 +8,7 @@ os.environ.setdefault("DATABASE_URI", "postgresql://test:test@localhost:5432/tes
 
 from orchestrator.core.search.core.types import EntityType, QueryOperation
 from orchestrator.core.search.query.queries import CountQuery, SelectQuery
+
 from orchestrator_agent.state import SearchState
 from orchestrator_agent.tools.filters import PathsResponse, ensure_query_initialized
 

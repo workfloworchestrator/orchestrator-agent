@@ -32,6 +32,7 @@ from a2a.types import (
     TextPart,
 )
 from ag_ui.core import RunAgentInput, ToolCallResultEvent, UserMessage
+
 from orchestrator_agent.adapters.a2a import A2A_SKILLS, WFOAgentExecutor, _build_state_fallback
 from orchestrator_agent.adapters.ag_ui import AGUIEventStream, AGUIWorker, _AGUIAdapter
 from orchestrator_agent.adapters.mcp import MCPApp, MCPWorker

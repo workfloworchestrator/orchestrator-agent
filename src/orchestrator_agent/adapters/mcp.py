@@ -35,10 +35,11 @@ from mcp.server.fastmcp import FastMCP
 from orchestrator.core.db import db
 from orchestrator.core.db.models import AgentRunTable
 from orchestrator.core.search.core.types import EntityType
+from pydantic_ai.ag_ui import StateDeps
+
 from orchestrator_agent.adapters.stream import collect_stream_output
 from orchestrator_agent.agent import AgentAdapter
 from orchestrator_agent.state import SearchState, TaskAction
-from pydantic_ai.ag_ui import StateDeps
 
 logger = structlog.get_logger(__name__)
 

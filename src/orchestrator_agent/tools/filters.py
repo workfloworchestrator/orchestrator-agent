@@ -22,12 +22,13 @@ from orchestrator.core.search.query.builder import ComponentInfo, LeafInfo, buil
 from orchestrator.core.search.query.exceptions import PathNotFoundError, QueryValidationError
 from orchestrator.core.search.query.queries import AggregateQuery, CountQuery, SelectQuery
 from orchestrator.core.search.query.validation import validate_filter_tree
-from orchestrator_agent.state import SearchState
 from pydantic import BaseModel, ConfigDict
 from pydantic_ai import RunContext
 from pydantic_ai.ag_ui import StateDeps
 from pydantic_ai.exceptions import ModelRetry
 from pydantic_ai.toolsets import FunctionToolset
+
+from orchestrator_agent.state import SearchState
 
 logger = structlog.get_logger(__name__)
 

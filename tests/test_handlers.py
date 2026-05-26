@@ -7,6 +7,7 @@ import os
 os.environ.setdefault("DATABASE_URI", "postgresql://test:test@localhost:5432/test")
 
 import pytest
+
 from orchestrator_agent.handlers import execute_aggregation_with_persistence, execute_search_with_persistence
 
 
