@@ -30,11 +30,8 @@ demo = [
 ]
 
 [build-system]
-requires = ["flit_core>=3.2,<4"]
-build-backend = "flit_core.buildapi"
-
-[tool.flit.module]
-name = "orchestrator_agent"
+requires = ["uv_build"]
+build-backend = "uv_build"
 
 [tool.ruff]
 exclude = [
