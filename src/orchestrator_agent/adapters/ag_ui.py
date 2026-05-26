@@ -30,7 +30,7 @@ from typing import Any
 from uuid import UUID
 
 from ag_ui.core import BaseEvent, CustomEvent, EventType, RunAgentInput, ToolCallResultEvent
-from orchestrator.db.models import AgentRunTable
+from orchestrator.core.db.models import AgentRunTable
 from pydantic_ai.ag_ui import StateDeps
 from pydantic_ai.messages import FunctionToolResultEvent, ToolReturnPart
 from pydantic_ai.ui import NativeEvent

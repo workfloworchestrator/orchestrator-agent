@@ -95,8 +95,8 @@ class WFOAgentExecutor(AgentExecutor):
 
         deps = StateDeps(SearchState(user_input=user_input))
 
-        from orchestrator.db import db
-        from orchestrator.db.models import AgentRunTable
+        from orchestrator.core.db import db
+        from orchestrator.core.db.models import AgentRunTable
 
         try:
             deps.state.run_id = uuid.uuid4()

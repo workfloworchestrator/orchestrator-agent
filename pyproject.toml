@@ -5,7 +5,7 @@ description = "Standalone WFO search agent for Kagent deployment"
 license = "Apache-2.0"
 requires-python = ">=3.11,<3.14"
 dependencies = [
-    "orchestrator-core[search]>=4.8.0",
+    "orchestrator-core>=5.0.1",
     "pydantic-ai-slim==1.56.0",
     "ag-ui-protocol==0.1.10",
     "a2a-sdk[http-server]>=0.3.25",
@@ -17,7 +17,6 @@ dependencies = [
 
 [dependency-groups]
 dev = [
-    "black>=25.1.0",
     "mypy>=1.9",
     "pre-commit>=4.2.0",
     "pytest>=8.0",
@@ -31,16 +30,8 @@ demo = [
 ]
 
 [build-system]
-requires = ["flit_core>=3.2,<4"]
-build-backend = "flit_core.buildapi"
-
-[tool.flit.module]
-name = "orchestrator_agent"
-
-[tool.black]
-line-length = 120
-target-version = ["py311"]
-extend-exclude = "demos"
+requires = ["uv_build"]
+build-backend = "uv_build"
 
 [tool.ruff]
 exclude = [

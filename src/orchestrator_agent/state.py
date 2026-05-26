@@ -14,8 +14,8 @@
 from enum import Enum
 from uuid import UUID
 
-from orchestrator.search.filters import FilterTree
-from orchestrator.search.query.queries import Query
+from orchestrator.core.search.filters import FilterTree
+from orchestrator.core.search.query.queries import Query
 from pydantic import BaseModel, Field
 
 from orchestrator_agent.memory import Memory

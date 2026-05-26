@@ -18,7 +18,7 @@ from typing import AsyncIterator
 
 import structlog
 from fastapi import FastAPI
-from orchestrator.db import init_database
+from orchestrator.core.db import init_database
 
 from orchestrator_agent.adapters import A2AAdapter, MCPApp
 from orchestrator_agent.agent import AgentAdapter

@@ -83,7 +83,7 @@ class Planner:
         logger.info(
             "Planner: Plan created",
             num_tasks=len(plan.tasks),
-            tasks=[f"{i+1}. {t.reasoning}" for i, t in enumerate(plan.tasks)],
+            tasks=[f"{i + 1}. {t.reasoning}" for i, t in enumerate(plan.tasks)],
         )
 
         return plan

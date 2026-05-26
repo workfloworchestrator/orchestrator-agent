@@ -13,7 +13,7 @@
 
 """Incoming request authentication for the standalone agent.
 
-Ports the ``AgentAuthMiddleware`` pattern from orchestrator-core and adds a
+Ports the ``AgentAuthMiddleware`` pattern from orchestrator.core-core and adds a
 concrete ``OIDCAuth`` subclass that resolves user info via the standard OIDC
 userinfo endpoint.
 """
@@ -103,7 +103,7 @@ def create_auth_manager() -> AuthManager:
 class AuthMiddleware:
     """ASGI middleware that enforces authentication on incoming requests.
 
-    Based on ``AgentAuthMiddleware`` from orchestrator-core.  Differences:
+    Based on ``AgentAuthMiddleware`` from orchestrator.core-core.  Differences:
 
     * Applied globally (A2A routes are added directly, not mounted).
     * Skips authentication for paths in ``PUBLIC_PATHS``.

@@ -27,7 +27,8 @@ class TestLogExecutionPlan:
     def test_none_plan(self, capsys):
         log_execution_plan(None)
         captured = capsys.readouterr()
-        assert "[EXECUTION PLAN] None" in captured.out
+        assert "execution_plan" in captured.out
+        assert "plan=None" in captured.out
 
     def test_plan_with_tasks(self, capsys):
         plan = ExecutionPlan(
@@ -38,9 +39,10 @@ class TestLogExecutionPlan:
         )
         log_execution_plan(plan)
         captured = capsys.readouterr()
-        assert "[EXECUTION PLAN] 2 tasks" in captured.out
-        assert "PENDING" in captured.out
-        assert "COMPLETED" in captured.out
+        assert "execution_plan" in captured.out
+        assert "num_tasks=2" in captured.out
+        assert "pending" in captured.out
+        assert "completed" in captured.out
         assert "search" in captured.out
         assert "Find subs" in captured.out
 
@@ -56,16 +58,16 @@ class TestLogAgentRequest:
 
         log_agent_request("Search", "You are a search agent", [msg])
         captured = capsys.readouterr()
-        assert "[Search] LLM Request" in captured.out
-        assert "[INSTRUCTIONS]" in captured.out
+        assert "llm_request" in captured.out
+        assert "node=Search" in captured.out
         assert "You are a search agent" in captured.out
-        assert "[MESSAGE HISTORY] (1 messages)" in captured.out
         assert "show subscriptions" in captured.out
 
     def test_empty_messages(self, capsys):
         log_agent_request("Planner", "Plan things", [])
         captured = capsys.readouterr()
-        assert "[MESSAGE HISTORY] (empty)" in captured.out
+        assert "llm_request" in captured.out
+        assert "message_history=[]" in captured.out
 
     def test_part_without_content(self, capsys):
         msg = MagicMock()
@@ -77,4 +79,4 @@ class TestLogAgentRequest:
 
         log_agent_request("Search", "instructions", [msg])
         captured = capsys.readouterr()
-        assert "[ToolCallPart]" in captured.out
+        assert "ToolCallPart" in captured.out

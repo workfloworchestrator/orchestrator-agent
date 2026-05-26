@@ -16,8 +16,8 @@ from uuid import UUID
 
 import httpx
 import structlog
-from orchestrator.search.core.types import EntityType
-from orchestrator.search.query.results import ExportData
+from orchestrator.core.search.core.types import EntityType
+from orchestrator.core.search.query.results import ExportData
 from pydantic_ai import RunContext
 from pydantic_ai.ag_ui import StateDeps
 from pydantic_ai.exceptions import ModelRetry

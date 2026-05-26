@@ -32,9 +32,9 @@ from contextlib import AsyncExitStack
 
 import structlog
 from mcp.server.fastmcp import FastMCP
-from orchestrator.db import db
-from orchestrator.db.models import AgentRunTable
-from orchestrator.search.core.types import EntityType
+from orchestrator.core.db import db
+from orchestrator.core.db.models import AgentRunTable
+from orchestrator.core.search.core.types import EntityType
 from pydantic_ai.ag_ui import StateDeps
 
 from orchestrator_agent.adapters.stream import collect_stream_output

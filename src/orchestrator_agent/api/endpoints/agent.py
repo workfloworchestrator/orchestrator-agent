@@ -15,7 +15,7 @@ from typing import Annotated
 
 from ag_ui.core import RunAgentInput
 from fastapi import APIRouter, Depends, HTTPException, Request
-from orchestrator.db import db
+from orchestrator.core.db import db
 from pydantic import ValidationError
 from pydantic_ai.ag_ui import SSE_CONTENT_TYPE
 from starlette.responses import Response, StreamingResponse

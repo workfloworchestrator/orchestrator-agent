@@ -13,7 +13,7 @@
 
 from uuid import UUID
 
-from orchestrator.db.models import GraphSnapshotTable
+from orchestrator.core.db.models import GraphSnapshotTable
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 from structlog import get_logger
@@ -71,7 +71,7 @@ class PostgresStatePersistence:
         Returns:
             The deserialized SearchState, or None if no snapshots exist
         """
-        from orchestrator.db.models import AgentRunTable
+        from orchestrator.core.db.models import AgentRunTable
 
         stmt = (
             select(GraphSnapshotTable)

@@ -19,7 +19,7 @@ details).  Setup tools (filters, grouping, etc.) return plain types and are
 *not* wrapped in a ToolArtifact.
 """
 
-from orchestrator.search.query.results import VisualizationType
+from orchestrator.core.search.query.results import VisualizationType
 from pydantic import BaseModel, Field
 
 
