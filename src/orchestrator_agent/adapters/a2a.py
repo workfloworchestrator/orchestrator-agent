@@ -111,28 +111,28 @@ class WFOAgentExecutor(AgentExecutor):
                 target_action=target_action,
             )
 
-            event_stream = self.agent.run_stream_events(deps=deps, target_action=target_action)
             artifact_texts: list[str] = []
             final_output = ""
 
-            async for event in event_stream:
-                match event:
-                    case PartDeltaEvent():
-                        pass
-                    case _:
-                        logger.debug("A2A execute: event", event_type=type(event).__name__)
+            async with self.agent.run_stream_events(deps=deps, target_action=target_action) as event_stream:
+                async for event in event_stream:
+                    match event:
+                        case PartDeltaEvent():
+                            pass
+                        case _:
+                            logger.debug("A2A execute: event", event_type=type(event).__name__)
 
-                if isinstance(event, FunctionToolResultEvent):
-                    result = event.result
-                    if isinstance(result, ToolReturnPart) and isinstance(result.metadata, ToolArtifact):
-                        text = result.model_response_str()
-                        await updater.add_artifact(
-                            parts=[Part(root=TextPart(text=text))],
-                        )
-                        artifact_texts.append(text)
+                    if isinstance(event, FunctionToolResultEvent):
+                        result = event.result
+                        if isinstance(result, ToolReturnPart) and isinstance(result.metadata, ToolArtifact):
+                            text = result.model_response_str()
+                            await updater.add_artifact(
+                                parts=[Part(root=TextPart(text=text))],
+                            )
+                            artifact_texts.append(text)
 
-                if isinstance(event, AgentRunResultEvent):
-                    final_output = str(event.result.output)
+                    if isinstance(event, AgentRunResultEvent):
+                        final_output = str(event.result.output)
 
             logger.debug(
                 "A2A execute: collection complete",

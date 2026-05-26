@@ -32,6 +32,7 @@ from a2a.types import (
     TextPart,
 )
 from ag_ui.core import RunAgentInput, ToolCallResultEvent, UserMessage
+from pydantic_ai import AgentEventStream
 
 from orchestrator_agent.adapters.a2a import A2A_SKILLS, WFOAgentExecutor, _build_state_fallback
 from orchestrator_agent.adapters.ag_ui import AGUIEventStream, AGUIWorker, _AGUIAdapter
@@ -259,7 +260,9 @@ class TestWFOAgentExecutorStateFallback:
                 deps.state.memory.complete_turn(assistant_answer="Searched 5 subscriptions.")
             yield make_text_result_event("Execution completed")
 
-        agent.run_stream_events = MagicMock(side_effect=stream_with_state_mutation)
+        agent.run_stream_events = MagicMock(
+            side_effect=lambda *a, **kw: AgentEventStream(stream_with_state_mutation(*a, **kw))
+        )
 
         ctx = _make_request_context()
         queue = EventQueue()
@@ -426,7 +429,7 @@ class TestMCPWorker:
             raise RuntimeError("boom")
             yield  # noqa: F401
 
-        agent.run_stream_events = MagicMock(return_value=failing_stream())
+        agent.run_stream_events = MagicMock(return_value=AgentEventStream(failing_stream()))
 
         worker = MCPWorker(agent=agent)
         with pytest.raises(RuntimeError, match="boom"):

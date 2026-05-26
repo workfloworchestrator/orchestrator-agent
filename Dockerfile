@@ -11,6 +11,6 @@ RUN uv sync --frozen --no-dev
 ENV PYTHONUNBUFFERED=1
 ENV PATH="/app/.venv/bin:$PATH"
 
-EXPOSE 8080
+EXPOSE 8091
 
-CMD ["uvicorn", "orchestrator_agent.app:app", "--host", "0.0.0.0", "--port", "8080"]
+CMD ["uvicorn", "orchestrator_agent.app:app", "--host", "0.0.0.0", "--port", "8091"]

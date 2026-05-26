@@ -16,6 +16,7 @@ os.environ.setdefault("DATABASE_URI", "postgresql://test:test@localhost:5432/tes
 
 import pytest
 from ag_ui.core import RunAgentInput, UserMessage
+from pydantic_ai import AgentEventStream
 from pydantic_ai.messages import FunctionToolResultEvent, ToolReturnPart
 from pydantic_ai.run import AgentRunResult, AgentRunResultEvent
 
@@ -88,10 +89,12 @@ def minimal_run_input() -> RunAgentInput:
     )
 
 
-async def mock_event_stream(*events: Any) -> AsyncIterator[Any]:
-    """Async generator that yields the given events in order."""
-    for event in events:
-        yield event
+def mock_event_stream(*events: Any) -> AgentEventStream:
+    """Returns an AgentEventStream that yields the given events in order."""
+    async def _gen() -> AsyncIterator[Any]:
+        for event in events:
+            yield event
+    return AgentEventStream(_gen())
 
 
 def parse_sse_events(raw_chunks: list[bytes]) -> list[dict]:

@@ -14,7 +14,7 @@
 from typing import TYPE_CHECKING, Any, AsyncIterator, Sequence
 
 import structlog
-from pydantic_ai import Agent, AgentRunResult, ModelSettings
+from pydantic_ai import Agent, AgentEventStream, AgentRunResult, ModelSettings
 from pydantic_ai.ag_ui import StateDeps
 from pydantic_ai.messages import (
     AgentStreamEvent,
@@ -103,19 +103,26 @@ class AgentAdapter(Agent[StateDeps[SearchState], str]):
 
         return initial_state
 
-    async def run_stream_events(  # type: ignore[override]
+    def run_stream_events(  # type: ignore[override]
         self,
         user_prompt: str | Sequence[UserContent] | None = None,
         *,
         deps: StateDeps[SearchState] | None = None,
         target_action: TaskAction | None = None,
         **kwargs: Any,
-    ) -> AsyncIterator[AgentStreamEvent | AgentRunResultEvent[str] | Any]:
+    ) -> AgentEventStream[str]:
         """Execute the plan and stream events in real-time.
 
         Custom events (AGENT_STEP_ACTIVE) are yielded directly from the planner
         and skill runners, then passed through by AGUIEventStream.handle_event().
         """
+        return AgentEventStream(self._run_stream_events_impl(deps=deps, target_action=target_action))
+
+    async def _run_stream_events_impl(
+        self,
+        deps: StateDeps[SearchState] | None = None,
+        target_action: TaskAction | None = None,
+    ) -> AsyncIterator[AgentStreamEvent | AgentRunResultEvent[str] | Any]:
         if deps is None:
             deps = StateDeps(SearchState())
 

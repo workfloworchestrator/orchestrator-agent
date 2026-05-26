@@ -66,8 +66,8 @@ class MCPWorker:
         logger.debug("MCPWorker: Starting skill execution", target_action=target_action, query=query[:100])
 
         try:
-            event_stream = self.agent.run_stream_events(deps=deps, target_action=target_action)
-            return await collect_stream_output(event_stream)
+            async with self.agent.run_stream_events(deps=deps, target_action=target_action) as event_stream:
+                return await collect_stream_output(event_stream)
         except Exception:
             logger.exception("MCPWorker: Skill execution failed", query=query[:100])
             raise
