@@ -16,8 +16,12 @@ from __future__ import annotations
 from time import time_ns
 from typing import TYPE_CHECKING
 
+import structlog
+
 if TYPE_CHECKING:
     from orchestrator_agent.state import ExecutionPlan
+
+logger = structlog.get_logger(__name__)
 
 
 def current_timestamp_ms() -> int:
@@ -26,55 +30,42 @@ def current_timestamp_ms() -> int:
 
 
 def log_execution_plan(plan: "ExecutionPlan | None") -> None:
-    """Print the execution plan for debugging.
-
-    Args:
-        plan: ExecutionPlan instance to print
-    """
     if not plan:
-        print("\n[EXECUTION PLAN] None")  # noqa: T201
+        logger.debug("execution_plan", plan=None)
         return
 
-    print(f"\n{'=' * 80}")  # noqa: T201
-    print(f"[EXECUTION PLAN] {len(plan.tasks)} tasks")  # noqa: T201
-    print(f"{'=' * 80}")  # noqa: T201
-
-    for i, task in enumerate(plan.tasks):
-        print(f"\n  [{i + 1}] {task.status.value.upper()}")  # noqa: T201
-        print(f"    Action: {task.action_type.value}")  # noqa: T201
-        print(f"    Reasoning: {task.reasoning}")  # noqa: T201
-
-    print(f"\n{'=' * 80}\n")  # noqa: T201
+    logger.debug(
+        "execution_plan",
+        num_tasks=len(plan.tasks),
+        tasks=[
+            {
+                "index": i + 1,
+                "status": task.status.value,
+                "action": task.action_type.value,
+                "reasoning": task.reasoning,
+            }
+            for i, task in enumerate(plan.tasks)
+        ],
+    )
 
 
 def log_agent_request(node_name: str, instructions: str, message_history: list) -> None:
-    """Log the complete request being sent to the LLM for debugging.
-
-    Args:
-        node_name: Name of the node making the request
-        instructions: System instructions/prompt
-        message_history: List of ModelRequest/ModelResponse messages
-    """
-    print(f"\n{'=' * 80}")  # noqa: T201
-    print(f"[{node_name}] LLM Request")  # noqa: T201
-    print(f"{'=' * 80}")  # noqa: T201
-
-    # Print system instructions
-    print("\n[INSTRUCTIONS]")  # noqa: T201
-    print(instructions)  # noqa: T201
-
-    # Print message history
-    if message_history:
-        print(f"\n[MESSAGE HISTORY] ({len(message_history)} messages)")  # noqa: T201
-        for i, msg in enumerate(message_history, 1):
-            print(f"\n--- Message {i} [{msg.kind}] ---")  # noqa: T201
-            for part in msg.parts:
-                part_type = part.__class__.__name__
-                if hasattr(part, "content"):
-                    print(f"[{part_type}] {part.content}")  # noqa: T201
-                else:
-                    print(f"[{part_type}] {part}")  # noqa: T201
-    else:
-        print("\n[MESSAGE HISTORY] (empty)")  # noqa: T201
-
-    print(f"\n{'=' * 80}\n")  # noqa: T201
+    logger.debug(
+        "llm_request",
+        node=node_name,
+        instructions=instructions,
+        message_history=[
+            {
+                "index": i,
+                "kind": msg.kind,
+                "parts": [
+                    {
+                        "type": part.__class__.__name__,
+                        "content": part.content if hasattr(part, "content") else str(part),
+                    }
+                    for part in msg.parts
+                ],
+            }
+            for i, msg in enumerate(message_history, 1)
+        ],
+    )
