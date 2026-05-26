@@ -17,7 +17,6 @@ dependencies = [
 
 [dependency-groups]
 dev = [
-    "black>=25.1.0",
     "mypy>=1.9",
     "pre-commit>=4.2.0",
     "pytest>=8.0",
@@ -36,11 +35,6 @@ build-backend = "flit_core.buildapi"
 
 [tool.flit.module]
 name = "orchestrator_agent"
-
-[tool.black]
-line-length = 120
-target-version = ["py311"]
-extend-exclude = "demos"
 
 [tool.ruff]
 exclude = [
