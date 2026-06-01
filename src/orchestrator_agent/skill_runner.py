@@ -83,29 +83,30 @@ class SkillRunner:
         if self.debug:
             log_agent_request(step_name, prompt, message_history)
 
-        async for event in self._agent.run_stream_events(
+        async with self._agent.run_stream_events(
             instructions=prompt,
             deps=state_deps,
             message_history=message_history,
-        ):
-            try:
-                if isinstance(event, FunctionToolCallEvent):
-                    self._tool_calls_in_current_run.append(event.part.tool_name)
-            except Exception as e:
-                logger.error(f"Error tracking tool call: {e}", exc_info=True)
+        ) as event_stream:
+            async for event in event_stream:
+                try:
+                    if isinstance(event, FunctionToolCallEvent):
+                        self._tool_calls_in_current_run.append(event.part.tool_name)
+                except Exception as e:
+                    logger.error(f"Error tracking tool call: {e}", exc_info=True)
 
-            match event:
-                case AgentRunResultEvent():
-                    self._last_run_result = event.result
-                    logger.debug(
-                        f"{step_name}: Captured final result with {len(event.result.new_messages())} new messages"
-                    )
-                case PartDeltaEvent():
-                    pass
-                case _:
-                    logger.debug(f"{step_name}: Yielding event", event_type=type(event).__name__)
+                match event:
+                    case AgentRunResultEvent():
+                        self._last_run_result = event.result
+                        logger.debug(
+                            f"{step_name}: Captured final result with {len(event.result.new_messages())} new messages"
+                        )
+                    case PartDeltaEvent():
+                        pass
+                    case _:
+                        logger.debug(f"{step_name}: Yielding event", event_type=type(event).__name__)
 
-            yield event
+                yield event
 
         if self._last_run_result is None:
             logger.warning(f"{step_name}: No result captured")
