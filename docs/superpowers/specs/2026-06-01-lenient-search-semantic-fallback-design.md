@@ -74,10 +74,25 @@ Robustness ladder:
 
 The returned `query_id` and `QueryArtifact` point to whichever query produced the rows that are shown.
 
-### Signaling which strategy hit
+### 3. Signal exact vs. approximate matches
 
-- `SearchResponse.metadata.search_type` already reports `structured` / `semantic` / `fuzzy`; it flows into the `QueryResultsResponse` returned to LLM/A2A/MCP consumers unchanged.
-- When a fallback fires, set a `description` like `"No exact matches for the filters; showing N closest semantic matches"` and record a `ToolStep` capturing that the fallback ran, the retriever used, and that filters were dropped. This lets the LLM explain the fallback to the user and lets later turns know the strict filter found nothing.
+Every search result must make clear whether it is a direct filter match or an approximate (semantic/fuzzy) match, so users and the LLM don't mistake "closest related" rows for exact hits.
+
+- **Source of truth:** `SearchResponse.metadata.search_type` already reports `structured` / `semantic` / `fuzzy` / `hybrid`. It flows into `QueryResultsResponse` returned to LLM/A2A/MCP consumers unchanged.
+- **Surface it inline to the frontend:** add a `search_type: str` field to `QueryArtifact` (`src/orchestrator_agent/artifacts.py`), populated from `search_response.metadata.search_type`. Today the lightweight artifact streamed to AG-UI carries only `description` / `query_id` / `total_results`; the strategy is only visible after the REST fetch. Adding the field lets the UI badge results as exact vs. approximate without the round-trip.
+- **Human-readable `description` distinguishes the two cases:**
+  - Structured pass (filters matched): `"Found {n} matching {entity_type}"`.
+  - Fallback pass (filters dropped, semantic/fuzzy): `"No exact matches — showing {n} closest {entity_type} by similarity"`.
+- **Memory:** the `ToolStep` recorded by `run_search` captures whether the fallback ran, the retriever used, and that filters were dropped, so the LLM can explain it and later turns know the strict filter found nothing.
+
+### 4. Advertise the behavior in the SEARCH skill (`skills.py`)
+
+Update the `TaskAction.SEARCH` entry in `SKILLS` (`src/orchestrator_agent/skills.py`) so the advertised capability (used for A2A skill discovery and planning) reflects what now happens:
+
+- `description`: extend to note lenient matching and the semantic fallback, e.g. `"Find subscriptions, products, workflows, processes. Uses lenient filters (partial text and ranges) and falls back to semantic similarity search when no exact matches are found."`
+- `tags`: add `"fuzzy"` and `"semantic"` alongside the existing `"search"`, `"query"`.
+
+This keeps the externally-visible skill metadata honest about the lenient + fallback behavior.
 
 ## Error handling & scope
 
@@ -90,11 +105,12 @@ The returned `query_id` and `QueryArtifact` point to whichever query produced th
 
 `pytest` / `pytest-asyncio`, mocking `execute_search_with_persistence` in `tests/`:
 
-1. Structured pass returns results → fallback **not** invoked; structured response returned.
-2. Structured pass returns 0 (with `user_input` set) → fallback invoked with `filters=None`, `retriever=SEMANTIC`, `query_text=user_input`; fallback rows returned; response metadata reports `semantic`; `description` indicates a fallback.
+1. Structured pass returns results → fallback **not** invoked; structured response returned; artifact `search_type` reflects the structured strategy and `description` reads as an exact-match phrasing.
+2. Structured pass returns 0 (with `user_input` set) → fallback invoked with `filters=None`, `retriever=SEMANTIC`, `query_text=user_input`; fallback rows returned; response metadata and artifact `search_type` report `semantic`; `description` uses the "no exact matches — closest by similarity" phrasing.
 3. Structured pass returns 0 and `user_input` empty → no fallback; empty result returned.
 4. Semantic fallback raises `ValueError` → degrades to auto-route (`retriever=None`); if all attempts empty, the original empty structured result is returned (happy path preserved).
 5. Light assertion that `FILTERING_RULES` contains the operator-selection guidance (e.g. mentions `LIKE` and a range operator).
+6. The `SEARCH` skill `description` mentions the fallback and its `tags` include `"semantic"` (guards against the advertised metadata drifting from behavior).
 
 ## Out of scope
 
