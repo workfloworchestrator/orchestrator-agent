@@ -11,7 +11,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-from typing import TYPE_CHECKING, Any, AsyncIterator, Sequence
+from typing import TYPE_CHECKING, Any, AsyncGenerator, Sequence
 
 import structlog
 from pydantic_ai import Agent, AgentEventStream, AgentRunResult, ModelSettings
@@ -122,7 +122,7 @@ class AgentAdapter(Agent[StateDeps[SearchState], str]):
         self,
         deps: StateDeps[SearchState] | None = None,
         target_action: TaskAction | None = None,
-    ) -> AsyncIterator[AgentStreamEvent | AgentRunResultEvent[str] | Any]:
+    ) -> AsyncGenerator[AgentStreamEvent | AgentRunResultEvent[str] | Any, None]:
         if deps is None:
             deps = StateDeps(SearchState())
 

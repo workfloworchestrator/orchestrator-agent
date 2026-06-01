@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import json
 import os
-from typing import Any, AsyncIterator
+from typing import Any, AsyncGenerator
 
 # Set required env vars before any orchestrator_agent imports trigger Settings instantiation.
 os.environ.setdefault("DATABASE_URI", "postgresql://test:test@localhost:5432/test")
@@ -91,7 +91,7 @@ def minimal_run_input() -> RunAgentInput:
 
 def mock_event_stream(*events: Any) -> AgentEventStream:
     """Returns an AgentEventStream that yields the given events in order."""
-    async def _gen() -> AsyncIterator[Any]:
+    async def _gen() -> AsyncGenerator[Any, None]:
         for event in events:
             yield event
     return AgentEventStream(_gen())

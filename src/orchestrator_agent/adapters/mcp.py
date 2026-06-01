@@ -66,8 +66,12 @@ class MCPWorker:
         logger.debug("MCPWorker: Starting skill execution", target_action=target_action, query=query[:100])
 
         try:
+            # Return after the `async with` (not inside it) so mypy sees a definite return:
+            # AgentEventStream.__aexit__ is typed `-> bool`, so a return inside the block reads
+            # as "may be suppressed" and trips `missing return`.
             async with self.agent.run_stream_events(deps=deps, target_action=target_action) as event_stream:
-                return await collect_stream_output(event_stream)
+                result = await collect_stream_output(event_stream)
+            return result  # noqa: RET504
         except Exception:
             logger.exception("MCPWorker: Skill execution failed", query=query[:100])
             raise
