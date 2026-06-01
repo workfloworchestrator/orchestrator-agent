@@ -60,8 +60,12 @@ SKILLS: dict[TaskAction, Skill] = {
     TaskAction.SEARCH: Skill(
         action=TaskAction.SEARCH,
         name="Search",
-        description="Find subscriptions, products, workflows, processes",
-        tags=["search", "query"],
+        description=(
+            "Find subscriptions, products, workflows, processes. Uses lenient filters "
+            "(partial text and ranges) and falls back to semantic similarity search when "
+            "no exact matches are found."
+        ),
+        tags=["search", "query", "fuzzy", "semantic"],
         toolsets=[filter_building_toolset, search_execution_toolset],
         get_prompt=get_search_execution_prompt,
         memory_scope=MemoryScope.LIGHTWEIGHT,

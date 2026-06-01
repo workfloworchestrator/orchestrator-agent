@@ -37,3 +37,9 @@ class TestSkillsRegistry:
 
     def test_text_response_has_no_toolsets(self):
         assert SKILLS[TaskAction.TEXT_RESPONSE].toolsets == []
+
+    def test_search_skill_advertises_semantic_fallback(self):
+        skill = SKILLS[TaskAction.SEARCH]
+        assert "semantic" in skill.description.lower()
+        assert "semantic" in skill.tags
+        assert "fuzzy" in skill.tags
