@@ -212,7 +212,7 @@ async def discover_filter_paths(
     return all_results
 
 
-@filter_building_toolset.tool
+@filter_building_toolset.tool_plain
 async def get_valid_operators() -> dict[str, list[FilterOp]]:
     """Gets the mapping of field types to their valid filter operators."""
     definitions = await _get_definitions()
