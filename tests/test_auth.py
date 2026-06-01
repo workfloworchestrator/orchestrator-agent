@@ -100,3 +100,38 @@ class TestOAuthTokenManager:
             },
             timeout=30,
         )
+
+    async def test_auth_enabled_follows_oauth_active_when_unset(self, monkeypatch):
+        monkeypatch.setattr("orchestrator_agent.auth.agent_settings.OAUTH2_OUTBOUND_ACTIVE", None)
+        mgr = OAuthTokenManager()
+
+        monkeypatch.setattr("orchestrator_agent.auth.oauth2lib_settings.OAUTH2_ACTIVE", True)
+        assert mgr.auth_enabled is True
+
+        monkeypatch.setattr("orchestrator_agent.auth.oauth2lib_settings.OAUTH2_ACTIVE", False)
+        assert mgr.auth_enabled is False
+
+    async def test_outbound_true_overrides_inactive_incoming(self, monkeypatch, token_response):
+        monkeypatch.setattr("orchestrator_agent.auth.oauth2lib_settings.OAUTH2_ACTIVE", False)
+        monkeypatch.setattr("orchestrator_agent.auth.agent_settings.OAUTH2_OUTBOUND_ACTIVE", True)
+        monkeypatch.setattr(
+            "orchestrator_agent.auth.oauth2lib_settings.OAUTH2_TOKEN_URL", "https://idp.example.com/token"
+        )
+        monkeypatch.setattr("orchestrator_agent.auth.oauth2lib_settings.OAUTH2_RESOURCE_SERVER_ID", "test-client")
+        monkeypatch.setattr("orchestrator_agent.auth.oauth2lib_settings.OAUTH2_RESOURCE_SERVER_SECRET", "test-secret")
+        mgr = OAuthTokenManager()
+        assert mgr.auth_enabled is True
+
+        mock_client = AsyncMock(spec=httpx.AsyncClient)
+        mock_client.post.return_value = token_response
+        mock_client.__aenter__ = AsyncMock(return_value=mock_client)
+        mock_client.__aexit__ = AsyncMock(return_value=False)
+        with patch("orchestrator_agent.auth.httpx.AsyncClient", return_value=mock_client):
+            assert await mgr.get_token() == "tok-123"
+
+    async def test_outbound_false_overrides_active_incoming(self, monkeypatch):
+        monkeypatch.setattr("orchestrator_agent.auth.oauth2lib_settings.OAUTH2_ACTIVE", True)
+        monkeypatch.setattr("orchestrator_agent.auth.agent_settings.OAUTH2_OUTBOUND_ACTIVE", False)
+        mgr = OAuthTokenManager()
+        assert mgr.auth_enabled is False
+        assert await mgr.get_token() is None

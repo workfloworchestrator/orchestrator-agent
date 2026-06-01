@@ -15,6 +15,8 @@ import httpx
 import structlog
 from oauth2_lib.settings import oauth2lib_settings
 
+from orchestrator_agent.settings import agent_settings
+
 logger = structlog.get_logger(__name__)
 
 
@@ -26,7 +28,9 @@ class OAuthTokenManager:
 
     @property
     def auth_enabled(self) -> bool:
-        return oauth2lib_settings.OAUTH2_ACTIVE
+        if agent_settings.OAUTH2_OUTBOUND_ACTIVE is None:
+            return oauth2lib_settings.OAUTH2_ACTIVE
+        return agent_settings.OAUTH2_OUTBOUND_ACTIVE
 
     async def get_token(self) -> str | None:
         if not self.auth_enabled:
