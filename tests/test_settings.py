@@ -112,3 +112,13 @@ def test_create_model_openai_provider_when_no_azure():
     result = settings.create_model()
     assert isinstance(result, OpenAIChatModel)
     assert isinstance(result._provider, OpenAIProvider)
+
+
+def test_oauth2_outbound_active_defaults_to_none():
+    settings = AgentSettings()
+    assert settings.OAUTH2_OUTBOUND_ACTIVE is None
+
+
+def test_oauth2_outbound_active_accepts_explicit_bool():
+    assert AgentSettings(OAUTH2_OUTBOUND_ACTIVE=True).OAUTH2_OUTBOUND_ACTIVE is True
+    assert AgentSettings(OAUTH2_OUTBOUND_ACTIVE=False).OAUTH2_OUTBOUND_ACTIVE is False

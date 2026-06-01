@@ -65,6 +65,10 @@ class AgentSettings(BaseSettings):
         default=None, description="API version for Azure OpenAI (e.g. 2024-12-01-preview)"
     )
     AGENT_DEBUG: bool = Field(default=False, description="Enable debug logging for agent execution")
+    OAUTH2_OUTBOUND_ACTIVE: bool | None = Field(
+        default=None,
+        description="Enable OAuth2 client-credentials auth on outgoing requests. When unset, follows OAUTH2_ACTIVE.",
+    )
     orchestrator_api_paths: OrchestratorAPIPaths = Field(default_factory=OrchestratorAPIPaths)
 
     def create_model(self) -> str | Model:
