@@ -12,6 +12,7 @@ from orchestrator_agent.auth import OAuthTokenManager
 
 @pytest.fixture
 def _enable_oauth(monkeypatch):
+    monkeypatch.setattr("orchestrator_agent.auth.agent_settings.OAUTH2_OUTBOUND_ACTIVE", None)
     monkeypatch.setattr("orchestrator_agent.auth.oauth2lib_settings.OAUTH2_ACTIVE", True)
     monkeypatch.setattr("orchestrator_agent.auth.oauth2lib_settings.OAUTH2_TOKEN_URL", "https://idp.example.com/token")
     monkeypatch.setattr("orchestrator_agent.auth.oauth2lib_settings.OAUTH2_RESOURCE_SERVER_ID", "test-client")
@@ -20,6 +21,7 @@ def _enable_oauth(monkeypatch):
 
 @pytest.fixture
 def _disable_oauth(monkeypatch):
+    monkeypatch.setattr("orchestrator_agent.auth.agent_settings.OAUTH2_OUTBOUND_ACTIVE", None)
     monkeypatch.setattr("orchestrator_agent.auth.oauth2lib_settings.OAUTH2_ACTIVE", False)
 
 
