@@ -72,7 +72,8 @@ async def _attempt_semantic_query(
     )
     try:
         response, new_run_id, query_id = await execute_search_with_persistence(query, session, run_id)
-    except ValueError:
+    except ValueError as exc:
+        logger.debug("Semantic fallback attempt unavailable", retriever=retriever, error=str(exc))
         return None
     return (response, new_run_id, query_id, query) if response.results else None
 

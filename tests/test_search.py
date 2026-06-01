@@ -159,3 +159,51 @@ class TestExecuteSearchWithFallback:
         assert response.results == []
         assert final_query.filters is not None
         assert len(calls) == 3
+
+
+class TestRunSearchArtifact:
+    @pytest.mark.parametrize(
+        "fallback_used, search_type, expected_description",
+        [
+            pytest.param(False, "structured", "Found 1 matching SUBSCRIPTION", id="exact"),
+            pytest.param(
+                True,
+                "semantic",
+                "No exact matches — showing 1 closest SUBSCRIPTION by similarity",
+                id="fallback",
+            ),
+        ],
+    )
+    async def test_run_search_propagates_search_type(
+        self, monkeypatch, fallback_used, search_type, expected_description
+    ):
+        from types import SimpleNamespace
+
+        from orchestrator.core.search.query.queries import SelectQuery
+
+        response = _response([_result("e1")], search_type)
+        final_query = SelectQuery(entity_type=EntityType.SUBSCRIPTION, query_text="acme corp", filters=None, limit=10)
+
+        async def fake_execute(state, entity_type, limit, session):
+            state.query_id = STRUCT_QID
+            return response, final_query, fallback_used
+
+        monkeypatch.setattr(search_mod, "_execute_search_with_fallback", fake_execute)
+        monkeypatch.setattr(search_mod, "db", SimpleNamespace(session=object()))
+
+        state = SearchState(user_input="acme corp", run_id=RUN_ID)
+        state.query_id = STRUCT_QID
+        state.memory.start_turn("acme corp")
+        state.memory.start_step("Search")
+        ctx = SimpleNamespace(deps=SimpleNamespace(state=state))
+
+        tool_return = await search_mod.run_search(ctx, EntityType.SUBSCRIPTION, 10)
+
+        artifact = tool_return.metadata
+        assert artifact.search_type == search_type
+        assert artifact.description == expected_description
+        assert artifact.total_results == 1
+
+        recorded = state.memory.current_turn.current_step.tool_steps[-1]
+        assert recorded.context["fallback_used"] is fallback_used
+        assert recorded.context["search_type"] == search_type
