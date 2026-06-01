@@ -34,6 +34,14 @@ class TestQueryArtifact:
         a = QueryArtifact(description="test", query_id="q1", total_results=0)
         assert a.visualization_type is not None
 
+    def test_search_type_defaults_to_empty(self):
+        a = QueryArtifact(description="test", query_id="q1", total_results=0)
+        assert a.search_type == ""
+
+    def test_search_type_can_be_set(self):
+        a = QueryArtifact(description="test", query_id="q1", total_results=3, search_type="semantic")
+        assert a.search_type == "semantic"
+
 
 class TestDataArtifact:
     def test_fields(self):
