@@ -42,6 +42,7 @@ class QueryArtifact(ToolArtifact):
     query_id: str
     total_results: int
     visualization_type: VisualizationType = Field(default_factory=VisualizationType)
+    search_type: str = ""
 
 
 class DataArtifact(ToolArtifact):

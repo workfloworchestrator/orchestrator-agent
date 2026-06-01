@@ -33,6 +33,16 @@ class TestGetSearchExecutionPrompt:
         assert "Filtering Rules" in prompt
         assert "MANDATORY FIRST STEP" in prompt
 
+    def test_includes_lenient_operator_guidance(self):
+        prompt = get_search_execution_prompt(_make_state())
+        assert "PREFER LENIENT OPERATORS" in prompt
+        assert "like" in prompt
+        assert "between" in prompt
+
+    def test_includes_semantic_fallback_note(self):
+        prompt = get_search_execution_prompt(_make_state())
+        assert "automatically retries with a broader semantic search" in prompt
+
 
 class TestGetAggregationExecutionPrompt:
     def test_contains_key_elements(self):
@@ -46,6 +56,11 @@ class TestGetAggregationExecutionPrompt:
     def test_includes_filtering_rules(self):
         prompt = get_aggregation_execution_prompt(_make_state())
         assert "Filtering Rules" in prompt
+
+    def test_aggregation_has_no_semantic_fallback_note(self):
+        prompt = get_aggregation_execution_prompt(_make_state())
+        assert "automatically retries with a broader semantic search" not in prompt
+        assert "PREFER LENIENT OPERATORS" in prompt
 
 
 class TestGetTextResponsePrompt:

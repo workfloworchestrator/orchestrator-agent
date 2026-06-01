@@ -26,6 +26,10 @@ FILTERING_RULES = f"""### Filtering Rules (if query requires filters)
 - Pass simple field names to discovery (e.g. "status", "id", "start_date") — not dotted paths like "subscription.status"
 - **USE EXACT PATHS**: Only use paths returned by `{tools.discover_filter_paths.__name__}`. Do not modify or invent paths.
 - **MATCH OPERATORS**: Only use operators compatible with the field type as confirmed by `{tools.get_valid_operators.__name__}`
+- **PREFER LENIENT OPERATORS** — choose the broadest operator that still captures the user's intent:
+  - Text, names, titles, descriptions, or partial values → use `like` (substring match, e.g. `%acme%`), NOT `eq`. Reserve `eq` for exact identifiers (UUIDs), enum/status values, and booleans.
+  - Dates and numbers ("in 2025", "after X", "between X and Y", "more than 100") → use range operators `between`/`gt`/`gte`/`lt`/`lte`, NOT `eq`.
+  - Avoid `eq` on human-typed text: an over-strict filter that matches nothing is worse than a broad one.
 - Temporal constraints like "in 2025", "between X and Y" require filters on datetime fields
 - If a discovered path does not match the user's intent, try alternative field names in a new discovery call"""
 
@@ -62,6 +66,8 @@ def get_search_execution_prompt(state: SearchState) -> str:
         4. Explain what you did in 1-2 sentences at most. DO NOT list the actual results, they are already shown to the user.
 
         {FILTERING_RULES}
+
+        **Note:** If a search returns no results, the system automatically retries with a broader semantic search (filters dropped) and shows the closest matches. Don't over-constrain your filters. If the result description says matches are approximate, briefly tell the user the results are the closest available rather than exact matches.
 
         ---
 
