@@ -91,9 +91,11 @@ def minimal_run_input() -> RunAgentInput:
 
 def mock_event_stream(*events: Any) -> AgentEventStream:
     """Returns an AgentEventStream that yields the given events in order."""
+
     async def _gen() -> AsyncGenerator[Any, None]:
         for event in events:
             yield event
+
     return AgentEventStream(_gen())
 
 
