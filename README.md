@@ -97,7 +97,7 @@ The `azure:` prefix on `AGENT_MODEL` (or setting `AGENT_API_VERSION`) selects th
 
 ## Architecture
 
-This repo contains only the agent logic (planner, skills, tools, adapters, state, memory, prompts). The search infrastructure (query engine, filters, retrievers, indexing, DB models) lives in `orchestrator-core` and is imported as a dependency via `orchestrator-core[search]` (along with everything else for now).
+This repo contains only the agent logic (planner, skills, tools, adapters, state, memory, prompts). The search infrastructure (query engine, filters, retrievers, indexing, DB models) lives in `orchestrator-core` and is imported as a dependency via `orchestrator-core` (along with everything else for now).
 
 ```
 Request ──► AG-UI adapter ──► AgentAdapter.run_stream_events()
