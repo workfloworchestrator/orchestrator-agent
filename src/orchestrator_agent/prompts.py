@@ -30,6 +30,7 @@ FILTERING_RULES = f"""### Filtering Rules (if query requires filters)
   - Text, names, titles, descriptions, or partial values → use `like` (substring match, e.g. `%acme%`), NOT `eq`. Reserve `eq` for exact identifiers (UUIDs), enum/status values, and booleans.
   - Dates and numbers ("in 2025", "after X", "between X and Y", "more than 100") → use range operators `between`/`gt`/`gte`/`lt`/`lte`, NOT `eq`.
   - Avoid `eq` on human-typed text: an over-strict filter that matches nothing is worse than a broad one.
+- **KEEP KNOWN STRUCTURED FILTERS**: When the user names a concrete dimension like status or product, always include it as a filter — even when you also match on free text. Filters narrow the candidate set *before* ranking, so they make results more relevant, not fewer. Use `eq` when the exact value is known (e.g. status `active`); use `like` when unsure of the exact stored value (e.g. a product name).
 - Temporal constraints like "in 2025", "between X and Y" require filters on datetime fields
 - If a discovered path does not match the user's intent, try alternative field names in a new discovery call"""
 

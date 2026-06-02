@@ -6,6 +6,8 @@ import os
 
 os.environ.setdefault("DATABASE_URI", "postgresql://test:test@localhost:5432/test")
 
+import pytest
+
 from orchestrator_agent.prompts import (
     get_aggregation_execution_prompt,
     get_planning_prompt,
@@ -21,27 +23,20 @@ def _make_state(user_input: str = "show subscriptions") -> SearchState:
 
 
 class TestGetSearchExecutionPrompt:
-    def test_contains_key_elements(self):
+    @pytest.mark.parametrize(
+        "required",
+        [
+            pytest.param(["Searching", "run_search", "discover_filter_paths", "set_filter_tree"], id="key-elements"),
+            pytest.param(["Filtering Rules", "MANDATORY FIRST STEP"], id="filtering-rules"),
+            pytest.param(["PREFER LENIENT OPERATORS", "like", "between"], id="lenient-operators"),
+            pytest.param(["automatically retries with a broader semantic search"], id="semantic-fallback-note"),
+            pytest.param(["KEEP KNOWN STRUCTURED FILTERS", "status", "product"], id="structured-filter-retention"),
+        ],
+    )
+    def test_prompt_contains(self, required):
         prompt = get_search_execution_prompt(_make_state())
-        assert "Searching" in prompt
-        assert "run_search" in prompt
-        assert "discover_filter_paths" in prompt
-        assert "set_filter_tree" in prompt
-
-    def test_includes_filtering_rules(self):
-        prompt = get_search_execution_prompt(_make_state())
-        assert "Filtering Rules" in prompt
-        assert "MANDATORY FIRST STEP" in prompt
-
-    def test_includes_lenient_operator_guidance(self):
-        prompt = get_search_execution_prompt(_make_state())
-        assert "PREFER LENIENT OPERATORS" in prompt
-        assert "like" in prompt
-        assert "between" in prompt
-
-    def test_includes_semantic_fallback_note(self):
-        prompt = get_search_execution_prompt(_make_state())
-        assert "automatically retries with a broader semantic search" in prompt
+        missing = [snippet for snippet in required if snippet not in prompt]
+        assert not missing, f"missing from search prompt: {missing}"
 
 
 class TestGetAggregationExecutionPrompt:
