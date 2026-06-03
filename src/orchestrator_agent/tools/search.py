@@ -179,7 +179,7 @@ async def run_search(
 
     Args:
         ctx: Tool run context providing access to agent state.
-        entity_type: Type of entity to search (e.g. SUBSCRIPTION, NODE).
+        entity_type: Type of entity to search (SUBSCRIPTION, PRODUCT, WORKFLOW, or PROCESS).
         limit: Maximum number of results to return.
         retriever: Ranking strategy. HYBRID (semantic + fuzzy keyword) for queries centered on
             an identifier/code/name; SEMANTIC for descriptive phrases; FUZZY for exact tokens or
