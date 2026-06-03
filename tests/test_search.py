@@ -207,3 +207,22 @@ class TestRunSearchArtifact:
         recorded = state.memory.current_turn.current_step.tool_steps[-1]
         assert recorded.context["fallback_used"] is fallback_used
         assert recorded.context["search_type"] == search_type
+
+
+class TestEffectiveRetriever:
+    @pytest.mark.parametrize(
+        "embeddings_enabled, requested, expected",
+        [
+            pytest.param(True, RetrieverType.HYBRID, RetrieverType.HYBRID, id="on-hybrid"),
+            pytest.param(True, RetrieverType.SEMANTIC, RetrieverType.SEMANTIC, id="on-semantic"),
+            pytest.param(True, RetrieverType.FUZZY, RetrieverType.FUZZY, id="on-fuzzy"),
+            pytest.param(True, None, None, id="on-auto"),
+            pytest.param(False, RetrieverType.HYBRID, RetrieverType.FUZZY, id="off-hybrid-degrades"),
+            pytest.param(False, RetrieverType.SEMANTIC, RetrieverType.FUZZY, id="off-semantic-degrades"),
+            pytest.param(False, RetrieverType.FUZZY, RetrieverType.FUZZY, id="off-fuzzy"),
+            pytest.param(False, None, None, id="off-auto"),
+        ],
+    )
+    def test_effective(self, monkeypatch, embeddings_enabled, requested, expected):
+        monkeypatch.setattr(search_mod.llm_settings, "EMBEDDING_API_ENABLED", embeddings_enabled)
+        assert search_mod._effective_retriever(requested) == expected

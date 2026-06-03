@@ -25,6 +25,7 @@ from orchestrator.core.search.query.results import (
     SearchResponse,
     VisualizationType,
 )
+from orchestrator.core.settings import llm_settings
 from pydantic_ai import RunContext
 from pydantic_ai.ag_ui import StateDeps
 from pydantic_ai.messages import ToolReturn
@@ -47,6 +48,18 @@ def _describe_results(count: int, entity_type: EntityType, fallback_used: bool) 
     if fallback_used:
         return f"No exact matches — showing {count} closest {label} by similarity"
     return f"Found {count} matching {label}"
+
+
+def _effective_retriever(requested: RetrieverType | None) -> RetrieverType | None:
+    """Resolve the retriever to actually use, accounting for embedding availability.
+
+    SEMANTIC and HYBRID need embeddings; when EMBEDDING_API_ENABLED is False they would
+    raise ValueError in Retriever.route. Degrade those to FUZZY (which still keyword-matches
+    the identifier). FUZZY and None (auto-routing) pass through unchanged.
+    """
+    if requested in (RetrieverType.SEMANTIC, RetrieverType.HYBRID) and not llm_settings.EMBEDDING_API_ENABLED:
+        return RetrieverType.FUZZY
+    return requested
 
 
 async def _attempt_semantic_query(
