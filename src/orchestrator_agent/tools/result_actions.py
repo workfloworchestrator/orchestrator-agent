@@ -35,21 +35,16 @@ logger = structlog.get_logger(__name__)
 result_actions_toolset: FunctionToolset[StateDeps[SearchState]] = FunctionToolset(max_retries=2)
 
 
-@result_actions_toolset.tool
-async def fetch_entity_details(
+async def _fetch_entity_detail(
     ctx: RunContext[StateDeps[SearchState]],
     entity_id: str,
     entity_type: EntityType,
 ) -> ToolReturn:
-    """Fetch detailed information for a single entity by its ID.
+    """Fetch the full domain model for a known UUID via the orchestrator HTTP API.
 
-    Args:
-        ctx: Runtime context for agent (injected).
-        entity_id: The UUID of the entity to fetch details for.
-        entity_type: Type of entity.
-
-    Returns:
-        ToolReturn with entity JSON and ExportArtifact metadata.
+    The HTTP API assembles the full domain model (product blocks, instance
+    values, etc.) that a flat DB row does not contain. Handles bearer-token
+    auth with a single 401/403 refresh-and-retry; 404 becomes a ModelRetry.
     """
     logger.debug(
         "Fetching detailed entity data",
@@ -97,6 +92,28 @@ async def fetch_entity_details(
     )
 
     return ToolReturn(return_value=detailed_json, metadata=artifact)
+
+
+@result_actions_toolset.tool
+async def fetch_entity_details(
+    ctx: RunContext[StateDeps[SearchState]],
+    entity_id: str,
+    entity_type: EntityType,
+) -> ToolReturn:
+    """Fetch detailed information for a single entity by its known UUID.
+
+    Use this when a full, exact UUID is already in hand (e.g. from a previous
+    search result). To resolve a partial id-prefix, use get_entity_by_id instead.
+
+    Args:
+        ctx: Runtime context for agent (injected).
+        entity_id: The exact UUID of the entity to fetch details for.
+        entity_type: Type of entity.
+
+    Returns:
+        ToolReturn with entity JSON and DataArtifact metadata.
+    """
+    return await _fetch_entity_detail(ctx, entity_id, entity_type)
 
 
 @result_actions_toolset.tool
