@@ -95,8 +95,10 @@ Behavior (dispatch via `match`/structural checks, no `isinstance` chains):
    - Shorter than `MIN_PREFIX_LEN` → `ModelRetry("Need at least 4 characters of the id to look it up.")`.
    - Call `resolve_entity_id_prefix(db.session, entity_type, prefix, limit=N)` (e.g. `N = 10`):
      - **1 match** → `_fetch_entity_detail(...)` for that UUID → `DataArtifact`.
-     - **2…N matches** → build a `QueryResultsResponse` of `ResultRow{group_values={entity_id, title, entity_type}}` → `ToolReturn(return_value=full_response, metadata=QueryArtifact(...))`. If `len > N` (we fetched `N+1`), the description notes "showing first N — refine the id".
+     - **2…N matches** → return a **plain `ToolReturn`** (no `ToolArtifact` metadata) whose `return_value` is the candidate list (`[{"entity_id": ..., "title": ...}]`) plus a short instruction string; the skill LLM lists them and asks the user to refine the id or pick one. If more than `N` matched (we fetched `N+1`), include a "showing first N — refine the id" note.
      - **0 matches** → `ModelRetry(f"No {entity_type.value} found with id starting with {prefix}.")`.
+
+**Why the candidate list carries no artifact:** `QueryArtifact` is a *reference* — the AG-UI adapter (`adapters/ag_ui.py:73-83`) emits only `metadata.model_dump_json()` and the frontend re-fetches full rows via `GET /queries/{query_id}/results`. A direct DB prefix resolution is **not** a persisted query, so it has no `query_id`; a `QueryArtifact` would dangle. Returning the candidates as plain tool content lets the skill LLM present them as text for disambiguation — no persistence, no frontend change. Tools that return no `ToolArtifact` fall through to the adapter's default handling, exactly like any non-artifact tool.
 
 Each path records a `ToolStep` in `ctx.deps.state.memory` (mirroring the existing tools).
 
@@ -135,12 +137,14 @@ No code-level intent detection. The change is prompt guidance only:
 
 ## Tests
 
-- **`tests/test_entity_lookup.py`** — `resolve_entity_id_prefix` against a DB fixture (or fake session). `@pytest.mark.parametrize` over entity types × cases: full UUID, single-match prefix, multi-match prefix, no match, too-short prefix, non-hex input. Use `pytest.param(..., id=...)` for readable case names.
-- **`tests/test_result_actions.py`** — `get_entity_by_id` behavior with the resolver and HTTP layer mocked:
-  - single match / full UUID → `DataArtifact` + full model (HTTP mocked);
-  - 2+ matches → `QueryArtifact` + `QueryResultsResponse` candidate list;
-  - 0 matches / too-short / non-hex → `ModelRetry`.
-  - Verify `_fetch_entity_detail` is the shared path (e.g. one HTTP mock satisfies both `fetch_entity_details` and the single-match path).
+- **`tests/test_entity_lookup.py`** — the pure pieces, no real DB:
+  - `_ENTITY_LOOKUP` has an entry for every `EntityType` (guards against a missing mapping).
+  - id-form classification helpers (`_classify_id`: full UUID vs. valid prefix vs. too-short vs. non-hex), `@pytest.mark.parametrize`'d with `pytest.param(..., id=...)`.
+  - `resolve_entity_id_prefix` with a **fake session** (a `SimpleNamespace`/stub whose `query(...).filter(...).limit(...).all()` returns canned rows) — asserts the right table/columns are selected and rows map to `ResolvedEntity`. (Real prefix-matching SQL needs a DB and is out of scope for unit tests; note this in the test module docstring.)
+- **`tests/test_result_actions.py`** — `get_entity_by_id` decision logic, with `resolve_entity_id_prefix` and `_fetch_entity_detail` monkeypatched and `db` faked via `SimpleNamespace(session=object())` (mirroring `tests/test_search.py:192`):
+  - single match / full UUID → delegates to `_fetch_entity_detail` (assert it was called with the resolved UUID; `_fetch_entity_detail` stubbed to return a sentinel `ToolReturn` with a `DataArtifact`);
+  - 2+ matches → plain `ToolReturn` whose `metadata` is `None` and whose `return_value` lists the candidates;
+  - 0 matches / too-short / non-hex → raises `ModelRetry`.
 - No planner-LLM test (matches repo convention; the planner change is prompt text + the full suite staying green).
 
 ## Out of scope
