@@ -65,6 +65,7 @@ uv run demos/a2a_client.py <subscription-uuid>
 | `AGENT_API_KEY` | *(none)* | API key for the LLM provider |
 | `AGENT_API_VERSION` | *(none)* | API version for Azure OpenAI (e.g. `2024-12-01-preview`) |
 | `AGENT_DEBUG` | `false` | Enable debug logging for agent execution |
+| `AGENT_DOMAIN_CONTEXT` | *(empty)* | Optional free-text domain knowledge injected into the search prompt (e.g. identifier conventions and their filter fields). Empty disables the section |
 | `OAUTH2_ACTIVE` | `true` | Enable OIDC authentication on incoming requests (via `oauth2_lib`) |
 | `OAUTH2_OUTBOUND_ACTIVE` | *(unset)* | Enable OAuth2 client-credentials auth on outgoing requests to orchestrator-core. When unset, follows `OAUTH2_ACTIVE`; set to `true`/`false` to control outbound auth independently of incoming auth |
 | `OIDC_BASE_URL` | *(none)* | Base URL of the OIDC provider (required when `OAUTH2_ACTIVE=true`) |
@@ -95,6 +96,26 @@ AGENT_API_VERSION=2024-12-01-preview
 ```
 
 The `azure:` prefix on `AGENT_MODEL` (or setting `AGENT_API_VERSION`) selects the Azure provider automatically. When none of `AGENT_API_BASE`, `AGENT_API_KEY`, or `AGENT_API_VERSION` is set, `AGENT_MODEL` is passed directly to pydantic-ai as a model string (existing behavior).
+
+### Identifier-aware search
+
+When a user references an entity by a concrete identifier — a customer name, a subscription id, or a code/number such as `IS4443`, `4433`, or `id 1234` — the search skill is guided to extract that token and use it as a high-signal search key: it discovers the matching field and filters with `like` (substring/typo-tolerant), and only falls back to plain ranking when no field clearly matches.
+
+The agent also picks a **retriever** per query:
+
+- **HYBRID** (semantic + fuzzy keyword) — for identifier/code/name-centric lookups.
+- **SEMANTIC** — for descriptive or sentence-like queries.
+- **FUZZY** — for exact tokens, and whenever embeddings are unavailable.
+
+SEMANTIC and HYBRID require embeddings (configured in orchestrator-core via `EMBEDDING_API_ENABLED`). When embeddings are disabled, the agent automatically uses FUZZY and the prompt stops offering the embedding-based options — so the feature degrades safely with no configuration change.
+
+Use `AGENT_DOMAIN_CONTEXT` to teach the agent deployment-specific conventions that it cannot infer, for example:
+
+```bash
+AGENT_DOMAIN_CONTEXT="Circuit codes look like IS#### and map to the imsCircuitId field — filter with like. Customer references are 8-digit numbers — field customerId."
+```
+
+This text is injected verbatim as a `## Domain Knowledge` section in the search prompt; leaving it empty omits the section entirely.
 
 ## Architecture
 
