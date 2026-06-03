@@ -77,6 +77,11 @@ class TestGetPlanningPrompt:
         prompt = get_planning_prompt(_make_state())
         assert "Do NOT create redundant tasks" in prompt
 
+    def test_mentions_id_prefix_single_result_actions_task(self):
+        prompt = get_planning_prompt(_make_state())
+        assert "id-prefix" in prompt
+        assert "RESULT_ACTIONS" in prompt
+
 
 class TestGetResultActionsPrompt:
     def test_contains_key_elements(self):
@@ -84,3 +89,8 @@ class TestGetResultActionsPrompt:
         assert "Acting on Results" in prompt
         assert "prepare_export" in prompt
         assert "fetch_entity_details" in prompt
+
+    def test_mentions_get_entity_by_id_for_id_or_prefix(self):
+        prompt = get_result_actions_prompt(_make_state())
+        assert "get_entity_by_id" in prompt
+        assert "id-prefix" in prompt

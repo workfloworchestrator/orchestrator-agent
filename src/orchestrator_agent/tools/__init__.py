@@ -30,6 +30,7 @@ from orchestrator_agent.tools.filters import (
 )
 from orchestrator_agent.tools.result_actions import (
     fetch_entity_details,
+    get_entity_by_id,
     prepare_export,
     result_actions_toolset,
 )
@@ -44,6 +45,7 @@ __all__ = [
     "aggregation_toolset",
     "discover_filter_paths",
     "fetch_entity_details",
+    "get_entity_by_id",
     "filter_building_toolset",
     "get_valid_operators",
     "prepare_export",
