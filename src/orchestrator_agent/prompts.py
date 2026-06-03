@@ -31,6 +31,7 @@ FILTERING_RULES = f"""### Filtering Rules (if query requires filters)
   - Dates and numbers ("in 2025", "after X", "between X and Y", "more than 100") → use range operators `between`/`gt`/`gte`/`lt`/`lte`, NOT `eq`.
   - Avoid `eq` on human-typed text: an over-strict filter that matches nothing is worse than a broad one.
 - **KEEP KNOWN STRUCTURED FILTERS**: When the user names a concrete dimension like status or product, always include it as a filter — even when you also match on free text. Filters narrow the candidate set *before* ranking, so they make results more relevant, not fewer. Use `eq` when the exact value is known (e.g. status `active`); use `like` when unsure of the exact stored value (e.g. a product name).
+- **EXTRACT IDENTIFIERS**: Scan the request for specific identifiers the user gave — entity/subscription ids, customer names, reference codes (e.g. `IS4443`), or numbers (e.g. `4433`, `id 1234`). These are the highest-signal part of the request. Use `{tools.discover_filter_paths.__name__}` to find the field that holds such a value and filter it with `like` (substring/typo-tolerant). If no discovered field clearly matches an opaque identifier, do NOT invent a filter — the search already ranks on the full request text. Never silently ignore an identifier the user provided.
 - Temporal constraints like "in 2025", "between X and Y" require filters on datetime fields
 - If a discovered path does not match the user's intent, try alternative field names in a new discovery call"""
 

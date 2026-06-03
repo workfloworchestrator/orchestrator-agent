@@ -31,6 +31,7 @@ class TestGetSearchExecutionPrompt:
             pytest.param(["PREFER LENIENT OPERATORS", "like", "between"], id="lenient-operators"),
             pytest.param(["automatically retries with a broader semantic search"], id="semantic-fallback-note"),
             pytest.param(["KEEP KNOWN STRUCTURED FILTERS", "status", "product"], id="structured-filter-retention"),
+            pytest.param(["EXTRACT IDENTIFIERS", "highest-signal"], id="identifier-extraction"),
         ],
     )
     def test_prompt_contains(self, required):
