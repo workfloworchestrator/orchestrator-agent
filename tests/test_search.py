@@ -160,6 +160,27 @@ class TestExecuteSearchWithFallback:
         assert final_query.filters is not None
         assert len(calls) == 3
 
+    @pytest.mark.parametrize(
+        "embeddings_enabled, requested, expected",
+        [
+            pytest.param(True, RetrieverType.HYBRID, RetrieverType.HYBRID, id="hybrid-on"),
+            pytest.param(False, RetrieverType.HYBRID, RetrieverType.FUZZY, id="hybrid-off-degrades"),
+            pytest.param(True, None, None, id="auto-passthrough"),
+        ],
+    )
+    async def test_primary_pass_uses_effective_retriever(self, monkeypatch, embeddings_enabled, requested, expected):
+        captured = []
+
+        async def fake(query, session, run_id):
+            captured.append(query.retriever)
+            return _response([_result()], "structured"), RUN_ID, STRUCT_QID
+
+        monkeypatch.setattr(search_mod, "execute_search_with_persistence", fake)
+        monkeypatch.setattr(search_mod.llm_settings, "EMBEDDING_API_ENABLED", embeddings_enabled)
+        state = _state()
+        await search_mod._execute_search_with_fallback(state, EntityType.SUBSCRIPTION, 10, object(), requested)
+        assert captured[0] == expected
+
 
 class TestRunSearchArtifact:
     @pytest.mark.parametrize(
@@ -184,7 +205,7 @@ class TestRunSearchArtifact:
         response = _response([_result("e1")], search_type)
         final_query = SelectQuery(entity_type=EntityType.SUBSCRIPTION, query_text="acme corp", filters=None, limit=10)
 
-        async def fake_execute(state, entity_type, limit, session):
+        async def fake_execute(state, entity_type, limit, session, retriever=None):
             state.query_id = STRUCT_QID
             return response, final_query, fallback_used
 
@@ -207,3 +228,48 @@ class TestRunSearchArtifact:
         recorded = state.memory.current_turn.current_step.tool_steps[-1]
         assert recorded.context["fallback_used"] is fallback_used
         assert recorded.context["search_type"] == search_type
+
+
+async def test_run_search_forwards_retriever(monkeypatch):
+    from types import SimpleNamespace
+
+    from orchestrator.core.search.query.queries import SelectQuery
+
+    captured = {}
+
+    async def fake_execute(state, entity_type, limit, session, retriever):
+        captured["retriever"] = retriever
+        state.query_id = STRUCT_QID
+        final_query = SelectQuery(entity_type=EntityType.SUBSCRIPTION, query_text="acme", filters=None, limit=10)
+        return _response([_result("e1")], "structured"), final_query, False
+
+    monkeypatch.setattr(search_mod, "_execute_search_with_fallback", fake_execute)
+    monkeypatch.setattr(search_mod, "db", SimpleNamespace(session=object()))
+
+    state = SearchState(user_input="acme", run_id=RUN_ID)
+    state.query_id = STRUCT_QID
+    state.memory.start_turn("acme")
+    state.memory.start_step("Search")
+    ctx = SimpleNamespace(deps=SimpleNamespace(state=state))
+
+    await search_mod.run_search(ctx, EntityType.SUBSCRIPTION, 10, RetrieverType.HYBRID)
+    assert captured["retriever"] == RetrieverType.HYBRID
+
+
+class TestEffectiveRetriever:
+    @pytest.mark.parametrize(
+        "embeddings_enabled, requested, expected",
+        [
+            pytest.param(True, RetrieverType.HYBRID, RetrieverType.HYBRID, id="on-hybrid"),
+            pytest.param(True, RetrieverType.SEMANTIC, RetrieverType.SEMANTIC, id="on-semantic"),
+            pytest.param(True, RetrieverType.FUZZY, RetrieverType.FUZZY, id="on-fuzzy"),
+            pytest.param(True, None, None, id="on-auto"),
+            pytest.param(False, RetrieverType.HYBRID, RetrieverType.FUZZY, id="off-hybrid-degrades"),
+            pytest.param(False, RetrieverType.SEMANTIC, RetrieverType.FUZZY, id="off-semantic-degrades"),
+            pytest.param(False, RetrieverType.FUZZY, RetrieverType.FUZZY, id="off-fuzzy"),
+            pytest.param(False, None, None, id="off-auto"),
+        ],
+    )
+    def test_effective(self, monkeypatch, embeddings_enabled, requested, expected):
+        monkeypatch.setattr(search_mod.llm_settings, "EMBEDDING_API_ENABLED", embeddings_enabled)
+        assert search_mod._effective_retriever(requested) == expected

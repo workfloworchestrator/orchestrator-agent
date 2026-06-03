@@ -13,6 +13,7 @@
 
 from unittest.mock import patch
 
+import pytest
 from pydantic_ai.models.openai import OpenAIChatModel
 from pydantic_ai.providers.azure import AzureProvider
 from pydantic_ai.providers.openai import OpenAIProvider
@@ -56,26 +57,22 @@ def test_create_model_returns_openai_model_when_only_api_base():
     assert isinstance(result, OpenAIChatModel)
 
 
-def test_create_model_strips_provider_prefix():
+@pytest.mark.parametrize(
+    "model_input,expected_name",
+    [
+        ("openai:gpt-4o", "gpt-4o"),
+        ("gpt-4o", "gpt-4o"),
+    ],
+)
+def test_create_model_strips_provider_prefix(model_input: str, expected_name: str) -> None:
     settings = AgentSettings(
-        AGENT_MODEL="openai:gpt-4o",
+        AGENT_MODEL=model_input,
         AGENT_API_BASE="https://example.com/v1",
         AGENT_API_KEY="sk-test",
     )
     result = settings.create_model()
     assert isinstance(result, OpenAIChatModel)
-    assert result.model_name == "gpt-4o"
-
-
-def test_create_model_no_prefix():
-    settings = AgentSettings(
-        AGENT_MODEL="gpt-4o",
-        AGENT_API_BASE="https://example.com/v1",
-        AGENT_API_KEY="sk-test",
-    )
-    result = settings.create_model()
-    assert isinstance(result, OpenAIChatModel)
-    assert result.model_name == "gpt-4o"
+    assert result.model_name == expected_name
 
 
 def test_create_model_azure_prefix_uses_azure_provider():
@@ -122,3 +119,13 @@ def test_oauth2_outbound_active_defaults_to_none():
 def test_oauth2_outbound_active_accepts_explicit_bool():
     assert AgentSettings(OAUTH2_OUTBOUND_ACTIVE=True).OAUTH2_OUTBOUND_ACTIVE is True
     assert AgentSettings(OAUTH2_OUTBOUND_ACTIVE=False).OAUTH2_OUTBOUND_ACTIVE is False
+
+
+def test_agent_domain_context_defaults_to_empty():
+    assert AgentSettings().AGENT_DOMAIN_CONTEXT == ""
+
+
+def test_agent_domain_context_accepts_value():
+    assert AgentSettings(AGENT_DOMAIN_CONTEXT="circuit codes map to imsCircuitId").AGENT_DOMAIN_CONTEXT == (
+        "circuit codes map to imsCircuitId"
+    )

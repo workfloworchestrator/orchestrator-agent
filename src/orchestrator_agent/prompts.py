@@ -14,8 +14,10 @@
 from textwrap import dedent
 
 from orchestrator.core.search.core.types import EntityType
+from orchestrator.core.settings import llm_settings
 
 from orchestrator_agent import tools
+from orchestrator_agent.settings import agent_settings
 from orchestrator_agent.state import SearchState
 
 AGENT_CONTEXT = """You are an agent that executes tasks in a plan, one step at a time.
@@ -31,8 +33,32 @@ FILTERING_RULES = f"""### Filtering Rules (if query requires filters)
   - Dates and numbers ("in 2025", "after X", "between X and Y", "more than 100") → use range operators `between`/`gt`/`gte`/`lt`/`lte`, NOT `eq`.
   - Avoid `eq` on human-typed text: an over-strict filter that matches nothing is worse than a broad one.
 - **KEEP KNOWN STRUCTURED FILTERS**: When the user names a concrete dimension like status or product, always include it as a filter — even when you also match on free text. Filters narrow the candidate set *before* ranking, so they make results more relevant, not fewer. Use `eq` when the exact value is known (e.g. status `active`); use `like` when unsure of the exact stored value (e.g. a product name).
+- **EXTRACT IDENTIFIERS**: Scan the request for specific identifiers the user gave — entity/subscription ids, customer names, reference codes (e.g. `IS4443`), or numbers (e.g. `4433`, `id 1234`). These are the highest-signal part of the request. Use `{tools.discover_filter_paths.__name__}` to find the field that holds such a value and filter it with `like` (substring/typo-tolerant). If no discovered field clearly matches an opaque identifier, do NOT invent a filter — the search already ranks on the full request text. Never silently ignore an identifier the user provided.
 - Temporal constraints like "in 2025", "between X and Y" require filters on datetime fields
 - If a discovered path does not match the user's intent, try alternative field names in a new discovery call"""
+
+
+def _domain_context_section() -> str:
+    """Return a '## Domain Knowledge' block when AGENT_DOMAIN_CONTEXT is set, else ''."""
+    context = agent_settings.AGENT_DOMAIN_CONTEXT.strip()
+    if not context:
+        return ""
+    return f"## Domain Knowledge\n{context}"
+
+
+def _retriever_guidance() -> str:
+    """Retriever-selection guidance for the search prompt, conditioned on embedding availability."""
+    if llm_settings.EMBEDDING_API_ENABLED:
+        return (
+            "- **CHOOSE A RETRIEVER**: For identifier/code/name-centric requests pass "
+            f"`retriever=HYBRID` to `{tools.run_search.__name__}`; for descriptive/sentence "
+            "requests use `retriever=SEMANTIC`; omit it to auto-route."
+        )
+    return (
+        "- **CHOOSE A RETRIEVER**: Embeddings are unavailable — use `retriever=FUZZY` for "
+        f"identifier matching with `{tools.run_search.__name__}` and rely on filters. "
+        "Do not request embedding-based retrievers."
+    )
 
 
 def get_search_execution_prompt(state: SearchState) -> str:
@@ -45,6 +71,8 @@ def get_search_execution_prompt(state: SearchState) -> str:
         Complete prompt for executing search with optional filtering
     """
     context = state.memory.format_context_for_llm(state)
+    domain_section = _domain_context_section()
+    retriever_guidance = _retriever_guidance()
 
     return dedent(
         f"""
@@ -66,6 +94,9 @@ def get_search_execution_prompt(state: SearchState) -> str:
         3. Call {tools.run_search.__name__}(entity_type=...) — you MUST pass entity_type
         4. Explain what you did in 1-2 sentences at most. DO NOT list the actual results, they are already shown to the user.
 
+        {retriever_guidance}
+
+        {domain_section}
         {FILTERING_RULES}
 
         **Note:** If a search returns no results, the system automatically retries with a broader semantic search (filters dropped) and shows the closest matches. Don't over-constrain your filters. If the result description says matches are approximate, briefly tell the user the results are the closest available rather than exact matches.

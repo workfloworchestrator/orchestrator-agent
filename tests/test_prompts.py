@@ -31,6 +31,7 @@ class TestGetSearchExecutionPrompt:
             pytest.param(["PREFER LENIENT OPERATORS", "like", "between"], id="lenient-operators"),
             pytest.param(["automatically retries with a broader semantic search"], id="semantic-fallback-note"),
             pytest.param(["KEEP KNOWN STRUCTURED FILTERS", "status", "product"], id="structured-filter-retention"),
+            pytest.param(["EXTRACT IDENTIFIERS", "highest-signal"], id="identifier-extraction"),
         ],
     )
     def test_prompt_contains(self, required):
@@ -94,3 +95,39 @@ class TestGetResultActionsPrompt:
         prompt = get_result_actions_prompt(_make_state())
         assert "get_entity_by_id" in prompt
         assert "id-prefix" in prompt
+
+
+class TestDomainContextSection:
+    @pytest.mark.parametrize(
+        "context, expect_section",
+        [
+            pytest.param("IS#### maps to imsCircuitId", True, id="set"),
+            pytest.param("", False, id="empty"),
+            pytest.param("   ", False, id="whitespace-only"),
+        ],
+    )
+    def test_domain_section(self, monkeypatch, context, expect_section):
+        monkeypatch.setattr("orchestrator_agent.prompts.agent_settings.AGENT_DOMAIN_CONTEXT", context)
+        prompt = get_search_execution_prompt(_make_state())
+        assert ("## Domain Knowledge" in prompt) is expect_section
+        if expect_section:
+            assert context.strip() in prompt
+
+
+class TestRetrieverGuidance:
+    @pytest.mark.parametrize(
+        "embeddings_enabled, expect_hybrid",
+        [
+            pytest.param(True, True, id="embeddings-on"),
+            pytest.param(False, False, id="embeddings-off"),
+        ],
+    )
+    def test_retriever_guidance(self, monkeypatch, embeddings_enabled, expect_hybrid):
+        monkeypatch.setattr("orchestrator_agent.prompts.llm_settings.EMBEDDING_API_ENABLED", embeddings_enabled)
+        prompt = get_search_execution_prompt(_make_state())
+        assert "CHOOSE A RETRIEVER" in prompt
+        if expect_hybrid:
+            assert "retriever=HYBRID" in prompt
+        else:
+            assert "retriever=FUZZY" in prompt
+            assert "retriever=HYBRID" not in prompt

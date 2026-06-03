@@ -25,6 +25,7 @@ from orchestrator.core.search.query.results import (
     SearchResponse,
     VisualizationType,
 )
+from orchestrator.core.settings import llm_settings
 from pydantic_ai import RunContext
 from pydantic_ai.ag_ui import StateDeps
 from pydantic_ai.messages import ToolReturn
@@ -47,6 +48,18 @@ def _describe_results(count: int, entity_type: EntityType, fallback_used: bool) 
     if fallback_used:
         return f"No exact matches — showing {count} closest {label} by similarity"
     return f"Found {count} matching {label}"
+
+
+def _effective_retriever(requested: RetrieverType | None) -> RetrieverType | None:
+    """Resolve the retriever to actually use, accounting for embedding availability.
+
+    SEMANTIC and HYBRID need embeddings; when EMBEDDING_API_ENABLED is False they would
+    raise ValueError in Retriever.route. Degrade those to FUZZY (which still keyword-matches
+    the identifier). FUZZY and None (auto-routing) pass through unchanged.
+    """
+    if requested in (RetrieverType.SEMANTIC, RetrieverType.HYBRID) and not llm_settings.EMBEDDING_API_ENABLED:
+        return RetrieverType.FUZZY
+    return requested
 
 
 async def _attempt_semantic_query(
@@ -115,6 +128,7 @@ async def _execute_search_with_fallback(
     entity_type: EntityType,
     limit: int,
     session: WrappedSession,
+    retriever: RetrieverType | None = None,
 ) -> tuple[SearchResponse, SelectQuery, bool]:
     """Run the structured pass, then a semantic fallback when it returns zero rows.
 
@@ -122,7 +136,8 @@ async def _execute_search_with_fallback(
     Returns (response, final_query, fallback_used).
     """
     ensure_query_initialized(state, entity_type)
-    query = cast(SelectQuery, cast(Query, state.query).model_copy(update={"limit": limit}))
+    effective = _effective_retriever(retriever) if state.user_input else None
+    query = cast(SelectQuery, cast(Query, state.query).model_copy(update={"limit": limit, "retriever": effective}))
     response, run_id, query_id = await execute_search_with_persistence(query, session, state.run_id)
     state.run_id = run_id
     state.query_id = query_id
@@ -151,6 +166,7 @@ async def run_search(
     ctx: RunContext[StateDeps[SearchState]],
     entity_type: EntityType,
     limit: int = 10,
+    retriever: RetrieverType | None = None,
 ) -> ToolReturn:
     """Execute a search to find and rank entities.
 
@@ -160,9 +176,19 @@ async def run_search(
     If the structured search finds nothing, this automatically retries with a
     broader semantic search (filters dropped) so the user still gets the closest
     matches; the result description states when matches are approximate.
+
+    Args:
+        ctx: Tool run context providing access to agent state.
+        entity_type: Type of entity to search (SUBSCRIPTION, PRODUCT, WORKFLOW, or PROCESS).
+        limit: Maximum number of results to return.
+        retriever: Ranking strategy. HYBRID (semantic + fuzzy keyword) for queries centered on
+            an identifier/code/name; SEMANTIC for descriptive phrases; FUZZY for exact tokens or
+            when embeddings are unavailable. Omit to auto-route.
     """
     state = ctx.deps.state
-    response, final_query, fallback_used = await _execute_search_with_fallback(state, entity_type, limit, db.session)
+    response, final_query, fallback_used = await _execute_search_with_fallback(
+        state, entity_type, limit, db.session, retriever
+    )
 
     description = _describe_results(len(response.results), entity_type, fallback_used)
 
