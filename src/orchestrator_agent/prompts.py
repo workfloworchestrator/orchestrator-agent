@@ -204,11 +204,14 @@ def get_planning_prompt(state: SearchState) -> str:
         1. **Check available context**: If results already exist from previous turns, you can act on them directly
         2. **Break into tasks**: Each task = one skill execution. Create as many tasks as needed to fulfill the request.
 
-        ## Example
+        ## Examples
+        Request: "Show me subscription IS1234" / "what does it look like" / "give me its details"
+        Plan: {{"tasks": [{{"action_type": "result_actions", "reasoning": "Fetch the domain model for subscription IS1234"}}]}}
+
         Request: "Find X and export them"
         Plan: {{"tasks": [{{"action_type": "search", "reasoning": "Search for X"}}, {{"action_type": "result_actions", "reasoning": "Export the results"}}]}}
 
-        Note: Getting detailed data for a single entity by its id or id-prefix (when the entity type is stated) requires a single RESULT_ACTIONS task, not SEARCH. Preparing an export also requires a RESULT_ACTIONS task."""
+        Note: A RESULT_ACTIONS task fetches a single entity's domain model/details BY DEFAULT. Getting detailed data for a single entity by its id or id-prefix (when the entity type is stated) requires a single RESULT_ACTIONS task, not SEARCH. Only plan an export RESULT_ACTIONS task when the user EXPLICITLY asks to export or download (e.g. "export", "download", "CSV", "spreadsheet"). Viewing, showing, or getting the details of results is NOT an export — do not add an export task for it."""
 
     return dedent(
         f"""
@@ -246,15 +249,18 @@ def get_result_actions_prompt(state: SearchState) -> str:
 
         Act on existing search/aggregation results.
 
-        ## Available Actions
-        - If user wants to EXPORT/DOWNLOAD results: Call {tools.prepare_export.__name__}() ONLY
+        ## Available Actions (default to fetching details — export ONLY on an explicit request)
         - If the user references a specific entity by id or id-prefix: Call {tools.get_entity_by_id.__name__}(id_or_prefix=..., entity_type=...)
         - If a full known UUID is already in hand (e.g. from a previous result): Call {tools.fetch_entity_details.__name__}(entity_id=..., entity_type=...)
+        - ONLY if the user EXPLICITLY asks to export or download (words like "export", "download", "CSV", "spreadsheet"): Call {tools.prepare_export.__name__}() ONLY
 
         ## Your Task
         Execute the requested action. After calling the tool, respond with a single short confirmation.
 
-        IMPORTANT: For export requests, ONLY call prepare_export(). Do NOT fetch entity details.
+        IMPORTANT:
+        - Viewing, showing, getting, or "giving me" an entity or results means fetching details/the domain model — that is NOT an export. Do not prepare an export unless the user explicitly used export/download language.
+        - If it is genuinely unclear whether the user wants to view details or export, do NOT guess: ask one short clarifying question and call no tool.
+        - For export requests, ONLY call {tools.prepare_export.__name__}(). Do NOT fetch entity details.
 
         ---
 
