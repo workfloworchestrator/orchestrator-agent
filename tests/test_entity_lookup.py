@@ -21,6 +21,7 @@ canned rows.
 from __future__ import annotations
 
 import os
+from uuid import UUID
 
 os.environ.setdefault("DATABASE_URI", "postgresql://test:test@localhost:5432/test")
 
@@ -132,6 +133,11 @@ class TestResolveEntityIdPrefix:
                 ("11111111-bbbb", "Beta LLC"),
                 ResolvedEntity(entity_id="11111111-bbbb", title="Beta LLC"),
                 id="second-row",
+            ),
+            pytest.param(
+                (UUID("11111111-1111-1111-1111-111111111111"), "Gamma Inc"),
+                ResolvedEntity(entity_id="11111111-1111-1111-1111-111111111111", title="Gamma Inc"),
+                id="uuid-id-coerced-to-str",
             ),
         ],
     )
