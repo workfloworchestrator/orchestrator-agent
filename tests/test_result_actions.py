@@ -200,3 +200,10 @@ class TestGetEntityById:
 
         with pytest.raises(ModelRetry, match="search by name"):
             await ra.get_entity_by_id(ctx, "acme corp", EntityType.SUBSCRIPTION)
+
+
+def test_get_entity_by_id_is_exported_from_tools_package():
+    from orchestrator_agent import tools
+
+    assert hasattr(tools, "get_entity_by_id")
+    assert "get_entity_by_id" in tools.__all__
