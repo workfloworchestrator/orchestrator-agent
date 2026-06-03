@@ -16,6 +16,7 @@ from uuid import UUID
 
 import httpx
 import structlog
+from orchestrator.core.db import db
 from orchestrator.core.search.core.types import EntityType
 from orchestrator.core.search.query.results import ExportData
 from pydantic_ai import RunContext
@@ -26,6 +27,11 @@ from pydantic_ai.toolsets import FunctionToolset
 
 from orchestrator_agent.artifacts import DataArtifact, ExportArtifact
 from orchestrator_agent.auth import token_manager
+from orchestrator_agent.entity_lookup import (
+    IdForm,
+    _classify_id,
+    resolve_entity_id_prefix,
+)
 from orchestrator_agent.memory import ToolStep
 from orchestrator_agent.settings import agent_settings
 from orchestrator_agent.state import SearchState
@@ -33,6 +39,8 @@ from orchestrator_agent.state import SearchState
 logger = structlog.get_logger(__name__)
 
 result_actions_toolset: FunctionToolset[StateDeps[SearchState]] = FunctionToolset(max_retries=2)
+
+_PREFIX_MATCH_LIMIT = 10
 
 
 async def _fetch_entity_detail(
@@ -114,6 +122,75 @@ async def fetch_entity_details(
         ToolReturn with entity JSON and DataArtifact metadata.
     """
     return await _fetch_entity_detail(ctx, entity_id, entity_type)
+
+
+async def _resolve_prefix(
+    ctx: RunContext[StateDeps[SearchState]],
+    entity_type: EntityType,
+    prefix: str,
+) -> ToolReturn:
+    """Resolve a partial id-prefix: fetch on a unique match, else list candidates."""
+    matches = resolve_entity_id_prefix(db.session, entity_type, prefix, limit=_PREFIX_MATCH_LIMIT)
+
+    if not matches:
+        raise ModelRetry(f"No {entity_type.value} found with id starting with {prefix}.")
+
+    if len(matches) == 1:
+        return await _fetch_entity_detail(ctx, matches[0].entity_id, entity_type)
+
+    capped = matches[:_PREFIX_MATCH_LIMIT]
+    candidates = [{"entity_id": m.entity_id, "title": m.title} for m in capped]
+    instruction = (
+        f"Multiple {entity_type.value} ids start with {prefix}. Ask the user to refine the id or pick one of these."
+    )
+    if len(matches) > _PREFIX_MATCH_LIMIT:
+        instruction += f" Showing the first {_PREFIX_MATCH_LIMIT} — refine the id for fewer."
+
+    description = f"Found {len(capped)} {entity_type.value} candidates for id prefix {prefix}"
+    ctx.deps.state.memory.record_tool_step(
+        ToolStep(
+            step_type="get_entity_by_id",
+            description=description,
+            context={"prefix": prefix, "match_count": len(capped)},
+        )
+    )
+
+    return ToolReturn(return_value={"candidates": candidates, "instruction": instruction})
+
+
+@result_actions_toolset.tool
+async def get_entity_by_id(
+    ctx: RunContext[StateDeps[SearchState]],
+    id_or_prefix: str,
+    entity_type: EntityType,
+) -> ToolReturn:
+    """Resolve a specific entity by full UUID or partial id-prefix, then fetch its details.
+
+    Use this when the user references a specific entity by its id — including just
+    the first few characters they copied — and the entity type is stated. On a
+    unique match the full domain model is fetched; on multiple matches a candidate
+    list is returned for the user to disambiguate.
+
+    Args:
+        ctx: Runtime context for agent (injected).
+        id_or_prefix: A full UUID or a partial id-prefix (at least 4 hex characters).
+        entity_type: Type of entity (SUBSCRIPTION, PRODUCT, WORKFLOW, PROCESS).
+
+    Returns:
+        ToolReturn with entity details (DataArtifact) for a unique match, or a plain
+        candidate list when the prefix is ambiguous.
+    """
+    form, normalized = _classify_id(id_or_prefix)
+
+    match form:
+        case IdForm.NON_HEX:
+            raise ModelRetry(f"'{id_or_prefix.strip()}' is not a UUID; search by name instead.")
+        case IdForm.TOO_SHORT:
+            raise ModelRetry("Need at least 4 characters of the id to look it up.")
+        case IdForm.FULL_UUID:
+            return await _fetch_entity_detail(ctx, normalized, entity_type)
+        case IdForm.PREFIX:
+            return await _resolve_prefix(ctx, entity_type, normalized)
 
 
 @result_actions_toolset.tool
