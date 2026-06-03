@@ -26,6 +26,7 @@ from enum import Enum
 from typing import Any
 from uuid import UUID
 
+from orchestrator.core.db.database import WrappedSession
 from orchestrator.core.db.models import (
     ProcessTable,
     ProductTable,
@@ -92,3 +93,25 @@ def _classify_id(raw: str) -> tuple[IdForm, str]:
             return IdForm.TOO_SHORT, norm
         return IdForm.PREFIX, norm
     return IdForm.FULL_UUID, norm
+
+
+def resolve_entity_id_prefix(
+    session: WrappedSession,
+    entity_type: EntityType,
+    prefix: str,
+    limit: int,
+) -> list[ResolvedEntity]:
+    """Return entities whose id starts with ``prefix`` (case-insensitive), up to ``limit``.
+
+    Fetches ``limit + 1`` rows so the caller can detect "more than limit" matches
+    without a second count query. The prefix is matched against the id cast to
+    text; on large tables this is a sequential scan, bounded by the limit.
+    """
+    spec = _ENTITY_LOOKUP[entity_type]
+    rows = (
+        session.query(spec.id_col, spec.title_expr)
+        .filter(cast(spec.id_col, Text).ilike(f"{prefix}%"))
+        .limit(limit + 1)
+        .all()
+    )
+    return [ResolvedEntity(entity_id=str(row[0]), title=str(row[1])) for row in rows]

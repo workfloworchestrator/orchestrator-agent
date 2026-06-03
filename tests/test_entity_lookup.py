@@ -30,7 +30,9 @@ from orchestrator.core.search.core.types import EntityType
 from orchestrator_agent.entity_lookup import (
     _ENTITY_LOOKUP,
     IdForm,
+    ResolvedEntity,
     _classify_id,
+    resolve_entity_id_prefix,
 )
 
 
@@ -69,3 +71,77 @@ class TestClassifyId:
         form, norm = _classify_id(raw)
         assert form is expected_form
         assert norm == expected_norm
+
+
+class _FakeQuery:
+    """Records filter/limit calls and returns canned rows from .all()."""
+
+    def __init__(self, recorder: dict, rows: list):
+        self._recorder = recorder
+        self._rows = rows
+
+    def filter(self, *args):
+        self._recorder["filter_called"] = True
+        return self
+
+    def limit(self, n):
+        self._recorder["limit_arg"] = n
+        return self
+
+    def all(self):
+        return self._rows
+
+
+class _FakeSession:
+    """Stand-in for WrappedSession that records query() column args."""
+
+    def __init__(self, rows: list):
+        self.rows = rows
+        self.recorder: dict = {}
+
+    def query(self, *args):
+        self.recorder["query_args"] = args
+        return _FakeQuery(self.recorder, self.rows)
+
+
+class TestResolveEntityIdPrefix:
+    def test_query_machinery(self):
+        """Checks that the correct columns, filter, and limit+1 are used."""
+        session = _FakeSession([("11111111-aaaa", "Acme Corp")])
+
+        resolve_entity_id_prefix(session, EntityType.SUBSCRIPTION, "1111", limit=10)
+
+        # Columns selected match the spec for this entity type (identity, not ==,
+        # because SQLAlchemy columns overload __eq__ to build SQL expressions).
+        spec = _ENTITY_LOOKUP[EntityType.SUBSCRIPTION]
+        assert session.recorder["query_args"][0] is spec.id_col
+        assert session.recorder["query_args"][1] is spec.title_expr
+        # limit+1 so the caller can detect "more than limit" without a count query.
+        assert session.recorder["limit_arg"] == 11
+        assert session.recorder["filter_called"] is True
+
+    @pytest.mark.parametrize(
+        "raw_row, expected",
+        [
+            pytest.param(
+                ("11111111-aaaa", "Acme Corp"),
+                ResolvedEntity(entity_id="11111111-aaaa", title="Acme Corp"),
+                id="first-row",
+            ),
+            pytest.param(
+                ("11111111-bbbb", "Beta LLC"),
+                ResolvedEntity(entity_id="11111111-bbbb", title="Beta LLC"),
+                id="second-row",
+            ),
+        ],
+    )
+    def test_row_mapping(self, raw_row, expected):
+        """Each DB row is mapped to a ResolvedEntity with str id and title."""
+        session = _FakeSession([raw_row])
+        result = resolve_entity_id_prefix(session, EntityType.SUBSCRIPTION, "1111", limit=10)
+        assert result == [expected]
+
+    def test_empty_rows_returns_empty_list(self):
+        session = _FakeSession([])
+        result = resolve_entity_id_prefix(session, EntityType.PRODUCT, "dead", limit=10)
+        assert result == []
