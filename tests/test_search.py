@@ -19,6 +19,7 @@ from orchestrator.core.search.core.types import (
 from orchestrator.core.search.filters import EqualityFilter, FilterTree, PathFilter
 from orchestrator.core.search.query.results import SearchResponse, SearchResult
 
+from orchestrator_agent.settings import SearchEffort
 from orchestrator_agent.state import SearchState
 from orchestrator_agent.tools import search as search_mod
 
@@ -135,7 +136,7 @@ class TestExecuteSearchWithFallback:
         monkeypatch.setattr(search_mod, "execute_search_with_persistence", fake)
         state = _state()
         response, final_query, fallback_used = await search_mod._execute_search_with_fallback(
-            state, EntityType.SUBSCRIPTION, 10, object()
+            state, EntityType.SUBSCRIPTION, 10, object(), effort=SearchEffort.HIGH
         )
         assert fallback_used is True
         assert response.metadata.search_type == "fuzzy"
@@ -153,12 +154,65 @@ class TestExecuteSearchWithFallback:
         monkeypatch.setattr(search_mod, "execute_search_with_persistence", fake)
         state = _state()
         response, final_query, fallback_used = await search_mod._execute_search_with_fallback(
-            state, EntityType.SUBSCRIPTION, 10, object()
+            state, EntityType.SUBSCRIPTION, 10, object(), effort=SearchEffort.HIGH
         )
         assert fallback_used is False
         assert response.results == []
         assert final_query.filters is not None
         assert len(calls) == 3
+
+    @pytest.mark.parametrize(
+        "effort, expected_calls",
+        [
+            pytest.param(SearchEffort.LOW, 1, id="low-no-fallback"),
+            pytest.param(SearchEffort.MEDIUM, 2, id="medium-one-pass"),
+            pytest.param(SearchEffort.HIGH, 3, id="high-two-passes"),
+        ],
+    )
+    async def test_effort_controls_number_of_fallback_passes(self, monkeypatch, effort, expected_calls):
+        calls = []
+
+        async def fake(query, session, run_id):
+            calls.append(query)
+            search_type = "structured" if query.filters is not None else "semantic"
+            return _response([], search_type), RUN_ID, STRUCT_QID
+
+        monkeypatch.setattr(search_mod, "execute_search_with_persistence", fake)
+        state = _state()
+        response, final_query, fallback_used = await search_mod._execute_search_with_fallback(
+            state, EntityType.SUBSCRIPTION, 10, object(), effort=effort
+        )
+        assert fallback_used is False
+        assert len(calls) == expected_calls
+
+    async def test_low_effort_skips_fallback_even_when_semantic_would_match(self, monkeypatch):
+        async def fake(query, session, run_id):
+            if query.filters is not None:
+                return _response([], "structured"), RUN_ID, STRUCT_QID
+            return _response([_result("s1")], "semantic"), RUN_ID, FALLBACK_QID
+
+        monkeypatch.setattr(search_mod, "execute_search_with_persistence", fake)
+        state = _state()
+        response, final_query, fallback_used = await search_mod._execute_search_with_fallback(
+            state, EntityType.SUBSCRIPTION, 10, object(), effort=SearchEffort.LOW
+        )
+        assert fallback_used is False
+        assert response.results == []
+        assert state.query_id == STRUCT_QID
+
+    async def test_effort_defaults_to_configured_setting(self, monkeypatch):
+        calls = []
+
+        async def fake(query, session, run_id):
+            calls.append(query)
+            search_type = "structured" if query.filters is not None else "semantic"
+            return _response([], search_type), RUN_ID, STRUCT_QID
+
+        monkeypatch.setattr(search_mod, "execute_search_with_persistence", fake)
+        monkeypatch.setattr(search_mod.agent_settings, "AGENT_SEARCH_EFFORT", SearchEffort.LOW)
+        state = _state()
+        await search_mod._execute_search_with_fallback(state, EntityType.SUBSCRIPTION, 10, object())
+        assert len(calls) == 1
 
     @pytest.mark.parametrize(
         "embeddings_enabled, requested, expected",
@@ -254,6 +308,36 @@ async def test_run_search_forwards_retriever(monkeypatch):
 
     await search_mod.run_search(ctx, EntityType.SUBSCRIPTION, 10, RetrieverType.HYBRID)
     assert captured["retriever"] == RetrieverType.HYBRID
+
+
+async def test_run_search_limit_defaults_to_setting_and_honors_override(monkeypatch):
+    from types import SimpleNamespace
+
+    from orchestrator.core.search.query.queries import SelectQuery
+
+    captured = {}
+
+    async def fake_execute(state, entity_type, limit, session, retriever=None):
+        captured["limit"] = limit
+        state.query_id = STRUCT_QID
+        final_query = SelectQuery(entity_type=EntityType.SUBSCRIPTION, query_text="acme", filters=None, limit=limit)
+        return _response([_result("e1")], "structured"), final_query, False
+
+    monkeypatch.setattr(search_mod, "_execute_search_with_fallback", fake_execute)
+    monkeypatch.setattr(search_mod, "db", SimpleNamespace(session=object()))
+    monkeypatch.setattr(search_mod.agent_settings, "SEARCH_RESULT_LIMIT", 25)
+
+    state = SearchState(user_input="acme", run_id=RUN_ID)
+    state.query_id = STRUCT_QID
+    state.memory.start_turn("acme")
+    state.memory.start_step("Search")
+    ctx = SimpleNamespace(deps=SimpleNamespace(state=state))
+
+    await search_mod.run_search(ctx, EntityType.SUBSCRIPTION)
+    assert captured["limit"] == 25
+
+    await search_mod.run_search(ctx, EntityType.SUBSCRIPTION, 5)
+    assert captured["limit"] == 5
 
 
 class TestEffectiveRetriever:

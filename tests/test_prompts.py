@@ -15,6 +15,7 @@ from orchestrator_agent.prompts import (
     get_search_execution_prompt,
     get_text_response_prompt,
 )
+from orchestrator_agent.settings import SearchEffort
 from orchestrator_agent.state import SearchState
 
 
@@ -112,6 +113,38 @@ class TestDomainContextSection:
         assert ("## Domain Knowledge" in prompt) is expect_section
         if expect_section:
             assert context.strip() in prompt
+
+
+class TestPlannerEffortGuidance:
+    @pytest.mark.parametrize(
+        "effort, expect_clarify",
+        [
+            pytest.param(SearchEffort.HIGH, False, id="high-proceeds"),
+            pytest.param(SearchEffort.MEDIUM, True, id="medium-asks-when-ambiguous"),
+            pytest.param(SearchEffort.LOW, True, id="low-prefers-asking"),
+        ],
+    )
+    def test_planner_clarify_bias(self, monkeypatch, effort, expect_clarify):
+        monkeypatch.setattr("orchestrator_agent.prompts.agent_settings.AGENT_SEARCH_EFFORT", effort)
+        prompt = get_planning_prompt(_make_state())
+        assert ("clarifying question" in prompt) is expect_clarify
+
+
+class TestEmptyResultsGuidance:
+    @pytest.mark.parametrize(
+        "effort, expect_auto_retry",
+        [
+            pytest.param(SearchEffort.HIGH, True, id="high-auto-retries"),
+            pytest.param(SearchEffort.MEDIUM, True, id="medium-auto-retries"),
+            pytest.param(SearchEffort.LOW, False, id="low-asks-instead"),
+        ],
+    )
+    def test_empty_results_note(self, monkeypatch, effort, expect_auto_retry):
+        monkeypatch.setattr("orchestrator_agent.prompts.agent_settings.AGENT_SEARCH_EFFORT", effort)
+        prompt = get_search_execution_prompt(_make_state())
+        assert ("automatically retries with a broader semantic search" in prompt) is expect_auto_retry
+        if not expect_auto_retry:
+            assert "ask whether to broaden the search" in prompt
 
 
 class TestRetrieverGuidance:

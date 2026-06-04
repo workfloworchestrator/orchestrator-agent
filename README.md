@@ -65,6 +65,8 @@ uv run demos/a2a_client.py <subscription-uuid>
 | `AGENT_API_KEY` | *(none)* | API key for the LLM provider |
 | `AGENT_API_VERSION` | *(none)* | API version for Azure OpenAI (e.g. `2024-12-01-preview`) |
 | `AGENT_DEBUG` | `false` | Enable debug logging for agent execution |
+| `SEARCH_RESULT_LIMIT` | `10` | Default maximum number of results a search returns when the model doesn't request a specific count. The model can still request more per query (e.g. "top 50") |
+| `AGENT_SEARCH_EFFORT` | `medium` | How hard the agent tries before deferring to you. `high` = up to two broadening fallback searches when a filtered search returns nothing (most persistent); `medium` = one broadening pass, then report no matches; `low` = no silent broadening and the planner prefers asking a clarifying question |
 | `AGENT_DOMAIN_CONTEXT` | *(empty)* | Optional free-text domain knowledge injected into the search prompt (e.g. identifier conventions and their filter fields). Empty disables the section |
 | `OAUTH2_ACTIVE` | `true` | Enable OIDC authentication on incoming requests (via `oauth2_lib`) |
 | `OAUTH2_OUTBOUND_ACTIVE` | *(unset)* | Enable OAuth2 client-credentials auth on outgoing requests to orchestrator-core. When unset, follows `OAUTH2_ACTIVE`; set to `true`/`false` to control outbound auth independently of incoming auth |

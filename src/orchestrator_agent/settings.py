@@ -13,14 +13,27 @@
 
 from __future__ import annotations
 
+from enum import Enum
 from typing import TYPE_CHECKING
 
 from orchestrator.core.search.core.types import EntityType
-from pydantic import Field, SecretStr
+from pydantic import Field, SecretStr, field_validator
 from pydantic_settings import BaseSettings
 
 if TYPE_CHECKING:
     from pydantic_ai.models import Model
+
+
+class SearchEffort(str, Enum):
+    """How persistently the agent searches before deferring to the user.
+
+    Controls the number of broadening fallback passes when a filtered search is empty
+    (HIGH=2, MEDIUM=1, LOW=0) and how readily the planner asks a clarifying question.
+    """
+
+    LOW = "low"
+    MEDIUM = "medium"
+    HIGH = "high"
 
 
 class OrchestratorAPIPaths(BaseSettings):
@@ -65,6 +78,26 @@ class AgentSettings(BaseSettings):
         default=None, description="API version for Azure OpenAI (e.g. 2024-12-01-preview)"
     )
     AGENT_DEBUG: bool = Field(default=False, description="Enable debug logging for agent execution")
+    SEARCH_RESULT_LIMIT: int = Field(
+        default=10,
+        ge=1,
+        description="Default maximum number of results returned by run_search when the model does not "
+        "request a specific limit. The model can still override this per query.",
+    )
+    AGENT_SEARCH_EFFORT: SearchEffort = Field(
+        default=SearchEffort.MEDIUM,
+        description="How hard the agent tries before deferring to the user. 'high' = up to two broadening "
+        "fallback searches when a filtered search is empty (most persistent); 'medium' = one broadening "
+        "pass, then report no matches; 'low' = no silent broadening and the planner prefers asking a "
+        "clarifying question. Controls fallback attempts and planner clarify-bias.",
+    )
+
+    @field_validator("AGENT_SEARCH_EFFORT", mode="before")
+    @classmethod
+    def _normalize_search_effort(cls, value: object) -> object:
+        """Accept case-insensitive env values like 'MEDIUM' or 'High'."""
+        return value.lower() if isinstance(value, str) else value
+
     AGENT_DOMAIN_CONTEXT: str = Field(
         default="",
         description="Optional operator-supplied domain knowledge injected into the search prompt "

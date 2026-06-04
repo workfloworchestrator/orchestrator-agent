@@ -17,7 +17,7 @@ from orchestrator.core.search.core.types import EntityType
 from orchestrator.core.settings import llm_settings
 
 from orchestrator_agent import tools
-from orchestrator_agent.settings import agent_settings
+from orchestrator_agent.settings import SearchEffort, agent_settings
 from orchestrator_agent.state import SearchState
 
 AGENT_CONTEXT = """You are an agent that executes tasks in a plan, one step at a time.
@@ -44,6 +44,43 @@ def _domain_context_section() -> str:
     if not context:
         return ""
     return f"## Domain Knowledge\n{context}"
+
+
+def _empty_results_guidance() -> str:
+    """Note about empty searches, matching what the code does at the configured effort level."""
+    if agent_settings.AGENT_SEARCH_EFFORT == SearchEffort.LOW:
+        return (
+            "**Note:** If a search returns no results, do NOT silently broaden it. Tell the user there are "
+            "no exact matches and ask whether to broaden the search or refine the criteria."
+        )
+    return (
+        "**Note:** If a search returns no results, the system automatically retries with a broader semantic "
+        "search (filters dropped) and shows the closest matches. Don't over-constrain your filters. If the "
+        "result description says matches are approximate, briefly tell the user the results are the closest "
+        "available rather than exact matches."
+    )
+
+
+def _planner_effort_guidance() -> str:
+    """Clarify-vs-act guidance for the planner, conditioned on AGENT_SEARCH_EFFORT.
+
+    HIGH proceeds decisively (no extra guidance); MEDIUM asks only on genuine ambiguity; LOW
+    prefers a clarifying question whenever the request is underspecified.
+    """
+    effort = agent_settings.AGENT_SEARCH_EFFORT
+    if effort == SearchEffort.HIGH:
+        return ""
+    if effort == SearchEffort.MEDIUM:
+        return (
+            "**WHEN AMBIGUOUS, ASK**: If the request is genuinely ambiguous or missing a key identifier "
+            "needed to act, create a single TEXT_RESPONSE task that asks one concise clarifying question "
+            "instead of guessing. Otherwise proceed."
+        )
+    return (
+        "**PREFER ASKING OVER GUESSING**: Whenever the request is underspecified — vague criteria, an "
+        "ambiguous entity, or a missing identifier — create a single TEXT_RESPONSE task that asks one "
+        "concise clarifying question rather than running a search."
+    )
 
 
 def _retriever_guidance() -> str:
@@ -73,6 +110,7 @@ def get_search_execution_prompt(state: SearchState) -> str:
     context = state.memory.format_context_for_llm(state)
     domain_section = _domain_context_section()
     retriever_guidance = _retriever_guidance()
+    empty_results_guidance = _empty_results_guidance()
 
     return dedent(
         f"""
@@ -95,11 +133,12 @@ def get_search_execution_prompt(state: SearchState) -> str:
         4. Explain what you did in 1-2 sentences at most. DO NOT list the actual results, they are already shown to the user.
 
         {retriever_guidance}
+        - **RESULT COUNT**: `{tools.run_search.__name__}` returns a server-configured default number of results. Omit `limit` for the default; pass an explicit `limit` only when the user asks for a specific or larger count (e.g. "top 50", "first 100", or "all" — use a large number).
 
         {domain_section}
         {FILTERING_RULES}
 
-        **Note:** If a search returns no results, the system automatically retries with a broader semantic search (filters dropped) and shows the closest matches. Don't over-constrain your filters. If the result description says matches are approximate, briefly tell the user the results are the closest available rather than exact matches.
+        {empty_results_guidance}
 
         ---
 
@@ -197,6 +236,7 @@ def get_planning_prompt(state: SearchState) -> str:
         Complete prompt for creating multi-step execution plan
     """
     context = state.memory.format_context_for_llm(state)
+    effort_guidance = _planner_effort_guidance()
 
     guidelines = """## Your Task & Guidelines
         Analyze the user's request and create a sequential execution plan.
@@ -223,6 +263,8 @@ def get_planning_prompt(state: SearchState) -> str:
 
         IMPORTANT: Query execution skills automatically stream results to the user.
         Do NOT create redundant tasks just to "show" or "present" results that are already displayed.
+
+        {effort_guidance}
 
         ---
 

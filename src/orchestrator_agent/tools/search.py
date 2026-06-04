@@ -34,12 +34,25 @@ from pydantic_ai.toolsets import FunctionToolset
 from orchestrator_agent.artifacts import QueryArtifact
 from orchestrator_agent.handlers import execute_search_with_persistence
 from orchestrator_agent.memory import ToolStep
+from orchestrator_agent.settings import SearchEffort, agent_settings
 from orchestrator_agent.state import SearchState
 from orchestrator_agent.tools.filters import ensure_query_initialized
 
 logger = structlog.get_logger(__name__)
 
 search_execution_toolset: FunctionToolset[StateDeps[SearchState]] = FunctionToolset(max_retries=2)
+
+# Ordered broadening passes tried (in order) when a filtered search returns nothing.
+# SEMANTIC first because it applies no similarity threshold and is effectively guaranteed
+# non-empty; None (auto-routing) is the wider net that degrades to fuzzy in orchestrator-core.
+_FALLBACK_RETRIEVER_ORDER: tuple[RetrieverType | None, ...] = (RetrieverType.SEMANTIC, None)
+
+# How many of the above passes each effort level is allowed to run.
+_EFFORT_FALLBACK_PASSES: dict[SearchEffort, int] = {
+    SearchEffort.LOW: 0,
+    SearchEffort.MEDIUM: 1,
+    SearchEffort.HIGH: 2,
+}
 
 
 def _describe_results(count: int, entity_type: EntityType, fallback_used: bool) -> str:
@@ -98,29 +111,29 @@ async def _run_semantic_fallback(
     limit: int,
     run_id: UUID | None,
     session: WrappedSession,
+    passes: int,
 ) -> tuple[SearchResponse, UUID, UUID, SelectQuery] | None:
-    """Last-resort search: filterless semantic ranking, degrading to auto-routed fuzzy.
+    """Run up to ``passes`` filterless broadening searches, returning the first with rows.
 
-    SemanticRetriever applies no similarity threshold, so with filters dropped it
-    returns the closest N embedded entities and is effectively guaranteed non-empty.
-    If the explicit semantic pass cannot embed the query (ValueError), the
-    auto-routed pass (retriever=None) degrades to fuzzy in orchestrator-core.
+    Tries the retrievers in ``_FALLBACK_RETRIEVER_ORDER`` (SEMANTIC, then auto-routed) up to
+    ``passes`` times. SemanticRetriever applies no similarity threshold, so with filters dropped
+    it returns the closest N embedded entities and is effectively guaranteed non-empty. If the
+    explicit semantic pass cannot embed the query (ValueError) it yields nothing, so the
+    auto-routed pass (retriever=None) — when allowed — degrades to fuzzy in orchestrator-core.
+    ``passes == 0`` disables broadening entirely.
     """
-    return await _attempt_semantic_query(
-        RetrieverType.SEMANTIC,
-        entity_type=entity_type,
-        query_text=query_text,
-        limit=limit,
-        run_id=run_id,
-        session=session,
-    ) or await _attempt_semantic_query(
-        None,
-        entity_type=entity_type,
-        query_text=query_text,
-        limit=limit,
-        run_id=run_id,
-        session=session,
-    )
+    for retriever in _FALLBACK_RETRIEVER_ORDER[:passes]:
+        result = await _attempt_semantic_query(
+            retriever,
+            entity_type=entity_type,
+            query_text=query_text,
+            limit=limit,
+            run_id=run_id,
+            session=session,
+        )
+        if result is not None:
+            return result
+    return None
 
 
 async def _execute_search_with_fallback(
@@ -129,12 +142,16 @@ async def _execute_search_with_fallback(
     limit: int,
     session: WrappedSession,
     retriever: RetrieverType | None = None,
+    *,
+    effort: SearchEffort | None = None,
 ) -> tuple[SearchResponse, SelectQuery, bool]:
     """Run the structured pass, then a semantic fallback when it returns zero rows.
 
-    Updates state.run_id/query_id to the query that produced the returned rows.
-    Returns (response, final_query, fallback_used).
+    The number of broadening fallback passes is governed by ``effort`` (defaulting to the
+    configured ``AGENT_SEARCH_EFFORT``): HIGH=2, MEDIUM=1, LOW=0. Updates state.run_id/query_id
+    to the query that produced the returned rows. Returns (response, final_query, fallback_used).
     """
+    resolved_effort = effort if effort is not None else agent_settings.AGENT_SEARCH_EFFORT
     ensure_query_initialized(state, entity_type)
     effective = _effective_retriever(retriever) if state.user_input else None
     query = cast(SelectQuery, cast(Query, state.query).model_copy(update={"limit": limit, "retriever": effective}))
@@ -151,6 +168,7 @@ async def _execute_search_with_fallback(
         limit=limit,
         run_id=state.run_id,
         session=session,
+        passes=_EFFORT_FALLBACK_PASSES[resolved_effort],
     )
     if fallback is None:
         return response, query, False
@@ -165,7 +183,7 @@ async def _execute_search_with_fallback(
 async def run_search(
     ctx: RunContext[StateDeps[SearchState]],
     entity_type: EntityType,
-    limit: int = 10,
+    limit: int | None = None,
     retriever: RetrieverType | None = None,
 ) -> ToolReturn:
     """Execute a search to find and rank entities.
@@ -180,14 +198,17 @@ async def run_search(
     Args:
         ctx: Tool run context providing access to agent state.
         entity_type: Type of entity to search (SUBSCRIPTION, PRODUCT, WORKFLOW, or PROCESS).
-        limit: Maximum number of results to return.
+        limit: Maximum number of results to return. Omit to use the server-configured default;
+            set a higher value when the user asks for more (e.g. "top 50", "first 100", or "all" —
+            use a large number).
         retriever: Ranking strategy. HYBRID (semantic + fuzzy keyword) for queries centered on
             an identifier/code/name; SEMANTIC for descriptive phrases; FUZZY for exact tokens or
             when embeddings are unavailable. Omit to auto-route.
     """
     state = ctx.deps.state
+    effective_limit = limit if limit is not None else agent_settings.SEARCH_RESULT_LIMIT
     response, final_query, fallback_used = await _execute_search_with_fallback(
-        state, entity_type, limit, db.session, retriever
+        state, entity_type, effective_limit, db.session, retriever
     )
 
     description = _describe_results(len(response.results), entity_type, fallback_used)

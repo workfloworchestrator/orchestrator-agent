@@ -14,11 +14,12 @@
 from unittest.mock import patch
 
 import pytest
+from pydantic import ValidationError
 from pydantic_ai.models.openai import OpenAIChatModel
 from pydantic_ai.providers.azure import AzureProvider
 from pydantic_ai.providers.openai import OpenAIProvider
 
-from orchestrator_agent.settings import AgentSettings
+from orchestrator_agent.settings import AgentSettings, SearchEffort
 
 
 def test_create_model_returns_string_when_no_custom_config():
@@ -119,6 +120,40 @@ def test_oauth2_outbound_active_defaults_to_none():
 def test_oauth2_outbound_active_accepts_explicit_bool():
     assert AgentSettings(OAUTH2_OUTBOUND_ACTIVE=True).OAUTH2_OUTBOUND_ACTIVE is True
     assert AgentSettings(OAUTH2_OUTBOUND_ACTIVE=False).OAUTH2_OUTBOUND_ACTIVE is False
+
+
+def test_search_result_limit_defaults_to_10():
+    assert AgentSettings().SEARCH_RESULT_LIMIT == 10
+
+
+def test_search_result_limit_accepts_override():
+    assert AgentSettings(SEARCH_RESULT_LIMIT=50).SEARCH_RESULT_LIMIT == 50
+
+
+def test_search_result_limit_rejects_below_one():
+    with pytest.raises(ValidationError):
+        AgentSettings(SEARCH_RESULT_LIMIT=0)
+
+
+def test_search_effort_defaults_to_medium():
+    assert AgentSettings().AGENT_SEARCH_EFFORT == SearchEffort.MEDIUM
+
+
+@pytest.mark.parametrize(
+    "value, expected",
+    [
+        pytest.param("low", SearchEffort.LOW, id="low"),
+        pytest.param("HIGH", SearchEffort.HIGH, id="upper"),
+        pytest.param("Medium", SearchEffort.MEDIUM, id="mixed-case"),
+    ],
+)
+def test_search_effort_parses_case_insensitive(value: str, expected: SearchEffort) -> None:
+    assert AgentSettings(AGENT_SEARCH_EFFORT=value).AGENT_SEARCH_EFFORT == expected
+
+
+def test_search_effort_rejects_invalid():
+    with pytest.raises(ValidationError):
+        AgentSettings(AGENT_SEARCH_EFFORT="aggressive")
 
 
 def test_agent_domain_context_defaults_to_empty():
