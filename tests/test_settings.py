@@ -148,12 +148,13 @@ def test_search_effort_defaults_to_medium():
     ],
 )
 def test_search_effort_parses_case_insensitive(value: str, expected: SearchEffort) -> None:
-    assert AgentSettings(AGENT_SEARCH_EFFORT=value).AGENT_SEARCH_EFFORT == expected
+    settings = AgentSettings.model_validate({"AGENT_SEARCH_EFFORT": value})
+    assert settings.AGENT_SEARCH_EFFORT == expected
 
 
 def test_search_effort_rejects_invalid():
     with pytest.raises(ValidationError):
-        AgentSettings(AGENT_SEARCH_EFFORT="aggressive")
+        AgentSettings.model_validate({"AGENT_SEARCH_EFFORT": "aggressive"})
 
 
 def test_agent_domain_context_defaults_to_empty():
