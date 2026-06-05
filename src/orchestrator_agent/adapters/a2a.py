@@ -34,6 +34,7 @@ from a2a.types import (
     AgentCapabilities,
     AgentCard,
     AgentSkill,
+    DataPart,
     Part,
     TextPart,
 )
@@ -44,6 +45,7 @@ from pydantic_ai.run import AgentRunResultEvent
 
 from orchestrator_agent.agent import AgentAdapter
 from orchestrator_agent.artifacts import ToolArtifact
+from orchestrator_agent.artifacts_store import record_artifact
 from orchestrator_agent.memory import FALLBACK_MESSAGE, collect_tool_descriptions
 from orchestrator_agent.skills import SKILLS
 from orchestrator_agent.state import SearchState, TaskAction
@@ -112,7 +114,7 @@ class WFOAgentExecutor(AgentExecutor):
             )
 
             event_stream = self.agent.run_stream_events(deps=deps, target_action=target_action)
-            artifact_texts: list[str] = []
+            artifact_count = 0
             final_output = ""
 
             async for event in event_stream:
@@ -125,11 +127,20 @@ class WFOAgentExecutor(AgentExecutor):
                 if isinstance(event, FunctionToolResultEvent):
                     result = event.result
                     if isinstance(result, ToolReturnPart) and isinstance(result.metadata, ToolArtifact):
-                        text = result.model_response_str()
+                        # Emit the typed artifact as a structured DataPart (for direct
+                        # A2A consumers) AND persist it keyed by thread_id so a surface
+                        # can read it back at end-of-turn even when a declarative kagent
+                        # orchestrator drops the DataPart. The artifact is a *reference*
+                        # (e.g. QueryArtifact carries a query_id); the LLM summary stays
+                        # the final message below.
+                        artifact_name = type(result.metadata).__name__
+                        artifact_data = result.metadata.model_dump(mode="json", by_alias=True)
+                        record_artifact(context_id, artifact_name, artifact_data)
                         await updater.add_artifact(
-                            parts=[Part(root=TextPart(text=text))],
+                            name=artifact_name,
+                            parts=[Part(root=DataPart(data=artifact_data))],
                         )
-                        artifact_texts.append(text)
+                        artifact_count += 1
 
                 if isinstance(event, AgentRunResultEvent):
                     final_output = str(event.result.output)
@@ -137,15 +148,15 @@ class WFOAgentExecutor(AgentExecutor):
             logger.debug(
                 "A2A execute: collection complete",
                 task_id=task_id,
-                artifact_count=len(artifact_texts),
+                artifact_count=artifact_count,
                 final_output=final_output[:200] if final_output else "",
                 query_id=str(deps.state.query_id) if deps.state.query_id else None,
             )
 
-            # Prefer artifact content over LLM text (matches collect_stream_output behavior)
-            if artifact_texts:
-                final_output = "\n\n".join(artifact_texts)
-            elif not final_output or final_output == FALLBACK_MESSAGE:
+            # Keep the LLM summary as the final message. The structured artifact
+            # was already emitted as a DataPart above; we no longer overwrite the
+            # summary with serialized artifact text.
+            if not final_output or final_output == FALLBACK_MESSAGE:
                 final_output = _build_state_fallback(deps.state)
 
             await updater.complete(

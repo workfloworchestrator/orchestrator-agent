@@ -18,6 +18,7 @@ from typing import AsyncIterator
 
 import structlog
 from fastapi import FastAPI
+from fastapi.middleware.cors import CORSMiddleware
 from orchestrator.db import init_database
 
 from orchestrator_agent.adapters import A2AAdapter, MCPApp
@@ -33,6 +34,12 @@ logger = structlog.get_logger(__name__)
 async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     """Application lifespan: DB init, migration, adapter startup/shutdown."""
     init_database(agent_settings)  # type: ignore[arg-type]  # AgentSettings has DATABASE_URI which is all init_database needs
+
+    # Side-channel store for artifacts emitted during a turn (read back by the
+    # proxy at end-of-turn). Created here since the A2A path doesn't persist state.
+    from orchestrator_agent.artifacts_store import ensure_table
+
+    ensure_table()
 
     a2a_url = f"{agent_settings.BASE_URL}/"
     a2a = A2AAdapter(AgentAdapter(agent_settings.create_model(), debug=agent_settings.AGENT_DEBUG), url=a2a_url)
@@ -63,3 +70,12 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
 app = FastAPI(title="WFO Search Agent", lifespan=lifespan)
 app.include_router(api_router)
 app.add_middleware(AuthMiddleware, auth_manager=create_auth_manager())
+# Added last → outermost, so CORS preflight (OPTIONS) is handled before auth.
+# Lets the LibreChat fork (localhost:3080) fetch query results from this agent.
+# In production the agentgateway handles CORS.
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["http://localhost:3080"],
+    allow_methods=["GET", "OPTIONS"],
+    allow_headers=["*"],
+)

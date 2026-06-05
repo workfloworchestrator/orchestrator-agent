@@ -163,12 +163,16 @@ class TestWFOAgentExecutor:
         status_events = [e for e in events if isinstance(e, TaskStatusUpdateEvent)]
         artifact_events = [e for e in events if isinstance(e, TaskArtifactUpdateEvent)]
         assert len(artifact_events) == 1
-        assert artifact_events[0].artifact.parts[0].root.text == SAMPLE_ARTIFACT.model_dump_json()
+        # Artifact is emitted as a structured DataPart named after the artifact type,
+        # so surfaces can dispatch on the name (e.g. render QueryArtifact as a table).
+        artifact = artifact_events[0].artifact
+        assert artifact.name == "QueryArtifact"
+        assert artifact.parts[0].root.data == SAMPLE_ARTIFACT.model_dump(mode="json", by_alias=True)
         assert status_events[0].status.state == TaskState.working
         assert status_events[-1].status.state == TaskState.completed
-        # Completed message should contain artifact content, not generic "Execution completed"
+        # Completed message keeps the LLM summary, not the serialized artifact.
         completed_text = status_events[-1].status.message.parts[0].root.text
-        assert completed_text == SAMPLE_ARTIFACT.model_dump_json()
+        assert completed_text == "Execution completed"
 
     @pytest.mark.asyncio
     @pytest.mark.parametrize(("skill_id", "expected"), [("search", TaskAction.SEARCH), ("nonexistent", None)])
