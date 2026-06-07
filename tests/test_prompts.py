@@ -30,9 +30,10 @@ class TestGetSearchExecutionPrompt:
             pytest.param(["Searching", "run_search", "discover_filter_paths", "set_filter_tree"], id="key-elements"),
             pytest.param(["Filtering Rules", "MANDATORY FIRST STEP"], id="filtering-rules"),
             pytest.param(["PREFER LENIENT OPERATORS", "like", "between"], id="lenient-operators"),
-            pytest.param(["automatically retries with a broader semantic search"], id="semantic-fallback-note"),
+            pytest.param(["automatically retries"], id="semantic-fallback-note"),
             pytest.param(["KEEP KNOWN STRUCTURED FILTERS", "status", "product"], id="structured-filter-retention"),
             pytest.param(["EXTRACT IDENTIFIERS", "highest-signal"], id="identifier-extraction"),
+            pytest.param(["customer/organisation", "PRODUCT NAME vs TYPE"], id="customer-and-product-guidance"),
         ],
     )
     def test_prompt_contains(self, required):
@@ -56,7 +57,7 @@ class TestGetAggregationExecutionPrompt:
 
     def test_aggregation_has_no_semantic_fallback_note(self):
         prompt = get_aggregation_execution_prompt(_make_state())
-        assert "automatically retries with a broader semantic search" not in prompt
+        assert "automatically retries" not in prompt
         assert "PREFER LENIENT OPERATORS" in prompt
 
 
@@ -142,7 +143,7 @@ class TestEmptyResultsGuidance:
     def test_empty_results_note(self, monkeypatch, effort, expect_auto_retry):
         monkeypatch.setattr("orchestrator_agent.prompts.agent_settings.AGENT_SEARCH_EFFORT", effort)
         prompt = get_search_execution_prompt(_make_state())
-        assert ("automatically retries with a broader semantic search" in prompt) is expect_auto_retry
+        assert ("automatically retries" in prompt) is expect_auto_retry
         if not expect_auto_retry:
             assert "ask whether to broaden the search" in prompt
 
@@ -161,6 +162,7 @@ class TestRetrieverGuidance:
         assert "CHOOSE A RETRIEVER" in prompt
         if expect_hybrid:
             assert "retriever=HYBRID" in prompt
+            assert "cannot match opaque tokens" in prompt
         else:
             assert "retriever=FUZZY" in prompt
             assert "retriever=HYBRID" not in prompt

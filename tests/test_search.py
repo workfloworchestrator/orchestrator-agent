@@ -1,4 +1,4 @@
-"""Tests for run_search lenient/semantic-fallback helpers."""
+"""Tests for run_search broadening-fallback helpers."""
 
 from __future__ import annotations
 
@@ -16,7 +16,13 @@ from orchestrator.core.search.core.types import (
     SearchMetadata,
     UIType,
 )
-from orchestrator.core.search.filters import EqualityFilter, FilterTree, PathFilter
+from orchestrator.core.search.filters import (
+    EqualityFilter,
+    FilterTree,
+    NumericValueFilter,
+    PathFilter,
+    StringFilter,
+)
 from orchestrator.core.search.query.results import SearchResponse, SearchResult
 
 from orchestrator_agent.settings import SearchEffort
@@ -41,13 +47,25 @@ def _response(results: list[SearchResult], search_type: str) -> SearchResponse:
     return SearchResponse(results=results, metadata=SearchMetadata(search_type=search_type, description="x"))
 
 
+def _eq(path: str, value: str) -> PathFilter:
+    return PathFilter(path=path, condition=EqualityFilter(op=FilterOp.EQ, value=value), value_kind=UIType.STRING)
+
+
+def _like(path: str, value: str) -> PathFilter:
+    return PathFilter(path=path, condition=StringFilter(op=FilterOp.LIKE, value=value), value_kind=UIType.STRING)
+
+
+def _num_gt(path: str, value: int) -> PathFilter:
+    return PathFilter(path=path, condition=NumericValueFilter(op=FilterOp.GT, value=value), value_kind=UIType.NUMBER)
+
+
+def _tree(*leaves: PathFilter) -> FilterTree:
+    return FilterTree(op=BooleanOperator.AND, children=list(leaves))
+
+
 def _filters() -> FilterTree:
-    return FilterTree(
-        children=[
-            PathFilter(path="name", condition=EqualityFilter(op=FilterOp.EQ, value="acme"), value_kind=UIType.STRING)
-        ],
-        op=BooleanOperator.AND,
-    )
+    """A single exact (eq) leaf — has nothing relaxable, so it skips the relaxed rung."""
+    return _tree(_eq("name", "acme"))
 
 
 def _state(user_input: str = "acme corp", with_filters: bool = True) -> SearchState:
@@ -57,16 +75,60 @@ def _state(user_input: str = "acme corp", with_filters: bool = True) -> SearchSt
     return state
 
 
-class TestDescribeResults:
+def _has_like(filters: FilterTree | None) -> bool:
+    return filters is not None and any(isinstance(leaf.condition, StringFilter) for leaf in filters.get_all_leaves())
+
+
+class TestHighSignalFilters:
+    def test_drops_like_keeps_exact(self):
+        tree = _tree(
+            _eq("subscription.customer_id", "uuid-x"),
+            _eq("subscription.status", "active"),
+            _like("subscription.product.name", "%bgp%"),
+        )
+        reduced = search_mod._high_signal_filters(tree)
+        assert reduced is not None
+        assert reduced.get_all_paths() == {"subscription.customer_id", "subscription.status"}
+
+    def test_keeps_range_drops_like(self):
+        tree = _tree(_num_gt("subscription.bandwidth", 100), _like("subscription.product.name", "%bgp%"))
+        reduced = search_mod._high_signal_filters(tree)
+        assert reduced is not None
+        assert reduced.get_all_paths() == {"subscription.bandwidth"}
+
     @pytest.mark.parametrize(
-        "count, fallback_used, expected",
+        "tree",
         [
-            pytest.param(5, False, "Found 5 matching SUBSCRIPTION", id="exact"),
-            pytest.param(3, True, "No exact matches — showing 3 closest SUBSCRIPTION by similarity", id="fallback"),
+            pytest.param(None, id="none-input"),
+            pytest.param(_tree(_eq("subscription.status", "active")), id="nothing-relaxable"),
+            pytest.param(_tree(_like("subscription.product.name", "%bgp%")), id="nothing-high-signal"),
         ],
     )
-    def test_describe(self, count, fallback_used, expected):
-        assert search_mod._describe_results(count, EntityType.SUBSCRIPTION, fallback_used) == expected
+    def test_returns_none_when_relaxation_is_not_useful(self, tree):
+        assert search_mod._high_signal_filters(tree) is None
+
+
+class TestDescribeResults:
+    @pytest.mark.parametrize(
+        "count, mode, expected",
+        [
+            pytest.param(5, search_mod.MatchMode.EXACT, "Found 5 matching SUBSCRIPTION", id="exact"),
+            pytest.param(
+                4,
+                search_mod.MatchMode.RELAXED,
+                "No exact match on all criteria — showing 4 SUBSCRIPTION matching the key filters",
+                id="relaxed",
+            ),
+            pytest.param(
+                3,
+                search_mod.MatchMode.SIMILARITY,
+                "No exact matches — showing 3 closest SUBSCRIPTION by similarity",
+                id="similarity",
+            ),
+        ],
+    )
+    def test_describe(self, count, mode, expected):
+        assert search_mod._describe_results(count, EntityType.SUBSCRIPTION, mode) == expected
 
 
 class TestExecuteSearchWithFallback:
@@ -79,32 +141,95 @@ class TestExecuteSearchWithFallback:
 
         monkeypatch.setattr(search_mod, "execute_search_with_persistence", fake)
         state = _state()
-        response, final_query, fallback_used = await search_mod._execute_search_with_fallback(
+        response, final_query, mode = await search_mod._execute_search_with_fallback(
             state, EntityType.SUBSCRIPTION, 10, object()
         )
-        assert fallback_used is False
+        assert mode == search_mod.MatchMode.EXACT
         assert len(response.results) == 1
         assert len(calls) == 1
         assert state.query_id == STRUCT_QID
 
-    async def test_empty_structured_triggers_semantic_fallback(self, monkeypatch):
+    async def test_relaxed_pass_preserves_high_signal_filters(self, monkeypatch):
+        """An over-constraining `like` filter is relaxed while exact id/status filters are kept."""
+        tree = _tree(
+            _eq("subscription.customer_id", "uuid-x"),
+            _eq("subscription.status", "active"),
+            _like("subscription.product.name", "%bgp%"),
+        )
+
         async def fake(query, session, run_id):
+            if _has_like(query.filters):
+                return _response([], "structured"), RUN_ID, STRUCT_QID
+            if query.filters is not None:
+                return _response([_result("r1")], "structured"), RUN_ID, FALLBACK_QID
+            return _response([_result("s1")], "semantic"), RUN_ID, uuid4()
+
+        monkeypatch.setattr(search_mod, "execute_search_with_persistence", fake)
+        state = SearchState(user_input="uva bgp", run_id=RUN_ID)
+        state.pending_filters = tree
+        response, final_query, mode = await search_mod._execute_search_with_fallback(
+            state, EntityType.SUBSCRIPTION, 10, object(), effort=SearchEffort.MEDIUM
+        )
+        assert mode == search_mod.MatchMode.RELAXED
+        assert final_query.filters is not None
+        assert final_query.filters.get_all_paths() == {"subscription.customer_id", "subscription.status"}
+        assert final_query.retriever is None
+        assert state.query_id == FALLBACK_QID
+
+    async def test_filterless_passes_try_hybrid_before_semantic(self, monkeypatch):
+        seen = []
+
+        async def fake(query, session, run_id):
+            seen.append(query.retriever)
+            return _response([], "structured" if query.filters is not None else "semantic"), RUN_ID, STRUCT_QID
+
+        monkeypatch.setattr(search_mod, "execute_search_with_persistence", fake)
+        monkeypatch.setattr(search_mod.llm_settings, "EMBEDDING_API_ENABLED", True)
+        state = _state()  # single eq leaf -> no relaxed rung
+        await search_mod._execute_search_with_fallback(
+            state, EntityType.SUBSCRIPTION, 10, object(), effort=SearchEffort.HIGH
+        )
+        assert seen == [None, RetrieverType.HYBRID, RetrieverType.SEMANTIC]
+
+    async def test_filterless_passes_degrade_to_fuzzy_without_embeddings(self, monkeypatch):
+        seen = []
+
+        async def fake(query, session, run_id):
+            seen.append(query.retriever)
             if query.filters is not None:
                 return _response([], "structured"), RUN_ID, STRUCT_QID
+            return _response([_result("f1")], "fuzzy"), RUN_ID, FALLBACK_QID
+
+        monkeypatch.setattr(search_mod, "execute_search_with_persistence", fake)
+        monkeypatch.setattr(search_mod.llm_settings, "EMBEDDING_API_ENABLED", False)
+        state = _state()
+        response, final_query, mode = await search_mod._execute_search_with_fallback(
+            state, EntityType.SUBSCRIPTION, 10, object(), effort=SearchEffort.HIGH
+        )
+        assert mode == search_mod.MatchMode.SIMILARITY
+        assert final_query.retriever == RetrieverType.FUZZY
+        assert seen[:2] == [None, RetrieverType.FUZZY]
+
+    async def test_valueerror_skips_to_next_filterless_pass(self, monkeypatch):
+        seen = []
+
+        async def fake(query, session, run_id):
+            seen.append(query.retriever)
+            if query.filters is not None:
+                return _response([], "structured"), RUN_ID, STRUCT_QID
+            if query.retriever == RetrieverType.HYBRID:
+                raise ValueError("embedding unavailable")
             return _response([_result("s1")], "semantic"), RUN_ID, FALLBACK_QID
 
         monkeypatch.setattr(search_mod, "execute_search_with_persistence", fake)
+        monkeypatch.setattr(search_mod.llm_settings, "EMBEDDING_API_ENABLED", True)
         state = _state()
-        response, final_query, fallback_used = await search_mod._execute_search_with_fallback(
-            state, EntityType.SUBSCRIPTION, 10, object()
+        response, final_query, mode = await search_mod._execute_search_with_fallback(
+            state, EntityType.SUBSCRIPTION, 10, object(), effort=SearchEffort.HIGH
         )
-        assert fallback_used is True
-        assert len(response.results) == 1
-        assert response.metadata.search_type == "semantic"
-        assert final_query.filters is None
+        assert mode == search_mod.MatchMode.SIMILARITY
         assert final_query.retriever == RetrieverType.SEMANTIC
-        assert final_query.query_text == "acme corp"
-        assert state.query_id == FALLBACK_QID
+        assert seen == [None, RetrieverType.HYBRID, RetrieverType.SEMANTIC]
 
     async def test_empty_user_input_skips_fallback(self, monkeypatch):
         calls = []
@@ -115,33 +240,12 @@ class TestExecuteSearchWithFallback:
 
         monkeypatch.setattr(search_mod, "execute_search_with_persistence", fake)
         state = _state(user_input="", with_filters=True)
-        response, final_query, fallback_used = await search_mod._execute_search_with_fallback(
+        response, final_query, mode = await search_mod._execute_search_with_fallback(
             state, EntityType.SUBSCRIPTION, 10, object()
         )
-        assert fallback_used is False
+        assert mode == search_mod.MatchMode.EXACT
         assert response.results == []
         assert len(calls) == 1
-
-    async def test_semantic_valueerror_degrades_to_fuzzy(self, monkeypatch):
-        seen_retrievers = []
-
-        async def fake(query, session, run_id):
-            seen_retrievers.append(query.retriever)
-            if query.filters is not None:
-                return _response([], "structured"), RUN_ID, STRUCT_QID
-            if query.retriever == RetrieverType.SEMANTIC:
-                raise ValueError("embedding unavailable")
-            return _response([_result("f1")], "fuzzy"), RUN_ID, FALLBACK_QID
-
-        monkeypatch.setattr(search_mod, "execute_search_with_persistence", fake)
-        state = _state()
-        response, final_query, fallback_used = await search_mod._execute_search_with_fallback(
-            state, EntityType.SUBSCRIPTION, 10, object(), effort=SearchEffort.HIGH
-        )
-        assert fallback_used is True
-        assert response.metadata.search_type == "fuzzy"
-        assert final_query.retriever is None
-        assert seen_retrievers == [None, RetrieverType.SEMANTIC, None]
 
     async def test_all_passes_empty_returns_structured(self, monkeypatch):
         calls = []
@@ -152,11 +256,11 @@ class TestExecuteSearchWithFallback:
             return _response([], search_type), RUN_ID, STRUCT_QID
 
         monkeypatch.setattr(search_mod, "execute_search_with_persistence", fake)
-        state = _state()
-        response, final_query, fallback_used = await search_mod._execute_search_with_fallback(
+        state = _state()  # single eq leaf -> no relaxed rung; HIGH tries both filterless rungs
+        response, final_query, mode = await search_mod._execute_search_with_fallback(
             state, EntityType.SUBSCRIPTION, 10, object(), effort=SearchEffort.HIGH
         )
-        assert fallback_used is False
+        assert mode == search_mod.MatchMode.EXACT
         assert response.results == []
         assert final_query.filters is not None
         assert len(calls) == 3
@@ -166,10 +270,10 @@ class TestExecuteSearchWithFallback:
         [
             pytest.param(SearchEffort.LOW, 1, id="low-no-fallback"),
             pytest.param(SearchEffort.MEDIUM, 2, id="medium-one-pass"),
-            pytest.param(SearchEffort.HIGH, 3, id="high-two-passes"),
+            pytest.param(SearchEffort.HIGH, 3, id="high-two-filterless-passes"),
         ],
     )
-    async def test_effort_controls_number_of_fallback_passes(self, monkeypatch, effort, expected_calls):
+    async def test_effort_controls_passes_without_relaxable_filter(self, monkeypatch, effort, expected_calls):
         calls = []
 
         async def fake(query, session, run_id):
@@ -178,27 +282,31 @@ class TestExecuteSearchWithFallback:
             return _response([], search_type), RUN_ID, STRUCT_QID
 
         monkeypatch.setattr(search_mod, "execute_search_with_persistence", fake)
-        state = _state()
-        response, final_query, fallback_used = await search_mod._execute_search_with_fallback(
-            state, EntityType.SUBSCRIPTION, 10, object(), effort=effort
-        )
-        assert fallback_used is False
+        state = _state()  # single eq leaf -> ladder is [hybrid, semantic]
+        await search_mod._execute_search_with_fallback(state, EntityType.SUBSCRIPTION, 10, object(), effort=effort)
         assert len(calls) == expected_calls
 
-    async def test_low_effort_skips_fallback_even_when_semantic_would_match(self, monkeypatch):
+    @pytest.mark.parametrize(
+        "effort, expected_calls",
+        [
+            pytest.param(SearchEffort.LOW, 1, id="low-no-fallback"),
+            pytest.param(SearchEffort.MEDIUM, 2, id="medium-relaxed-only"),
+            pytest.param(SearchEffort.HIGH, 4, id="high-relaxed-plus-filterless"),
+        ],
+    )
+    async def test_effort_controls_passes_with_relaxable_filter(self, monkeypatch, effort, expected_calls):
+        calls = []
+
         async def fake(query, session, run_id):
-            if query.filters is not None:
-                return _response([], "structured"), RUN_ID, STRUCT_QID
-            return _response([_result("s1")], "semantic"), RUN_ID, FALLBACK_QID
+            calls.append(query)
+            search_type = "structured" if query.filters is not None else "semantic"
+            return _response([], search_type), RUN_ID, STRUCT_QID
 
         monkeypatch.setattr(search_mod, "execute_search_with_persistence", fake)
-        state = _state()
-        response, final_query, fallback_used = await search_mod._execute_search_with_fallback(
-            state, EntityType.SUBSCRIPTION, 10, object(), effort=SearchEffort.LOW
-        )
-        assert fallback_used is False
-        assert response.results == []
-        assert state.query_id == STRUCT_QID
+        state = SearchState(user_input="uva bgp", run_id=RUN_ID)
+        state.pending_filters = _tree(_eq("subscription.status", "active"), _like("subscription.product.name", "%bgp%"))
+        await search_mod._execute_search_with_fallback(state, EntityType.SUBSCRIPTION, 10, object(), effort=effort)
+        assert len(calls) == expected_calls
 
     async def test_effort_defaults_to_configured_setting(self, monkeypatch):
         calls = []
@@ -238,20 +346,24 @@ class TestExecuteSearchWithFallback:
 
 class TestRunSearchArtifact:
     @pytest.mark.parametrize(
-        "fallback_used, search_type, expected_description",
+        "mode, search_type, expected_description",
         [
-            pytest.param(False, "structured", "Found 1 matching SUBSCRIPTION", id="exact"),
+            pytest.param(search_mod.MatchMode.EXACT, "structured", "Found 1 matching SUBSCRIPTION", id="exact"),
             pytest.param(
-                True,
+                search_mod.MatchMode.RELAXED,
+                "structured",
+                "No exact match on all criteria — showing 1 SUBSCRIPTION matching the key filters",
+                id="relaxed",
+            ),
+            pytest.param(
+                search_mod.MatchMode.SIMILARITY,
                 "semantic",
                 "No exact matches — showing 1 closest SUBSCRIPTION by similarity",
-                id="fallback",
+                id="similarity",
             ),
         ],
     )
-    async def test_run_search_propagates_search_type(
-        self, monkeypatch, fallback_used, search_type, expected_description
-    ):
+    async def test_run_search_propagates_match_mode(self, monkeypatch, mode, search_type, expected_description):
         from types import SimpleNamespace
 
         from orchestrator.core.search.query.queries import SelectQuery
@@ -261,7 +373,7 @@ class TestRunSearchArtifact:
 
         async def fake_execute(state, entity_type, limit, session, retriever=None):
             state.query_id = STRUCT_QID
-            return response, final_query, fallback_used
+            return response, final_query, mode
 
         monkeypatch.setattr(search_mod, "_execute_search_with_fallback", fake_execute)
         monkeypatch.setattr(search_mod, "db", SimpleNamespace(session=object()))
@@ -280,7 +392,7 @@ class TestRunSearchArtifact:
         assert artifact.total_results == 1
 
         recorded = state.memory.current_turn.current_step.tool_steps[-1]
-        assert recorded.context["fallback_used"] is fallback_used
+        assert recorded.context["match_mode"] == mode.value
         assert recorded.context["search_type"] == search_type
 
 
@@ -295,7 +407,7 @@ async def test_run_search_forwards_retriever(monkeypatch):
         captured["retriever"] = retriever
         state.query_id = STRUCT_QID
         final_query = SelectQuery(entity_type=EntityType.SUBSCRIPTION, query_text="acme", filters=None, limit=10)
-        return _response([_result("e1")], "structured"), final_query, False
+        return _response([_result("e1")], "structured"), final_query, search_mod.MatchMode.EXACT
 
     monkeypatch.setattr(search_mod, "_execute_search_with_fallback", fake_execute)
     monkeypatch.setattr(search_mod, "db", SimpleNamespace(session=object()))
@@ -321,7 +433,7 @@ async def test_run_search_limit_defaults_to_setting_and_honors_override(monkeypa
         captured["limit"] = limit
         state.query_id = STRUCT_QID
         final_query = SelectQuery(entity_type=EntityType.SUBSCRIPTION, query_text="acme", filters=None, limit=limit)
-        return _response([_result("e1")], "structured"), final_query, False
+        return _response([_result("e1")], "structured"), final_query, search_mod.MatchMode.EXACT
 
     monkeypatch.setattr(search_mod, "_execute_search_with_fallback", fake_execute)
     monkeypatch.setattr(search_mod, "db", SimpleNamespace(session=object()))
