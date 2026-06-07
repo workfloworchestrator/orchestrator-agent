@@ -11,12 +11,13 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+from datetime import date, datetime
 from typing import Any
 
 import structlog
 from orchestrator.core.db import db
 from orchestrator.core.search.core.types import EntityType, FilterOp, QueryOperation, UIType
-from orchestrator.core.search.filters import FilterTree
+from orchestrator.core.search.filters import DateRangeFilter, DateValueFilter, FilterTree
 from orchestrator.core.search.filters.definitions import TypeDefinition, generate_definitions
 from orchestrator.core.search.query.builder import ComponentInfo, LeafInfo, build_paths_query, process_path_rows
 from orchestrator.core.search.query.exceptions import PathNotFoundError, QueryValidationError
@@ -84,6 +85,34 @@ def ensure_query_initialized(
 filter_building_toolset: FunctionToolset[StateDeps[SearchState]] = FunctionToolset(max_retries=2)
 
 
+def _to_datetime(value: datetime | date | str) -> datetime | date:
+    """Parse an ISO date/datetime string to a ``datetime``; pass non-strings through unchanged."""
+    return datetime.fromisoformat(value) if isinstance(value, str) else value
+
+
+def _coerce_condition_dates(condition: object) -> None:
+    """Coerce a date filter leaf's string value(s) to ``datetime`` in place."""
+    match condition:
+        case DateValueFilter():
+            condition.value = _to_datetime(condition.value)
+        case DateRangeFilter():
+            condition.value.start = _to_datetime(condition.value.start)
+            condition.value.end = _to_datetime(condition.value.end)
+        case _:
+            pass
+
+
+def _coerce_date_filter_values(filters: FilterTree) -> None:
+    """Coerce ISO date strings in date filters to ``datetime`` so they bind as TIMESTAMP.
+
+    Workaround for orchestrator-core (<= 5.0.4): ``DateValueFilter``/``DateRangeFilter`` compare a
+    ``timestamptz``-cast column against the raw value. A ``str`` value binds as VARCHAR, so Postgres
+    rejects ``timestamptz >= varchar``; a ``datetime`` binds as TIMESTAMP. Mutates the leaves in place.
+    """
+    for leaf in filters.get_all_leaves():
+        _coerce_condition_dates(leaf.condition)
+
+
 async def _list_paths(
     prefix: str,
     q: str | None,
@@ -141,6 +170,9 @@ async def set_filter_tree(
         logger.error("Unexpected Filter validation exception", error=str(e))
         raise ModelRetry(f"Filter validation failed: {str(e)}. Please check your filter structure and try again.")
 
+    if filters is not None:
+        _coerce_date_filter_values(filters)
+
     # Store validated filters — applied when query is created by run_search/run_aggregation
     if ctx.deps.state.query is not None:
         ctx.deps.state.query = ctx.deps.state.query.model_copy(update={"filters": filters})
@@ -148,6 +180,35 @@ async def set_filter_tree(
         ctx.deps.state.pending_filters = filters
 
     return filters
+
+
+async def _discover_field(field_name: str, entity_type: EntityType) -> dict[str, Any]:
+    """Discover the filterable leaves/components whose name contains ``field_name``."""
+    paths_response = await _list_paths(prefix="", q=field_name, entity_type=entity_type, limit=100)
+    needle = field_name.lower()
+    matching_leaves = [
+        {"name": leaf.name, "value_kind": leaf.ui_types, "paths": leaf.paths}
+        for leaf in paths_response.leaves
+        if needle in leaf.name.lower()
+    ]
+    matching_components = [
+        {"name": comp.name, "value_kind": comp.ui_types}
+        for comp in paths_response.components
+        if needle in comp.name.lower()
+    ]
+    if not matching_leaves and not matching_components:
+        return {
+            "status": "NOT_FOUND",
+            "guidance": f"No filterable paths found containing '{field_name}'. Do not create a filter for this.",
+            "leaves": [],
+            "components": [],
+        }
+    return {
+        "status": "OK",
+        "guidance": f"Found {len(matching_leaves)} field(s) and {len(matching_components)} component(s) for '{field_name}'.",
+        "leaves": matching_leaves,
+        "components": matching_components,
+    }
 
 
 @filter_building_toolset.tool
@@ -167,49 +228,7 @@ async def discover_filter_paths(
         else:
             raise ModelRetry("Entity type not specified and no query in state. Pass entity_type.")
 
-    all_results = {}
-    for field_name in field_names:
-        paths_response = await _list_paths(prefix="", q=field_name, entity_type=entity_type, limit=100)
-
-        matching_leaves = []
-        for leaf in paths_response.leaves:
-            if field_name.lower() in leaf.name.lower():
-                matching_leaves.append(
-                    {
-                        "name": leaf.name,
-                        "value_kind": leaf.ui_types,
-                        "paths": leaf.paths,
-                    }
-                )
-
-        matching_components = []
-        for comp in paths_response.components:
-            if field_name.lower() in comp.name.lower():
-                matching_components.append(
-                    {
-                        "name": comp.name,
-                        "value_kind": comp.ui_types,
-                    }
-                )
-
-        result_for_field: dict[str, Any]
-        if not matching_leaves and not matching_components:
-            result_for_field = {
-                "status": "NOT_FOUND",
-                "guidance": f"No filterable paths found containing '{field_name}'. Do not create a filter for this.",
-                "leaves": [],
-                "components": [],
-            }
-        else:
-            result_for_field = {
-                "status": "OK",
-                "guidance": f"Found {len(matching_leaves)} field(s) and {len(matching_components)} component(s) for '{field_name}'.",
-                "leaves": matching_leaves,
-                "components": matching_components,
-            }
-
-        all_results[field_name] = result_for_field
-    return all_results
+    return {field_name: await _discover_field(field_name, entity_type) for field_name in field_names}
 
 
 @filter_building_toolset.tool_plain
