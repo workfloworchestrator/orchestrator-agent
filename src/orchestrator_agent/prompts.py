@@ -34,6 +34,8 @@ FILTERING_RULES = f"""### Filtering Rules (if query requires filters)
   - Avoid `eq` on human-typed text: an over-strict filter that matches nothing is worse than a broad one.
 - **KEEP KNOWN STRUCTURED FILTERS**: When the user names a concrete dimension like status or product, always include it as a filter — even when you also match on free text. Filters narrow the candidate set *before* ranking, so they make results more relevant, not fewer. Use `eq` when the exact value is known (e.g. status `active`); use `like` when unsure of the exact stored value (e.g. a product name).
 - **EXTRACT IDENTIFIERS**: Scan the request for specific identifiers the user gave — entity/subscription ids, customer names, reference codes (e.g. `IS4443`), or numbers (e.g. `4433`, `id 1234`). These are the highest-signal part of the request. Use `{tools.discover_filter_paths.__name__}` to find the field that holds such a value and filter it with `like` (substring/typo-tolerant). If no discovered field clearly matches an opaque identifier, do NOT invent a filter — the search already ranks on the full request text. Never silently ignore an identifier the user provided.
+- **CUSTOMER / ORGANISATION SCOPE**: A customer/organisation identifier — including a bare UUID such as a CRM org id — is the single highest-signal scope. Discover the customer field (`{tools.discover_filter_paths.__name__}(["customer"])`) and filter it with `eq` (e.g. `customer_id`). Never drop a customer/organisation scope the user gave; keep it on every broadening attempt.
+- **PRODUCT NAME vs TYPE**: the specific product/offering name lives in `product_name` (and `tag`); the product *type* is a separate, coarser category. Put specific product or feature keywords (e.g. an IP/BGP offering or other product line) in a `product_name`/`tag` `like` filter — do NOT put them in `product type`, which only holds broad category values.
 - Temporal constraints like "in 2025", "between X and Y" require filters on datetime fields
 - If a discovered path does not match the user's intent, try alternative field names in a new discovery call"""
 
@@ -54,10 +56,11 @@ def _empty_results_guidance() -> str:
             "no exact matches and ask whether to broaden the search or refine the criteria."
         )
     return (
-        "**Note:** If a search returns no results, the system automatically retries with a broader semantic "
-        "search (filters dropped) and shows the closest matches. Don't over-constrain your filters. If the "
-        "result description says matches are approximate, briefly tell the user the results are the closest "
-        "available rather than exact matches."
+        "**Note:** If a search returns no results, the system automatically retries — first relaxing the "
+        "loosest text filters while keeping your high-signal filters (ids, status, customer), then if needed "
+        "dropping all filters and showing the closest matches. Keep high-signal filters; don't over-constrain "
+        "with guessed text. If the result description says matches are relaxed or approximate, briefly tell the "
+        "user they are the closest available rather than exact matches."
     )
 
 
@@ -89,7 +92,10 @@ def _retriever_guidance() -> str:
         return (
             "- **CHOOSE A RETRIEVER**: For identifier/code/name-centric requests pass "
             f"`retriever=HYBRID` to `{tools.run_search.__name__}`; for descriptive/sentence "
-            "requests use `retriever=SEMANTIC`; omit it to auto-route."
+            "requests use `retriever=SEMANTIC`; omit it to auto-route. When the request centers on "
+            "an opaque identifier or UUID (a customer/org id, circuit code, subscription id), you MUST "
+            "pass `retriever=HYBRID` so the identifier is keyword-matched — SEMANTIC alone cannot match "
+            "opaque tokens."
         )
     return (
         "- **CHOOSE A RETRIEVER**: Embeddings are unavailable — use `retriever=FUZZY` for "
