@@ -19,6 +19,7 @@ from orchestrator.core.search.filters import (
     StringFilter,
 )
 from orchestrator.core.search.filters.date_filters import DateRange
+from orchestrator.core.search.query.builder import ComponentInfo, LeafInfo
 from orchestrator.core.search.query.queries import CountQuery, SelectQuery
 from sqlalchemy import column
 from sqlalchemy.dialects import postgresql
@@ -122,7 +123,7 @@ def _range_leaf(start: str = "2018-01-01", end: str = "2026-12-31") -> PathFilte
 def _value_leaf(op: FilterOp, value: str = "2020-06-01") -> PathFilter:
     return PathFilter(
         path="subscription.start_date",
-        condition=DateValueFilter(op=op, value=value),
+        condition=DateValueFilter(op=op, value=value),  # type: ignore[arg-type]
         value_kind=UIType.DATETIME,
     )
 
@@ -208,3 +209,28 @@ class TestSetFilterTreeCoercesDates:
         stored = state.pending_filters
         assert stored is not None
         assert stored.get_all_leaves()[0].condition.value.start == datetime(2018, 1, 1)
+
+
+class TestDiscoverField:
+    @pytest.mark.parametrize(
+        "field_name, expected_status, leaf_count, component_count",
+        [
+            pytest.param("status", "OK", 1, 0, id="leaf-match"),
+            pytest.param("node", "OK", 0, 1, id="component-match"),
+            pytest.param("zzz", "NOT_FOUND", 0, 0, id="no-match"),
+        ],
+    )
+    async def test_discover_field_filters_by_name(
+        self, monkeypatch, field_name, expected_status, leaf_count, component_count
+    ):
+        async def _fake_list_paths(prefix, q, entity_type, limit=100):
+            return PathsResponse(
+                leaves=[LeafInfo(name="subscription.status", ui_types=[UIType.STRING], paths=["subscription.status"])],
+                components=[ComponentInfo(name="subscription.node", ui_types=[UIType.STRING])],
+            )
+
+        monkeypatch.setattr(filters_mod, "_list_paths", _fake_list_paths)
+        result = await filters_mod._discover_field(field_name, EntityType.SUBSCRIPTION)
+        assert result["status"] == expected_status
+        assert len(result["leaves"]) == leaf_count
+        assert len(result["components"]) == component_count
