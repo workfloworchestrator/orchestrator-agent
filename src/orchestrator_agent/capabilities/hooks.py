@@ -41,9 +41,9 @@ from orchestrator_agent.artifacts import (
     QueryArtifact,
     RenderedBlock,
 )
+from orchestrator_agent.capabilities.config import CapabilitySpec, load_capability_specs
 from orchestrator_agent.rendering.charts import aggregate_to_mermaid
 from orchestrator_agent.rendering.tables import search_to_markdown
-from orchestrator_agent.capabilities.config import CapabilitySpec, load_capability_specs
 from orchestrator_agent.tool_names import (
     AGGREGATE_TOOL,
     DISCOVER_FILTER_PATHS_TOOL,
@@ -202,15 +202,37 @@ class ArtifactCapability(AbstractCapability[Any]):
         if artifact is None:
             return result
 
+        # When we render a chart/table the adapter appends it after the agent's reply. The agent
+        # never sees that block, so tell it — only on the calls we actually inject — to summarise
+        # rather than restate the data (otherwise it lists the rows and the output duplicates).
+        notice = _injection_notice(artifact)
         if isinstance(result, ToolReturn):
             result.metadata = artifact
+            if notice and result.content is None:
+                result.content = notice
             return result
-        return ToolReturn(return_value=result, metadata=artifact)
+        return ToolReturn(return_value=result, metadata=artifact, content=notice)
 
 
 def _result_payload(result: Any) -> Any:
     """Unwrap a ToolReturn to its underlying value; pass other results through."""
     return result.return_value if isinstance(result, ToolReturn) else result
+
+
+def _injection_notice(artifact: Any) -> str | None:
+    """A note for the agent when this result carries a chart/table the adapter will append, else None.
+
+    Goes in ``ToolReturn.content`` (which the agent sees) — never the block itself, so the agent
+    can't reproduce or mangle it. Only emitted when there is actually something to inject.
+    """
+    block = getattr(artifact, "rendered_block", None)
+    if block is None:
+        return None
+    kind = "chart" if block.type == "mermaid" else "table"
+    return (
+        f"A {kind} for this result is shown to the user automatically below your reply. "
+        "Summarise in one sentence; do not reproduce it or restate its rows/numbers."
+    )
 
 
 def _build_query_artifact(tool_name: str, payload: dict[str, Any]) -> QueryArtifact | None:
@@ -279,4 +301,3 @@ __all__ = [
     "build_capabilities",
     "trim_history",
 ]
-

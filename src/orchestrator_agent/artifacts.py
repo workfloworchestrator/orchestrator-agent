@@ -32,8 +32,11 @@ class RenderedBlock(BaseModel):
     content: str
 
     def to_markdown(self) -> str:
-        """Render as injectable Markdown: Mermaid gets a code fence, Markdown passes through raw
-        (a fenced table would show as literal source instead of rendering)."""
+        """Render as injectable Markdown.
+
+        Mermaid gets a code fence; Markdown passes through raw (a fenced table would render as
+        literal source instead of a table).
+        """
         if self.type == "mermaid":
             return f"```mermaid\n{self.content}\n```"
         return self.content

@@ -28,6 +28,8 @@ from orchestrator_agent.capabilities.prompts import (
     get_export_instructions,
     get_search_instructions,
 )
+
+
 class CapabilitySpec(BaseModel):
     """Declarative definition of one capability, projected to a pydantic-ai ``Capability``."""
 

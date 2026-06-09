@@ -121,8 +121,6 @@ def test_oauth2_outbound_active_accepts_explicit_bool():
     assert AgentSettings(OAUTH2_OUTBOUND_ACTIVE=False).OAUTH2_OUTBOUND_ACTIVE is False
 
 
-
-
 def test_agent_domain_context_defaults_to_empty():
     assert AgentSettings().AGENT_DOMAIN_CONTEXT == ""
 

@@ -27,7 +27,6 @@ class TestSearchState:
         assert state.run_id == rid
         assert state.query_id == qid
 
-
     def test_serialization_roundtrip(self):
         state = SearchState(user_input="test query")
         data = state.model_dump(mode="json")

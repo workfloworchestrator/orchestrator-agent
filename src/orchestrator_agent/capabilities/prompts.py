@@ -36,7 +36,6 @@ from orchestrator_agent.tool_names import (
     SEARCH_TOOL,
 )
 
-
 BASE_FRAMING = dedent(
     """
     You are the WFO assistant. You help users find, count, inspect, and export

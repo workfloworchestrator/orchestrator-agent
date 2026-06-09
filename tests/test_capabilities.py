@@ -18,13 +18,13 @@ from orchestrator_agent.artifacts import (
     QueryArtifact,
     RenderedBlock,
 )
-from orchestrator_agent.rendering.charts import aggregate_to_mermaid
-from orchestrator_agent.rendering.tables import search_to_markdown
 from orchestrator_agent.capabilities.hooks import (
     FilterPathGuard,
     _artifact_for,
     trim_history,
 )
+from orchestrator_agent.rendering.charts import aggregate_to_mermaid
+from orchestrator_agent.rendering.tables import search_to_markdown
 from orchestrator_agent.tool_names import (
     AGGREGATE_TOOL,
     DISCOVER_FILTER_PATHS_TOOL,
@@ -161,8 +161,12 @@ class TestAggregateChart:
         assert "xychart-beta" in artifact.rendered_block.content
 
     def test_artifact_for_scalar_aggregate_stays_query_artifact(self):
-        payload = {"query_id": "q-1", "total_results": 7, "visualization": "table",
-                   "results": [{"group_values": {}, "aggregations": {"count": 7}}]}
+        payload = {
+            "query_id": "q-1",
+            "total_results": 7,
+            "visualization": "table",
+            "results": [{"group_values": {}, "aggregations": {"count": 7}}],
+        }
         artifact = _artifact_for(AGGREGATE_TOOL, payload)
         assert isinstance(artifact, QueryArtifact)
         assert artifact.rendered_block is None
@@ -188,10 +192,12 @@ class TestSearchTable:
         assert "Type" not in md  # single entity type -> no Type column
 
     def test_multiple_entity_types_add_type_column(self):
-        rows = {"results": [
-            {"entity_id": "1", "entity_type": "SUBSCRIPTION", "title": "A"},
-            {"entity_id": "2", "entity_type": "PRODUCT", "title": "B"},
-        ]}
+        rows = {
+            "results": [
+                {"entity_id": "1", "entity_type": "SUBSCRIPTION", "title": "A"},
+                {"entity_id": "2", "entity_type": "PRODUCT", "title": "B"},
+            ]
+        }
         assert "| Type | Title | ID |" in search_to_markdown(rows)
 
     def test_row_cap_and_count(self):
