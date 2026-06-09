@@ -59,6 +59,7 @@ uv run demos/a2a_client.py <subscription-uuid>
 | --- | --- | --- |
 | `DATABASE_URI` | *(required)* | PostgreSQL connection URI for the WFO database |
 | `ORCHESTRATOR_API_URL` | `http://localhost:8080` | URL of the orchestrator-core API |
+| `WFO_CORE_MCP_URL` | `http://localhost:8080/mcp` | URL of orchestrator-core's MCP server (serves the domain tools the agent calls) |
 | `BASE_URL` | `http://localhost:8080` | Public URL of this agent service |
 | `AGENT_MODEL` | `openai:gpt-4o` | LLM model in `provider:model` format |
 | `AGENT_API_BASE` | *(none)* | Custom base URL for the LLM provider (OpenAI-compatible) or Azure endpoint |
@@ -121,14 +122,14 @@ This text is injected verbatim as a `## Domain Knowledge` section in the search 
 
 ## Architecture
 
-This repo contains only the agent logic (planner, skills, tools, adapters, state, memory, prompts). The search infrastructure (query engine, filters, retrievers, indexing, DB models) lives in `orchestrator-core` and is imported as a dependency via `orchestrator-core` (along with everything else for now).
+This repo is a thin MCP client. The agent is a plain pydantic-ai `Agent` configured with **capabilities** (`capabilities/`). The full orchestrator-core MCP toolset is passed directly to the `Agent`, so the MCP server (`WFO_CORE_MCP_URL`, gated by `AgentTag.EXPOSED`) is the single source of which tools the model can call — new tools appear automatically with no agent change. Domain capabilities contribute only instructions. The search infrastructure (query engine, filters, retrievers, indexing, DB models) lives in `orchestrator-core`.
 
 ```
-Request ──► AG-UI adapter ──► AgentAdapter.run_stream_events()
-         ──► A2A adapter  ──►   └─► Planner.execute()
-         ──► MCP adapter  ──►         └─► SkillRunner.run()
+Request ──► AG-UI adapter ──► async with Agent: ──► run_stream_events()
+         ──► A2A adapter  ──►   (always-on capabilities + full MCP toolset)
+         ──► MCP adapter  ──►   └─► MCPToolset ──► orchestrator-core /mcp
 ```
 
-The **A2A adapter** uses [a2a-sdk](https://github.com/google/a2a-sdk) server primitives (`AgentExecutor`, `DefaultRequestHandler`, `A2AFastAPIApplication`). The SDK handles JSON-RPC routing, SSE streaming, task lifecycle, and agent card serving. The adapter implements a single `WFOAgentExecutor.execute()` method that drives the pydantic-ai event stream and publishes A2A events via `TaskUpdater`.
+Capabilities are always-on (no on-demand `load_capability`). Domain capabilities — **search**, **aggregate**, **entity** (details/lookup), **export** — supply instructions only. Three hook capabilities add cross-cutting behaviour: `FilterPathGuard` enforces that any `filters`/`group_by` call is preceded by `discover_filter_paths` (paths are DB-specific and must not be guessed); `ProcessHistory` does sliding-window history trimming; and `ArtifactCapability` maps each MCP tool's JSON result into `QueryArtifact` / `DataArtifact` / `ExportArtifact` metadata for the AG-UI/A2A transport. Grouped aggregations and search results are also rendered deterministically in code (a Mermaid chart / Markdown table carried as a `RenderedBlock`) and injected into the answer, so they appear even on text-only clients. MCP tools require an open session, so every run happens inside `async with agent:`.
 
-The agent advertises skills (search, aggregation, result actions, text response) on the agent card. Clients can target a specific skill by passing `{"skill_id": "<action>"}` in the message metadata to bypass the planner.
+The **A2A adapter** uses [a2a-sdk](https://github.com/google/a2a-sdk) server primitives (`AgentExecutor`, `DefaultRequestHandler`, `A2AFastAPIApplication`). The SDK handles JSON-RPC routing, SSE streaming, task lifecycle, and agent card serving. The adapter implements a single `WFOAgentExecutor.execute()` method that drives the pydantic-ai event stream and publishes A2A events via `TaskUpdater`. The `AgentCard.skills` list is projected from the advertised capability specs (`skills_from_specs`), keeping the advertised skills in sync with the configured capabilities.

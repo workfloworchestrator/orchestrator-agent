@@ -1,4 +1,4 @@
-"""Tests for prompt generation functions."""
+"""Tests for capability instruction / framing generation."""
 
 from __future__ import annotations
 
@@ -8,94 +8,72 @@ os.environ.setdefault("DATABASE_URI", "postgresql://test:test@localhost:5432/tes
 
 import pytest
 
-from orchestrator_agent.prompts import (
-    get_aggregation_execution_prompt,
-    get_planning_prompt,
-    get_result_actions_prompt,
-    get_search_execution_prompt,
-    get_text_response_prompt,
+from orchestrator_agent.capabilities.prompts import (
+    BASE_FRAMING,
+    get_aggregation_instructions,
+    get_entity_instructions,
+    get_export_instructions,
+    get_search_instructions,
 )
-from orchestrator_agent.settings import SearchEffort
-from orchestrator_agent.state import SearchState
 
 
-def _make_state(user_input: str = "show subscriptions") -> SearchState:
-    return SearchState(user_input=user_input)
+class TestBaseFraming:
+    def test_text_only_rendering_rules(self):
+        assert "Markdown" in BASE_FRAMING
+        # Charts/tables are injected by the adapter; the framing tells the model not to draw them.
+        assert "chart or table" in BASE_FRAMING
+        assert "automatically" in BASE_FRAMING
 
 
-class TestGetSearchExecutionPrompt:
+class TestSearchInstructions:
     @pytest.mark.parametrize(
         "required",
         [
-            pytest.param(["Searching", "run_search", "discover_filter_paths", "set_filter_tree"], id="key-elements"),
+            pytest.param(["Searching", "search", "discover_filter_paths", "get_valid_operators"], id="key-elements"),
             pytest.param(["Filtering Rules", "MANDATORY FIRST STEP"], id="filtering-rules"),
             pytest.param(["PREFER LENIENT OPERATORS", "like", "between"], id="lenient-operators"),
-            pytest.param(["automatically retries with a broader semantic search"], id="semantic-fallback-note"),
+            pytest.param(["automatically broadens", "fallback_used"], id="auto-broaden-note"),
             pytest.param(["KEEP KNOWN STRUCTURED FILTERS", "status", "product"], id="structured-filter-retention"),
             pytest.param(["EXTRACT IDENTIFIERS", "highest-signal"], id="identifier-extraction"),
         ],
     )
-    def test_prompt_contains(self, required):
-        prompt = get_search_execution_prompt(_make_state())
-        missing = [snippet for snippet in required if snippet not in prompt]
-        assert not missing, f"missing from search prompt: {missing}"
+    def test_instructions_contain(self, required):
+        text = get_search_instructions()
+        missing = [snippet for snippet in required if snippet not in text]
+        assert not missing, f"missing from search instructions: {missing}"
 
 
-class TestGetAggregationExecutionPrompt:
+class TestAggregationInstructions:
     def test_contains_key_elements(self):
-        prompt = get_aggregation_execution_prompt(_make_state())
-        assert "Aggregating" in prompt
-        assert "run_aggregation" in prompt
-        assert "set_temporal_grouping" in prompt
-        assert "set_grouping" in prompt
-        assert "set_aggregations" in prompt
+        text = get_aggregation_instructions()
+        assert "Aggregating" in text
+        assert "aggregate" in text
+        assert "group_by" in text
+        assert "temporal_group_by" in text
 
     def test_includes_filtering_rules(self):
-        prompt = get_aggregation_execution_prompt(_make_state())
-        assert "Filtering Rules" in prompt
+        assert "Filtering Rules" in get_aggregation_instructions()
 
-    def test_aggregation_has_no_semantic_fallback_note(self):
-        prompt = get_aggregation_execution_prompt(_make_state())
-        assert "automatically retries with a broader semantic search" not in prompt
-        assert "PREFER LENIENT OPERATORS" in prompt
+    def test_no_semantic_fallback_note(self):
+        text = get_aggregation_instructions()
+        assert "automatically retries with a broader semantic search" not in text
+        assert "PREFER LENIENT OPERATORS" in text
 
 
-class TestGetTextResponsePrompt:
+class TestEntityInstructions:
     def test_contains_key_elements(self):
-        prompt = get_text_response_prompt(_make_state())
-        assert "Responding" in prompt
-        assert "Available Capabilities" in prompt
-        assert "SUBSCRIPTION" in prompt
+        text = get_entity_instructions()
+        assert "resolve_entity" in text
+        assert "get_entity_details" in text
+        assert "id-prefix" in text
+        assert "NOT an export" in text
 
 
-class TestGetPlanningPrompt:
+class TestExportInstructions:
     def test_contains_key_elements(self):
-        prompt = get_planning_prompt(_make_state())
-        assert "Execution Planning" in prompt
-        assert "Break into tasks" in prompt
-        assert "RESULT_ACTIONS" in prompt
-
-    def test_no_redundant_tasks_warning(self):
-        prompt = get_planning_prompt(_make_state())
-        assert "Do NOT create redundant tasks" in prompt
-
-    def test_mentions_id_prefix_single_result_actions_task(self):
-        prompt = get_planning_prompt(_make_state())
-        assert "id-prefix" in prompt
-        assert "RESULT_ACTIONS" in prompt
-
-
-class TestGetResultActionsPrompt:
-    def test_contains_key_elements(self):
-        prompt = get_result_actions_prompt(_make_state())
-        assert "Acting on Results" in prompt
-        assert "prepare_export" in prompt
-        assert "fetch_entity_details" in prompt
-
-    def test_mentions_get_entity_by_id_for_id_or_prefix(self):
-        prompt = get_result_actions_prompt(_make_state())
-        assert "get_entity_by_id" in prompt
-        assert "id-prefix" in prompt
+        text = get_export_instructions()
+        assert "export_query" in text
+        assert "EXPLICITLY" in text
 
 
 class TestDomainContextSection:
@@ -108,59 +86,17 @@ class TestDomainContextSection:
         ],
     )
     def test_domain_section(self, monkeypatch, context, expect_section):
-        monkeypatch.setattr("orchestrator_agent.prompts.agent_settings.AGENT_DOMAIN_CONTEXT", context)
-        prompt = get_search_execution_prompt(_make_state())
-        assert ("## Domain Knowledge" in prompt) is expect_section
+        monkeypatch.setattr("orchestrator_agent.capabilities.prompts.agent_settings.AGENT_DOMAIN_CONTEXT", context)
+        text = get_search_instructions()
+        assert ("## Domain Knowledge" in text) is expect_section
         if expect_section:
-            assert context.strip() in prompt
+            assert context.strip() in text
 
 
-class TestPlannerEffortGuidance:
-    @pytest.mark.parametrize(
-        "effort, expect_clarify",
-        [
-            pytest.param(SearchEffort.HIGH, False, id="high-proceeds"),
-            pytest.param(SearchEffort.MEDIUM, True, id="medium-asks-when-ambiguous"),
-            pytest.param(SearchEffort.LOW, True, id="low-prefers-asking"),
-        ],
-    )
-    def test_planner_clarify_bias(self, monkeypatch, effort, expect_clarify):
-        monkeypatch.setattr("orchestrator_agent.prompts.agent_settings.AGENT_SEARCH_EFFORT", effort)
-        prompt = get_planning_prompt(_make_state())
-        assert ("clarifying question" in prompt) is expect_clarify
-
-
-class TestEmptyResultsGuidance:
-    @pytest.mark.parametrize(
-        "effort, expect_auto_retry",
-        [
-            pytest.param(SearchEffort.HIGH, True, id="high-auto-retries"),
-            pytest.param(SearchEffort.MEDIUM, True, id="medium-auto-retries"),
-            pytest.param(SearchEffort.LOW, False, id="low-asks-instead"),
-        ],
-    )
-    def test_empty_results_note(self, monkeypatch, effort, expect_auto_retry):
-        monkeypatch.setattr("orchestrator_agent.prompts.agent_settings.AGENT_SEARCH_EFFORT", effort)
-        prompt = get_search_execution_prompt(_make_state())
-        assert ("automatically retries with a broader semantic search" in prompt) is expect_auto_retry
-        if not expect_auto_retry:
-            assert "ask whether to broaden the search" in prompt
-
-
-class TestRetrieverGuidance:
-    @pytest.mark.parametrize(
-        "embeddings_enabled, expect_hybrid",
-        [
-            pytest.param(True, True, id="embeddings-on"),
-            pytest.param(False, False, id="embeddings-off"),
-        ],
-    )
-    def test_retriever_guidance(self, monkeypatch, embeddings_enabled, expect_hybrid):
-        monkeypatch.setattr("orchestrator_agent.prompts.llm_settings.EMBEDDING_API_ENABLED", embeddings_enabled)
-        prompt = get_search_execution_prompt(_make_state())
-        assert "CHOOSE A RETRIEVER" in prompt
-        if expect_hybrid:
-            assert "retriever=HYBRID" in prompt
-        else:
-            assert "retriever=FUZZY" in prompt
-            assert "retriever=HYBRID" not in prompt
+class TestAutoBroadenNote:
+    def test_search_instructions_mention_fallback_used(self):
+        text = get_search_instructions()
+        assert "automatically broadens" in text
+        assert "fallback_used" in text
+        # retriever selection is the tool's job now — the prompt must not instruct it.
+        assert "CHOOSE A RETRIEVER" not in text

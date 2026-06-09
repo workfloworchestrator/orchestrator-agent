@@ -41,7 +41,7 @@ async def collect_stream_output(event_stream: AsyncIterator[Any]) -> str:
 
     async for event in event_stream:
         if isinstance(event, FunctionToolResultEvent):
-            result = event.result
+            result = event.part
             if isinstance(result, ToolReturnPart) and isinstance(result.metadata, ToolArtifact):
                 artifact_results.append(result)
         if isinstance(event, AgentRunResultEvent):

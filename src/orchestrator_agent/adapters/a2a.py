@@ -14,14 +14,18 @@
 """A2A adapter — exposes the orchestrator agent via the A2A protocol.
 
 Uses the ``a2a-sdk`` server primitives (``AgentExecutor``, ``DefaultRequestHandler``,
-``A2AFastAPIApplication``) instead of fasta2a.  The SDK handles all JSON-RPC routing,
-SSE streaming, task lifecycle management, and agent card serving.
+``A2AFastAPIApplication``). The executor drives the plain capabilities-based agent
+inside ``async with agent:`` (MCP session) and collects artifact results + final text.
+
+``A2A_SKILLS`` is static A2A protocol metadata (the agent's advertised skills) and is
+unrelated to pydantic-ai capabilities — it just describes what the agent can do.
 """
 
 from __future__ import annotations
 
+import json
 import uuid
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 import structlog
 from a2a.server.agent_execution import AgentExecutor, RequestContext
@@ -33,53 +37,44 @@ from a2a.server.tasks.task_updater import TaskUpdater
 from a2a.types import (
     AgentCapabilities,
     AgentCard,
-    AgentSkill,
+    DataPart,
     Part,
     TextPart,
 )
 from fastapi import FastAPI
-from pydantic_ai.ag_ui import StateDeps
-from pydantic_ai.messages import FunctionToolResultEvent, PartDeltaEvent, ToolReturnPart
+from pydantic_ai.messages import (
+    FunctionToolResultEvent,
+    ModelMessagesTypeAdapter,
+    PartDeltaEvent,
+    ToolReturnPart,
+)
 from pydantic_ai.run import AgentRunResultEvent
 
-from orchestrator_agent.agent import AgentAdapter
-from orchestrator_agent.artifacts import ToolArtifact
-from orchestrator_agent.memory import FALLBACK_MESSAGE, collect_tool_descriptions
-from orchestrator_agent.skills import SKILLS
-from orchestrator_agent.state import SearchState, TaskAction
+from orchestrator_agent.agent import new_deps
+from orchestrator_agent.artifacts import QueryArtifact, ToolArtifact
+from orchestrator_agent.capabilities.config import skills_from_specs
+from orchestrator_agent.mcp_client import bind_outbound_token
+from orchestrator_agent.persistence import PostgresStatePersistence
+
+if TYPE_CHECKING:
+    from orchestrator_agent.agent import WFOAgent
 
 logger = structlog.get_logger(__name__)
 
-
-def _build_state_fallback(state: SearchState) -> str:
-    """Build A2A output from execution state when event stream yielded nothing useful."""
-    completed = state.memory.completed_turns[-1:]
-    if completed:
-        return collect_tool_descriptions(completed[-1].steps)
-    return FALLBACK_MESSAGE
+NO_RESULTS = "No results"
 
 
-A2A_SKILLS = [
-    AgentSkill(
-        id=action.value,
-        name=skill.name,
-        description=skill.description,
-        tags=skill.tags,
-        input_modes=["application/json"],
-        output_modes=["application/json"],
-    )
-    for action, skill in SKILLS.items()
-]
+A2A_SKILLS = skills_from_specs()
 
 
 class WFOAgentExecutor(AgentExecutor):
-    """AgentExecutor that drives ``AgentAdapter.run_stream_events()``.
+    """AgentExecutor that drives the capabilities-based agent's event stream.
 
     Consumes the pydantic-ai event stream and publishes A2A events
     (status updates, artifacts) via the ``TaskUpdater`` helper.
     """
 
-    def __init__(self, agent: AgentAdapter) -> None:
+    def __init__(self, agent: "WFOAgent") -> None:
         self.agent = agent
 
     async def execute(self, context: RequestContext, event_queue: EventQueue) -> None:
@@ -90,10 +85,9 @@ class WFOAgentExecutor(AgentExecutor):
         await updater.start_work()
 
         user_input = context.get_user_input()
-        message = context.message
-        target_action = self._parse_target_action(message) if message else None
+        auth_token = self._parse_auth_token(context.message) if context.message else None
 
-        deps = StateDeps(SearchState(user_input=user_input))
+        deps = new_deps(user_input=user_input)
 
         from orchestrator.core.db import db
         from orchestrator.core.db.models import AgentRunTable
@@ -104,53 +98,55 @@ class WFOAgentExecutor(AgentExecutor):
             db.session.add(agent_run)
             db.session.commit()
 
-            logger.debug(
-                "A2A execute: starting",
-                task_id=task_id,
-                user_input=user_input[:100] if user_input else "",
-                target_action=target_action,
+            logger.debug("A2A execute: starting", task_id=task_id, user_input=user_input[:100] if user_input else "")
+
+            # Multi-turn memory: load the prior conversation for this context_id and replay it as
+            # pydantic-ai message_history, so the proxy only needs to send the latest user turn.
+            persistence = PostgresStatePersistence(thread_id=context_id, run_id=deps.state.run_id, session=db.session)
+            prior_state = await persistence.load_state()
+            message_history = (
+                ModelMessagesTypeAdapter.validate_python(prior_state.message_history)
+                if prior_state and prior_state.message_history
+                else None
             )
 
-            event_stream = self.agent.run_stream_events(deps=deps, target_action=target_action)
-            artifact_texts: list[str] = []
             final_output = ""
+            injected_blocks: list[str] = []
 
-            async for event in event_stream:
-                match event:
-                    case PartDeltaEvent():
-                        pass
-                    case _:
-                        logger.debug("A2A execute: event", event_type=type(event).__name__)
+            with bind_outbound_token(auth_token):
+                async with self.agent:
+                    async with self.agent.run_stream_events(
+                        user_input, deps=deps, message_history=message_history
+                    ) as event_stream:
+                        async for event in event_stream:
+                            if isinstance(event, FunctionToolResultEvent):
+                                result = event.part
+                                if isinstance(result, ToolReturnPart) and isinstance(result.metadata, ToolArtifact):
+                                    data = json.loads(result.model_response_str())
+                                    await updater.add_artifact(parts=[Part(root=DataPart(data=data))])
+                                    # Collect chart/table blocks to append after the agent's prose.
+                                    # The agent only sees raw data (no ToolReturn.content relay), so
+                                    # it just summarises — the adapter guarantees the block appears.
+                                    if isinstance(result.metadata, QueryArtifact) and result.metadata.rendered_block:
+                                        injected_blocks.append(result.metadata.rendered_block.to_markdown())
+                            elif isinstance(event, AgentRunResultEvent):
+                                final_output = str(event.result.output)
+                                deps.state.message_history = ModelMessagesTypeAdapter.dump_python(
+                                    event.result.all_messages(), mode="json"
+                                )
+                            elif not isinstance(event, PartDeltaEvent):
+                                logger.debug("A2A execute: event", event_type=type(event).__name__)
 
-                if isinstance(event, FunctionToolResultEvent):
-                    result = event.result
-                    if isinstance(result, ToolReturnPart) and isinstance(result.metadata, ToolArtifact):
-                        text = result.model_response_str()
-                        await updater.add_artifact(
-                            parts=[Part(root=TextPart(text=text))],
-                        )
-                        artifact_texts.append(text)
+            if injected_blocks:
+                final_output = final_output.rstrip() + "\n\n" + "\n\n".join(injected_blocks)
 
-                if isinstance(event, AgentRunResultEvent):
-                    final_output = str(event.result.output)
+            await persistence.snapshot(deps.state)
+            db.session.commit()
 
-            logger.debug(
-                "A2A execute: collection complete",
-                task_id=task_id,
-                artifact_count=len(artifact_texts),
-                final_output=final_output[:200] if final_output else "",
-                query_id=str(deps.state.query_id) if deps.state.query_id else None,
-            )
-
-            # Prefer artifact content over LLM text (matches collect_stream_output behavior)
-            if artifact_texts:
-                final_output = "\n\n".join(artifact_texts)
-            elif not final_output or final_output == FALLBACK_MESSAGE:
-                final_output = _build_state_fallback(deps.state)
-
+            # The answer is the agent's prose + any deterministically rendered chart/table blocks.
             await updater.complete(
                 message=updater.new_agent_message(
-                    parts=[Part(root=TextPart(text=final_output or "No results"))],
+                    parts=[Part(root=TextPart(text=final_output or NO_RESULTS))],
                 )
             )
 
@@ -168,19 +164,11 @@ class WFOAgentExecutor(AgentExecutor):
         await updater.cancel()
 
     @staticmethod
-    def _parse_target_action(message: Any) -> TaskAction | None:
-        """Extract target action from message metadata, if any."""
+    def _parse_auth_token(message: Any) -> str | None:
+        """Extract a bearer token from message metadata, if any (for MCP forwarding)."""
         metadata = getattr(message, "metadata", None) or {}
-        skill_id = metadata.get("skill_id") or metadata.get("skillId")
-        if not skill_id:
-            return None
-        try:
-            action = TaskAction(skill_id)
-            logger.debug("A2A: Routing to skill directly", target_action=action)
-            return action
-        except ValueError:
-            logger.warning("A2A: Unknown skillId, falling back to planner", skill_id=skill_id)
-            return None
+        token = metadata.get("auth_token") or metadata.get("authToken")
+        return str(token) if token else None
 
 
 class A2AAdapter:
@@ -190,17 +178,14 @@ class A2AAdapter:
 
         adapter = A2AAdapter(agent, url="http://localhost:8080/")
         adapter.add_routes(app)
-        # In lifespan:
-        async with adapter.agent:
-            yield
     """
 
-    def __init__(self, agent: AgentAdapter, url: str = "") -> None:
+    def __init__(self, agent: "WFOAgent", url: str = "") -> None:
         self.agent = agent
         self.executor = WFOAgentExecutor(agent)
 
         agent_card = AgentCard(
-            name="WFO Search Agent",
+            name="WFO Agent",
             description="Search, filter and aggregate orchestration data",
             url=url,
             version="1.0.0",
@@ -224,10 +209,3 @@ class A2AAdapter:
     def add_routes(self, app: FastAPI) -> None:
         """Add A2A protocol routes to an existing FastAPI application."""
         self._a2a_app.add_routes_to_app(app)
-
-    async def __aenter__(self) -> A2AAdapter:
-        await self.agent.__aenter__()
-        return self
-
-    async def __aexit__(self, *exc: Any) -> None:
-        await self.agent.__aexit__(*exc)

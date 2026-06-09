@@ -13,75 +13,69 @@
 
 """MCP (Model Context Protocol) adapter for the search agent.
 
-MCPWorker owns the agent lifecycle and stream consumption — parallel to
-AGUIWorker and A2AWorker.  It consumes ``agent.run_stream_events()`` to
-collect ToolArtifact results and the final LLM output, then returns a
-combined result string.
+``MCPWorker`` owns the agent lifecycle and stream consumption — parallel to
+``AGUIWorker`` and the A2A executor. It runs the capabilities-based agent (which
+self-routes via on-demand capability loading) and returns a combined result string.
 
-The FastMCP tool handlers are thin wrappers that delegate to the worker.
-
-Unlike AG-UI (streaming SSE to a frontend) or A2A (task lifecycle with
-broker/storage), the MCP adapter is **stateless** — each tool call is
-independent with no session or memory between calls.
+The FastMCP tool handlers are thin natural-language entry points; the model
+decides which domain capability to load. This adapter is stateless — each tool
+call is independent.
 """
 
 from __future__ import annotations
 
 import uuid
 from contextlib import AsyncExitStack
+from typing import TYPE_CHECKING
 
 import structlog
 from mcp.server.fastmcp import FastMCP
 from orchestrator.core.db import db
 from orchestrator.core.db.models import AgentRunTable
 from orchestrator.core.search.core.types import EntityType
-from pydantic_ai.ag_ui import StateDeps
 
 from orchestrator_agent.adapters.stream import collect_stream_output
-from orchestrator_agent.agent import AgentAdapter
-from orchestrator_agent.state import SearchState, TaskAction
+from orchestrator_agent.agent import new_deps
+from orchestrator_agent.mcp_client import bind_outbound_token
+
+if TYPE_CHECKING:
+    from orchestrator_agent.agent import WFOAgent
 
 logger = structlog.get_logger(__name__)
 
 
 class MCPWorker:
-    """Orchestrates MCP tool execution: state setup, stream consumption, result assembly.
+    """Runs the agent for a natural-language query and returns a result string."""
 
-    Parallel to AGUIWorker and A2AWorker — owns the agent reference and the
-    full tool-call lifecycle so the FastMCP handlers stay thin.
-    """
-
-    def __init__(self, agent: AgentAdapter) -> None:
+    def __init__(self, agent: "WFOAgent") -> None:
         self.agent = agent
 
-    async def run_skill(self, query: str, target_action: TaskAction | None = None) -> str:
-        """Create state, consume the agent stream, and return a result string."""
-        deps = StateDeps(SearchState(user_input=query))
+    async def run(self, query: str, *, auth_token: str | None = None) -> str:
+        """Create state, run the agent (MCP session open), and return a result string."""
+        deps = new_deps(user_input=query)
 
         deps.state.run_id = uuid.uuid4()
         agent_run = AgentRunTable(run_id=deps.state.run_id, thread_id=str(uuid.uuid4()), agent_type="mcp")
         db.session.add(agent_run)
         db.session.commit()
 
-        logger.debug("MCPWorker: Starting skill execution", target_action=target_action, query=query[:100])
+        logger.debug("MCPWorker: Starting run", query=query[:100])
 
         try:
-            event_stream = self.agent.run_stream_events(deps=deps, target_action=target_action)
-            return await collect_stream_output(event_stream)
+            with bind_outbound_token(auth_token):
+                async with self.agent:
+                    async with self.agent.run_stream_events(query, deps=deps) as event_stream:
+                        output = await collect_stream_output(event_stream)
+            return output
         except Exception:
-            logger.exception("MCPWorker: Skill execution failed", query=query[:100])
+            logger.exception("MCPWorker: run failed", query=query[:100])
             raise
 
 
 class MCPApp:
-    """MCP adapter app: FastMCP server, worker, tools, and lifecycle.
+    """MCP adapter app: FastMCP server, worker, tools, and lifecycle."""
 
-    Bundles the Starlette sub-app with the session manager lifecycle so the
-    host can ``async with mcp_app`` symmetrically with A2AApp.  Tool handlers
-    close over ``self.worker`` — no module-level global needed.
-    """
-
-    def __init__(self, agent: AgentAdapter) -> None:
+    def __init__(self, agent: "WFOAgent") -> None:
         self.agent = agent
         self.worker = MCPWorker(agent)
         self._stack: AsyncExitStack
@@ -105,7 +99,7 @@ class MCPApp:
             Describe what you're looking for in natural language.
             Examples: "active subscriptions", "failed workflows from last week"
             """
-            return await worker.run_skill(query, TaskAction.SEARCH)
+            return await worker.run(query)
 
         @self.server.tool()
         async def aggregate(query: str) -> str:
@@ -114,7 +108,7 @@ class MCPApp:
             Describe what aggregation you need.
             Examples: "count subscriptions by product", "average workflow duration by status"
             """
-            return await worker.run_skill(query, TaskAction.AGGREGATION)
+            return await worker.run(query)
 
         @self.server.tool()
         async def get_entity_details(entity_type: EntityType, entity_id: uuid.UUID) -> str:
@@ -125,7 +119,7 @@ class MCPApp:
                 entity_id: The UUID of the entity
             """
             query = f"Get details for {entity_type.value} {entity_id}"
-            return await worker.run_skill(query, TaskAction.RESULT_ACTIONS)
+            return await worker.run(query)
 
         @self.server.tool()
         async def ask(query: str) -> str:
@@ -133,7 +127,7 @@ class MCPApp:
 
             The agent will determine the best approach — search, aggregate, or answer directly.
             """
-            return await worker.run_skill(query, target_action=None)
+            return await worker.run(query)
 
     async def __aenter__(self) -> MCPApp:
         self._stack = AsyncExitStack()

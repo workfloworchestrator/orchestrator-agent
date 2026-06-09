@@ -6,7 +6,7 @@ license = "Apache-2.0"
 requires-python = ">=3.11,<3.14"
 dependencies = [
     "orchestrator-core>=5.0.2",
-    "pydantic-ai-slim==1.99.0",
+    "pydantic-ai-slim[mcp]>=1.106,<2",
     "ag-ui-protocol==0.1.10",
     "a2a-sdk[http-server]>=0.3.25",
     "mcp==1.26.0",

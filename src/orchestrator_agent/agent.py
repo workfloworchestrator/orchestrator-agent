@@ -11,140 +11,62 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-from typing import TYPE_CHECKING, Any, AsyncIterator, Sequence
+"""The WFO agent — a plain pydantic-ai ``Agent`` configured with capabilities.
+
+Domain behaviour lives entirely in capabilities (see ``capabilities.py``): each
+wraps a slice of orchestrator-core's MCP toolset plus its instructions, and is
+loaded on demand by the model via the framework ``load_capability`` tool.
+
+MCP tools require an open session, so every run must happen inside
+``async with agent:``.
+"""
+
+from __future__ import annotations
+
+from typing import TYPE_CHECKING
 
 import structlog
-from pydantic_ai import Agent, AgentRunResult, ModelSettings
+from pydantic_ai import Agent
 from pydantic_ai.ag_ui import StateDeps
-from pydantic_ai.messages import (
-    AgentStreamEvent,
-    UserContent,
-)
-from pydantic_ai.run import AgentRunResultEvent
-from pydantic_ai.toolsets import AbstractToolset
+
+from orchestrator_agent.capabilities.hooks import build_capabilities
+from orchestrator_agent.capabilities.prompts import BASE_FRAMING
+from orchestrator_agent.mcp_client import build_core_toolset
+from orchestrator_agent.state import SearchState
 
 if TYPE_CHECKING:
     from pydantic_ai.models import KnownModelName, Model
-else:
-    KnownModelName = str
-    Model = Any
-
-from orchestrator_agent.events import RunContext
-from orchestrator_agent.memory import FALLBACK_MESSAGE, collect_tool_descriptions
-from orchestrator_agent.planner import Planner
-from orchestrator_agent.skills import SKILLS, Skill
-from orchestrator_agent.state import SearchState, TaskAction
 
 logger = structlog.get_logger(__name__)
 
-
-def _build_execution_summary(state: SearchState) -> str:
-    """Build a human-readable summary from the execution state's memory."""
-    turn = state.memory.current_turn
-    if not turn:
-        return FALLBACK_MESSAGE
-
-    all_steps = list(turn.steps)
-    if turn.current_step:
-        all_steps.append(turn.current_step)
-
-    return collect_tool_descriptions(all_steps)
+WFOAgent = Agent[StateDeps[SearchState], str]
 
 
-class AgentAdapter(Agent[StateDeps[SearchState], str]):
-    """Overrides run_stream_events to execute plans and stream events.
+def build_agent(model: "Model | KnownModelName | str") -> WFOAgent:
+    """Build the capabilities-based WFO agent.
 
-    Custom AG-UI events (e.g. AGENT_STEP_ACTIVE) are yielded directly from the planner
-    and skill runners into the event stream. AGUIEventStream (in ag_ui.py) passes
-    them through to the frontend — pydantic-ai's default handler would drop them.
+    Args:
+        model: A pydantic-ai model or model name/string.
 
-    The model/toolsets are required by Agent's constructor but unused here;
-    the agents in Planner and SkillRunner handle actual LLM calls.
+    Returns:
+        A plain ``Agent`` ready to run inside ``async with agent:``.
     """
+    capabilities = build_capabilities()
+    logger.debug("Building WFO agent", model=str(model), capability_count=len(capabilities))
+    agent: WFOAgent = Agent(
+        model=model,
+        deps_type=StateDeps[SearchState],
+        instructions=BASE_FRAMING,
+        toolsets=[build_core_toolset()],
+        capabilities=capabilities,
+        retries=2,
+    )
+    return agent
 
-    def __init__(
-        self,
-        model: "Model | KnownModelName | str",
-        skills: dict[TaskAction, Skill] = SKILLS,
-        *,
-        deps_type: type[StateDeps[SearchState]] = StateDeps[SearchState],
-        model_settings: "ModelSettings | None" = None,
-        toolsets: Sequence[AbstractToolset[Any]] | None = None,
-        instructions: Any = None,
-        debug: bool = False,
-    ):
-        super().__init__(
-            model=model,
-            deps_type=deps_type,
-            model_settings=model_settings or ModelSettings(),
-            toolsets=toolsets or [],
-            instructions=instructions or [],
-        )
-        self.skills = skills
-        self._model_ref = model
-        self.model_name = model if isinstance(model, str) else str(model)
-        self._persistence: Any | None = None
-        self.debug = debug
 
-    async def _prepare_state(self, deps: StateDeps[SearchState]) -> SearchState:
-        """Load persisted state (if any) and start a new turn."""
-        initial_state = deps.state
-        user_input = initial_state.user_input
+def new_deps(user_input: str = "") -> StateDeps[SearchState]:
+    """Convenience constructor for the agent's run dependencies."""
+    return StateDeps(SearchState(user_input=user_input))
 
-        if self._persistence:
-            loaded = await self._persistence.load_state()
-            if loaded:
-                logger.debug("AgentAdapter: Resuming from previous state", run_id=self._persistence.run_id)
-                initial_state = loaded
-                initial_state.user_input = user_input
 
-        if not initial_state.memory.current_turn or initial_state.memory.current_turn.user_question != user_input:
-            initial_state.memory.start_turn(user_input)
-
-        return initial_state
-
-    async def run_stream_events(  # type: ignore[override]
-        self,
-        user_prompt: str | Sequence[UserContent] | None = None,
-        *,
-        deps: StateDeps[SearchState] | None = None,
-        target_action: TaskAction | None = None,
-        **kwargs: Any,
-    ) -> AsyncIterator[AgentStreamEvent | AgentRunResultEvent[str] | Any]:
-        """Execute the plan and stream events in real-time.
-
-        Custom events (AGENT_STEP_ACTIVE) are yielded directly from the planner
-        and skill runners, then passed through by AGUIEventStream.handle_event().
-        """
-        if deps is None:
-            deps = StateDeps(SearchState())
-
-        try:
-            initial_state = await self._prepare_state(deps)
-            ctx = RunContext(state=initial_state)
-            planner = Planner(model=self._model_ref, skills=self.skills, debug=self.debug)
-
-            has_inner_result = False
-            async for event in planner.execute(ctx, target_action=target_action):
-                if isinstance(event, AgentRunResultEvent):
-                    has_inner_result = True
-                    logger.debug("AgentAdapter: Captured AgentRunResultEvent", output=str(event.result.output)[:200])
-                else:
-                    logger.debug("AgentAdapter: Event", event_type=type(event).__name__)
-                yield event
-
-            # Build summary BEFORE complete_turn (while current_turn still exists)
-            summary = _build_execution_summary(ctx.state)
-            ctx.state.memory.complete_turn(assistant_answer=summary)
-            deps.state = ctx.state
-
-            if self._persistence:
-                await self._persistence.snapshot(ctx.state)
-
-            if not has_inner_result:
-                logger.debug("AgentAdapter: No inner result, using state summary", summary=summary[:200])
-                yield AgentRunResultEvent(result=AgentRunResult(output=summary))
-
-        except Exception as e:
-            logger.error("AgentAdapter: Execution failed", error=str(e), exc_info=True)
-            raise
+__all__: list[str] = ["WFOAgent", "build_agent", "new_deps"]
