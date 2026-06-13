@@ -48,7 +48,6 @@ from orchestrator_agent.tool_names import (
     AGGREGATE_TOOL,
     DISCOVER_FILTER_PATHS_TOOL,
     EXPORT_QUERY_TOOL,
-    GET_ENTITY_DETAILS_TOOL,
     PATH_CONSUMING_PARAMS,
     RESOLVE_ENTITY_TOOL,
     SEARCH_TOOL,
@@ -281,7 +280,7 @@ def _artifact_for(tool_name: str, result: Any) -> QueryArtifact | DataArtifact |
             download_url=str(download),
         )
 
-    if tool_name in (GET_ENTITY_DETAILS_TOOL, RESOLVE_ENTITY_TOOL):
+    if tool_name == RESOLVE_ENTITY_TOOL:
         entity_id = payload.get("entity_id") or payload.get("subscription_id") or payload.get("id")
         entity_type = payload.get("entity_type")
         if entity_id is None or entity_type is None:

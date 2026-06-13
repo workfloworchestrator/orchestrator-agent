@@ -27,7 +27,6 @@ SEARCH_TOOL = "search"
 AGGREGATE_TOOL = "aggregate"
 DISCOVER_FILTER_PATHS_TOOL = "discover_filter_paths"
 GET_VALID_OPERATORS_TOOL = "get_valid_operators"
-GET_ENTITY_DETAILS_TOOL = "get_entity_details"
 RESOLVE_ENTITY_TOOL = "resolve_entity"
 EXPORT_QUERY_TOOL = "export_query"
 
@@ -43,7 +42,6 @@ __all__ = [
     "AGGREGATE_TOOL",
     "DISCOVER_FILTER_PATHS_TOOL",
     "EXPORT_QUERY_TOOL",
-    "GET_ENTITY_DETAILS_TOOL",
     "GET_VALID_OPERATORS_TOOL",
     "PATH_CONSUMING_PARAMS",
     "RESOLVE_ENTITY_TOOL",

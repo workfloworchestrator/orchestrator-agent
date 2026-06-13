@@ -64,7 +64,6 @@ class TestEntityInstructions:
     def test_contains_key_elements(self):
         text = get_entity_instructions()
         assert "resolve_entity" in text
-        assert "get_entity_details" in text
         assert "id-prefix" in text
         assert "NOT an export" in text
 

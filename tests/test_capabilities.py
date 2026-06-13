@@ -29,7 +29,7 @@ from orchestrator_agent.tool_names import (
     AGGREGATE_TOOL,
     DISCOVER_FILTER_PATHS_TOOL,
     EXPORT_QUERY_TOOL,
-    GET_ENTITY_DETAILS_TOOL,
+    RESOLVE_ENTITY_TOOL,
     SEARCH_TOOL,
 )
 
@@ -83,7 +83,7 @@ class TestArtifactMapping:
 
     def test_entity_maps_to_data_artifact(self):
         result = {"entity_id": "e-1", "entity_type": "SUBSCRIPTION", "name": "x"}
-        artifact = _artifact_for(GET_ENTITY_DETAILS_TOOL, result)
+        artifact = _artifact_for(RESOLVE_ENTITY_TOOL, result)
         assert isinstance(artifact, DataArtifact)
         assert artifact.entity_id == "e-1"
         assert artifact.entity_type == "SUBSCRIPTION"
@@ -94,7 +94,7 @@ class TestArtifactMapping:
             (DISCOVER_FILTER_PATHS_TOOL, {"paths": []}),  # setup tool — no artifact
             (SEARCH_TOOL, {"results": []}),  # missing query_id
             (EXPORT_QUERY_TOOL, {"query_id": "q"}),  # missing download_url
-            (GET_ENTITY_DETAILS_TOOL, {"candidates": []}),  # ambiguous resolve, no concrete entity
+            (RESOLVE_ENTITY_TOOL, {"candidates": []}),  # ambiguous resolve, no concrete entity
             (SEARCH_TOOL, "not-a-dict"),
         ],
     )

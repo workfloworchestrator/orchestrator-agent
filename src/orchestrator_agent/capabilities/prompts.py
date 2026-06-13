@@ -30,7 +30,6 @@ from orchestrator_agent.tool_names import (
     AGGREGATE_TOOL,
     DISCOVER_FILTER_PATHS_TOOL,
     EXPORT_QUERY_TOOL,
-    GET_ENTITY_DETAILS_TOOL,
     GET_VALID_OPERATORS_TOOL,
     RESOLVE_ENTITY_TOOL,
     SEARCH_TOOL,
@@ -171,11 +170,10 @@ def get_entity_instructions() -> str:
         Fetch the full domain model / details for a single entity the user references.
 
         ## How to act
-        - If the user references an entity by id or id-prefix (and the entity type is stated or clear),
-          call `{RESOLVE_ENTITY_TOOL}(id_or_prefix=..., entity_type=...)`. On a unique match it returns the
-          entity; on multiple matches it returns a candidate list — ask the user to pick one.
-        - If you already hold a full, exact entity id (e.g. from a previous result), call
-          `{GET_ENTITY_DETAILS_TOOL}(entity_type=..., entity_id=...)` directly.
+        - When the user references an entity by id or id-prefix (and the entity type is stated or clear),
+          call `{RESOLVE_ENTITY_TOOL}(id_or_prefix=..., entity_type=...)`. It accepts a full id or a prefix.
+          On a unique match it returns the entity; on multiple matches it returns a candidate list — ask the
+          user to pick one.
         - After fetching, respond with a single short confirmation plus the key details.
 
         IMPORTANT: Viewing, showing, getting, or "giving me" an entity means fetching its details — that is
