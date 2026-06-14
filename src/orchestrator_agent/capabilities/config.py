@@ -38,10 +38,6 @@ class CapabilitySpec(BaseModel):
         description="One-line catalog entry shown to the model (and reusable as the A2A skill description)."
     )
     instructions: str = Field(description="Instructions loaded with the capability when the model activates it.")
-    defer_loading: bool = Field(
-        default=True,
-        description="Load on demand via load_capability (True) or keep always-on (False, e.g. shared helpers).",
-    )
     advertise: bool = Field(
         default=True,
         description="Advertise this capability as an A2A AgentCard skill (False for internal helpers).",
@@ -56,14 +52,13 @@ class CapabilitySpec(BaseModel):
     )
 
 
-def default_capability_specs() -> list[CapabilitySpec]:
-    """The built-in WFO capability set."""
+def load_capability_specs() -> list[CapabilitySpec]:
+    """Return the active capability specs (the built-in WFO set)."""
     return [
         CapabilitySpec(
             id="search",
             description="Find subscriptions, products, workflows, processes with lenient text/range filters.",
             instructions=get_search_instructions(),
-            defer_loading=False,
             a2a_tags=["search", "query", "fuzzy", "semantic"],
             examples=["Find all active subscriptions", "Search for workflows containing 'migrate'"],
         ),
@@ -71,7 +66,6 @@ def default_capability_specs() -> list[CapabilitySpec]:
             id="aggregate",
             description="Count, sum, average with grouping (regular or temporal).",
             instructions=get_aggregation_instructions(),
-            defer_loading=False,
             a2a_tags=["aggregate", "analytics"],
             examples=["How many subscriptions per status?", "Count processes grouped by type"],
         ),
@@ -79,7 +73,6 @@ def default_capability_specs() -> list[CapabilitySpec]:
             id="entity",
             description="Resolve a single entity by id or id-prefix.",
             instructions=get_entity_instructions(),
-            defer_loading=False,
             a2a_tags=["details", "lookup"],
             examples=["Show details for subscription abc123", "Look up workflow with id prefix 4f2e"],
         ),
@@ -87,16 +80,10 @@ def default_capability_specs() -> list[CapabilitySpec]:
             id="export",
             description="Prepare a downloadable export of an existing query's results.",
             instructions=get_export_instructions(),
-            defer_loading=False,
             a2a_tags=["export"],
             examples=["Export the last search results as CSV"],
         ),
     ]
-
-
-def load_capability_specs() -> list[CapabilitySpec]:
-    """Return the active capability specs."""
-    return default_capability_specs()
 
 
 def skills_from_specs() -> list:

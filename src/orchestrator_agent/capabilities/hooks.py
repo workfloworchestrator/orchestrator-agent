@@ -70,7 +70,7 @@ def build_capabilities(specs: list[CapabilitySpec] | None = None) -> list[Abstra
             id=spec.id,
             description=spec.description,
             instructions=spec.instructions,
-            defer_loading=spec.defer_loading,
+            defer_loading=False,
         )
         for spec in resolved
     ]
