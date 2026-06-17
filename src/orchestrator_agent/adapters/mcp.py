@@ -13,35 +13,66 @@
 
 """MCP (Model Context Protocol) adapter for the search agent.
 
-``MCPWorker`` owns the agent lifecycle and stream consumption — parallel to
-``AGUIWorker`` and the A2A executor. It runs the capabilities-based agent (which
-self-routes via on-demand capability loading) and returns a combined result string.
+This adapter exposes the agent *itself* as an MCP server (distinct from the agent being an MCP
+*client* of orchestrator-core). Each advertised plugin is auto-registered as one MCP tool — its name
+and description come from the plugin spec — so the MCP surface stays in sync with the plugins with no
+per-tool wiring here: add a plugin, it appears as a tool. A generic ``ask`` catch-all is also
+exposed.
 
-The FastMCP tool handlers are thin natural-language entry points; the model
-decides which domain capability to load. This adapter is stateless — each tool
-call is independent.
+Every tool is a thin natural-language entry point: it runs the full agent (always-on capabilities,
+which route by intent) via ``MCPWorker`` and returns the combined result string. The tool name/
+description simply advertise the capability to an MCP client browsing the agent's tools. This
+adapter is stateless — each tool call is independent.
 """
 
 from __future__ import annotations
 
 import uuid
+from collections.abc import Awaitable, Callable
 from contextlib import AsyncExitStack
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 import structlog
 from mcp.server.fastmcp import FastMCP
 from orchestrator.core.db import db
 from orchestrator.core.db.models import AgentRunTable
-from orchestrator.core.search.core.types import EntityType
+from pydantic_ai.messages import ToolReturnPart
 
-from orchestrator_agent.adapters.stream import collect_stream_output
 from orchestrator_agent.agent import new_deps
+from orchestrator_agent.artifacts import ToolArtifact
+from orchestrator_agent.capabilities import load_plugin_specs
 from orchestrator_agent.mcp_client import bind_outbound_token
 
 if TYPE_CHECKING:
     from orchestrator_agent.agent import WFOAgent
+    from orchestrator_agent.capabilities import PluginSpec
 
 logger = structlog.get_logger(__name__)
+
+
+def _tool_description(spec: "PluginSpec") -> str:
+    """Build an MCP tool description from a plugin spec (its one-liner + examples + an NL hint)."""
+    parts = [spec.description]
+    if spec.examples:
+        parts.append("Examples: " + "; ".join(f'"{e}"' for e in spec.examples))
+    parts.append("Describe your request in natural language.")
+    return "\n\n".join(parts)
+
+
+def _result_with_data(result: Any) -> str:
+    """The agent's final answer, plus the structured tool payloads as JSON.
+
+    The agent's prose is a one-line takeaway — it's told the data is rendered elsewhere (a chart/table
+    for human clients). An MCP caller is an LLM, so we send that data too, but as its native JSON
+    (not mermaid/markdown): the raw payloads of the artifact-bearing tool results from this run.
+    """
+    data = [
+        part.model_response_str()
+        for msg in result.all_messages()
+        for part in getattr(msg, "parts", [])
+        if isinstance(part, ToolReturnPart) and isinstance(part.metadata, ToolArtifact)
+    ]
+    return "\n\n".join([result.output, *data]) if data else result.output
 
 
 class MCPWorker:
@@ -51,7 +82,7 @@ class MCPWorker:
         self.agent = agent
 
     async def run(self, query: str, *, auth_token: str | None = None) -> str:
-        """Create state, run the agent (MCP session open), and return a result string."""
+        """Run the agent (MCP session open) and return its final answer plus the structured data."""
         deps = new_deps(user_input=query)
 
         deps.state.run_id = uuid.uuid4()
@@ -64,9 +95,8 @@ class MCPWorker:
         try:
             with bind_outbound_token(auth_token):
                 async with self.agent:
-                    async with self.agent.run_stream_events(query, deps=deps) as event_stream:
-                        output = await collect_stream_output(event_stream)
-            return output
+                    result = await self.agent.run(query, deps=deps)
+            return _result_with_data(result)
         except Exception:
             logger.exception("MCPWorker: run failed", query=query[:100])
             raise
@@ -90,44 +120,33 @@ class MCPApp:
         self.app = self.server.streamable_http_app()
 
     def _register_tools(self) -> None:
+        """Register one MCP tool per advertised plugin, plus a generic ``ask`` catch-all.
+
+        The plugin set is the single source: each advertised ``PluginSpec`` becomes a tool named after
+        the plugin, described by its spec. New plugins appear automatically; nothing is hardcoded here.
+        """
         worker = self.worker
 
-        @self.server.tool()
-        async def search(query: str) -> str:
-            """Find subscriptions, products, workflows, or processes.
-
-            Describe what you're looking for in natural language.
-            Examples: "active subscriptions", "failed workflows from last week"
-            """
-            return await worker.run(query)
-
-        @self.server.tool()
-        async def aggregate(query: str) -> str:
-            """Count, sum, or average data with grouping.
-
-            Describe what aggregation you need.
-            Examples: "count subscriptions by product", "average workflow duration by status"
-            """
-            return await worker.run(query)
-
-        @self.server.tool()
-        async def get_entity_details(entity_type: EntityType, entity_id: uuid.UUID) -> str:
-            """Fetch full details for a specific entity.
-
-            Args:
-                entity_type: The type of entity (SUBSCRIPTION, PRODUCT, WORKFLOW, PROCESS)
-                entity_id: The UUID of the entity
-            """
-            query = f"Get details for {entity_type.value} {entity_id}"
-            return await worker.run(query)
+        for spec in load_plugin_specs():
+            if spec.advertise:
+                self.server.add_tool(self._run_query_tool(), name=spec.id, description=_tool_description(spec))
 
         @self.server.tool()
         async def ask(query: str) -> str:
-            """Ask any question about the orchestration system.
+            """Ask any question about the orchestration system in natural language.
 
-            The agent will determine the best approach — search, aggregate, or answer directly.
+            The agent picks the right capability (search, aggregate, entity lookup, export) and answers.
             """
             return await worker.run(query)
+
+    def _run_query_tool(self) -> Callable[[str], Awaitable[str]]:
+        """A fresh natural-language tool handler that runs the agent (one per registered plugin tool)."""
+        worker = self.worker
+
+        async def run_query(query: str) -> str:
+            return await worker.run(query)
+
+        return run_query
 
     async def __aenter__(self) -> MCPApp:
         self._stack = AsyncExitStack()

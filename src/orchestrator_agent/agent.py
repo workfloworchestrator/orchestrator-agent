@@ -30,7 +30,7 @@ from pydantic_ai import Agent
 from pydantic_ai.ag_ui import StateDeps
 
 from orchestrator_agent.capabilities.hooks import build_capabilities
-from orchestrator_agent.capabilities.prompts import BASE_FRAMING
+from orchestrator_agent.capabilities.loader import load_system_prompt
 from orchestrator_agent.mcp_client import build_core_toolset
 from orchestrator_agent.state import SearchState
 
@@ -56,7 +56,7 @@ def build_agent(model: "Model | KnownModelName | str") -> WFOAgent:
     agent: WFOAgent = Agent(
         model=model,
         deps_type=StateDeps[SearchState],
-        instructions=BASE_FRAMING,
+        instructions=load_system_prompt(),
         toolsets=[build_core_toolset()],
         capabilities=capabilities,
         retries=2,

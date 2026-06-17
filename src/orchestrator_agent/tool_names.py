@@ -30,6 +30,28 @@ GET_VALID_OPERATORS_TOOL = "get_valid_operators"
 RESOLVE_ENTITY_TOOL = "resolve_entity"
 EXPORT_QUERY_TOOL = "export_query"
 
+# Every tool name the agent code depends on (artifact mapping, the filter-path guard).
+# Verified against the live MCP server at startup
+# (``verify_tool_contract``) so a rename in orchestrator-core fails loudly instead of silently
+# breaking artifact mapping or leaving the prompts pointing at a tool that no longer exists.
+ALL_TOOL_NAMES = (
+    SEARCH_TOOL,
+    AGGREGATE_TOOL,
+    DISCOVER_FILTER_PATHS_TOOL,
+    GET_VALID_OPERATORS_TOOL,
+    RESOLVE_ENTITY_TOOL,
+    EXPORT_QUERY_TOOL,
+)
+
+# Map of ``CONSTANT_NAME -> live tool name``. A plugin declares the tools it owns in frontmatter by
+# *constant* (``tools: [SEARCH_TOOL]``); ``behavior.owned_tool_names`` resolves them to live names
+# for tool ownership (the artifact filter + DeferredToolGate). Prompts do not name tools at all — the
+# model binds intent to a tool from the tool's description — so this is the single source of truth for
+# the constant->name mapping. Auto-derived from the ``*_TOOL`` constants above.
+TOOL_NAME_PLACEHOLDERS = {
+    name: value for name, value in dict(globals()).items() if name.endswith("_TOOL") and isinstance(value, str)
+}
+
 # --- Tool argument keys that reference filterable field paths -------------------------------
 # A tool call that supplies any of these (``filters`` on search/aggregate, ``group_by`` on
 # aggregate) references database-specific field paths that cannot be guessed — they must come
@@ -39,6 +61,8 @@ PATH_CONSUMING_PARAMS = ("filters", "group_by")
 
 
 __all__ = [
+    "ALL_TOOL_NAMES",
+    "TOOL_NAME_PLACEHOLDERS",
     "AGGREGATE_TOOL",
     "DISCOVER_FILTER_PATHS_TOOL",
     "EXPORT_QUERY_TOOL",

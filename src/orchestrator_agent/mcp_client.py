@@ -46,6 +46,7 @@ from pydantic_ai.toolsets import AbstractToolset
 
 from orchestrator_agent.auth import token_manager
 from orchestrator_agent.settings import agent_settings
+from orchestrator_agent.tool_names import ALL_TOOL_NAMES
 
 logger = structlog.get_logger(__name__)
 
@@ -111,8 +112,45 @@ def build_core_toolset() -> MCPToolset[Any]:
     )
 
 
+async def verify_tool_contract(toolset: MCPToolset[Any]) -> None:
+    """Assert every tool name the agent depends on exists on the live MCP server.
+
+    The names in ``tool_names.ALL_TOOL_NAMES`` are referenced two ways that pydantic-ai cannot
+    check for us: literally in the plugin prompts, and as match keys in artifact mapping (the
+    builders in ``capabilities/behavior/artifacts.py``). pydantic-ai only validates tool calls the
+    *model* makes at runtime — it is name-agnostic about our code's expectations — so a rename in
+    orchestrator-core would otherwise drift silently. This opens one session, lists the server's
+    tools, and raises on any missing name.
+
+    Only a *connection* failure (core momentarily unreachable) is logged and skipped — that is an
+    operational condition, not contract drift. Any other failure (auth, HTTP status, malformed
+    response) is a real misconfiguration and is raised so startup fails loud rather than serving a
+    broken agent.
+    """
+    try:
+        async with toolset:
+            live = {tool.name for tool in await toolset.list_tools()}
+    except (httpx.TransportError, ConnectionError, OSError, TimeoutError) as exc:
+        logger.warning(
+            "Could not reach the MCP server to verify the tool contract; skipping",
+            url=agent_settings.WFO_CORE_MCP_URL,
+            error=str(exc),
+        )
+        return
+
+    missing = sorted(name for name in ALL_TOOL_NAMES if name not in live)
+    if missing:
+        raise RuntimeError(
+            f"MCP server at {agent_settings.WFO_CORE_MCP_URL} is missing tools the agent depends on: "
+            f"{missing}. Available tools: {sorted(live)}. The orchestrator-core tool contract "
+            f"(tool_names.py) has drifted — fix the names before serving."
+        )
+    logger.debug("MCP tool contract verified", tools=sorted(live))
+
+
 __all__ = [
     "AbstractToolset",
     "bind_outbound_token",
     "build_core_toolset",
+    "verify_tool_contract",
 ]

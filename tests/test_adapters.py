@@ -10,6 +10,7 @@ import asyncio
 import json
 import uuid
 from contextlib import asynccontextmanager
+from types import SimpleNamespace
 from typing import Any
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -33,6 +34,7 @@ from a2a.types import (
     TextPart,
 )
 from ag_ui.core import RunAgentInput, ToolCallResultEvent, UserMessage
+from pydantic_ai.messages import ToolReturnPart
 
 from orchestrator_agent.adapters.a2a import A2A_SKILLS, NO_RESULTS, WFOAgentExecutor
 from orchestrator_agent.adapters.ag_ui import AGUIEventStream, AGUIWorker, _AGUIAdapter
@@ -376,35 +378,54 @@ class TestA2AEndpoint:
         assert len(card["skills"]) == len(A2A_SKILLS)
 
 
+def _run_agent_mock(output: str = "", messages: list | None = None) -> MagicMock:
+    """An agent mock whose `run(...)` returns a result with the given output and `all_messages()`.
+
+    It's also an async context manager. The MCP worker uses `agent.run`, not the streaming path.
+    """
+    agent = MagicMock()
+    agent.__aenter__ = AsyncMock(return_value=agent)
+    agent.__aexit__ = AsyncMock(return_value=False)
+    result = MagicMock(output=output)
+    result.all_messages.return_value = messages or []
+    agent.run = AsyncMock(return_value=result)
+    return agent
+
+
 class TestMCPWorker:
     @pytest.mark.asyncio
     @patch("orchestrator_agent.adapters.mcp.db")
-    async def test_passes_query_to_agent(self, _mock_db):
-        agent = _agent_mock(lambda: mock_event_stream(make_text_result_event("Done")))
+    async def test_returns_prose_when_no_artifact_data(self, _mock_db):
+        # No artifact-bearing tool result -> just the agent's final answer.
+        agent = _run_agent_mock(output="There are 7 active subscriptions.")
 
-        worker = MCPWorker(agent=agent)
-        await worker.run("show subscriptions")
+        out = await MCPWorker(agent=agent).run("show subscriptions")
 
-        args, _kwargs = agent._last_call
-        assert args[0] == "show subscriptions"
+        assert out == "There are 7 active subscriptions."
+        assert agent.run.call_args.args[0] == "show subscriptions"
+
+    @pytest.mark.asyncio
+    @patch("orchestrator_agent.adapters.mcp.db")
+    async def test_appends_artifact_payload_as_json(self, _mock_db):
+        # An artifact-bearing tool result -> its payload JSON is appended after the prose.
+        part = ToolReturnPart(tool_name="search", content={"query_id": "q-1", "returned": 2}, tool_call_id="c1")
+        part.metadata = QueryArtifact(description="d", query_id="q-1", total_results=2)
+        agent = _run_agent_mock(output="Found 2.", messages=[SimpleNamespace(parts=[part])])
+
+        out = await MCPWorker(agent=agent).run("find subs")
+
+        assert out.startswith("Found 2.")
+        assert "q-1" in out  # the structured payload rides along as JSON
 
     @pytest.mark.asyncio
     @patch("orchestrator_agent.adapters.mcp.db")
     async def test_exception_propagates(self, _mock_db):
-        """Exception in agent stream is re-raised after logging."""
+        """Exception during the agent run is re-raised after logging."""
+        agent = _run_agent_mock()
+        agent.run.side_effect = RuntimeError("boom")
 
-        def failing_stream():
-            async def gen():
-                raise RuntimeError("boom")
-                yield  # noqa: F401
-
-            return gen()
-
-        agent = _agent_mock(failing_stream)
-
-        worker = MCPWorker(agent=agent)
         with pytest.raises(RuntimeError, match="boom"):
-            await worker.run("find subs")
+            await MCPWorker(agent=agent).run("find subs")
 
 
 class TestMCPAppInit:
@@ -421,9 +442,11 @@ class TestMCPAppInit:
     @pytest.mark.parametrize(
         ("tool", "query"),
         [
-            ("search", "find active subs"),
-            ("aggregate", "count by product"),
-            ("ask", "what is happening?"),
+            ("search", "find active subs"),  # auto-derived from the search plugin
+            ("aggregate", "count by product"),  # auto-derived from the aggregate plugin
+            ("entity", "show subscription abc"),  # auto-derived from the entity plugin
+            ("export", "export the last results"),  # auto-derived from the export plugin
+            ("ask", "what is happening?"),  # generic catch-all
         ],
     )
     @patch("orchestrator_agent.adapters.mcp.db")
@@ -439,19 +462,15 @@ class TestMCPAppInit:
 
     @pytest.mark.asyncio
     @patch("orchestrator_agent.adapters.mcp.db")
-    async def test_tool_get_entity_details_delegates_to_worker(self, _mock_db):
-        import uuid as _uuid
+    async def test_tools_auto_registered_one_per_plugin(self, _mock_db):
+        # The MCP surface is derived from the plugin set — one tool per advertised plugin, plus `ask`.
+        from orchestrator_agent.capabilities import load_plugin_specs
 
-        agent = MagicMock()
-        app = MCPApp(agent)
-        app.worker.run = AsyncMock(return_value="details result")
-
-        entity_id = _uuid.uuid4()
-        await app.server.call_tool("get_entity_details", {"entity_type": "SUBSCRIPTION", "entity_id": str(entity_id)})
-
-        query = app.worker.run.call_args.args[0]
-        assert "SUBSCRIPTION" in query
-        assert str(entity_id) in query
+        app = MCPApp(MagicMock())
+        names = {t.name for t in await app.server.list_tools()}
+        advertised = {s.id for s in load_plugin_specs() if s.advertise}
+        assert advertised <= names  # every advertised plugin is a tool
+        assert "ask" in names
 
 
 class TestMCPAppLifecycle:

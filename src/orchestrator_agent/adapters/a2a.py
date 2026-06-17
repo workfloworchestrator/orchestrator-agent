@@ -52,7 +52,7 @@ from pydantic_ai.run import AgentRunResultEvent
 
 from orchestrator_agent.agent import new_deps
 from orchestrator_agent.artifacts import QueryArtifact, ToolArtifact
-from orchestrator_agent.capabilities.config import skills_from_specs
+from orchestrator_agent.capabilities.spec import skills_from_specs
 from orchestrator_agent.mcp_client import bind_outbound_token
 from orchestrator_agent.persistence import PostgresStatePersistence
 

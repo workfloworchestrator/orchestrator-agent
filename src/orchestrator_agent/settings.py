@@ -42,7 +42,7 @@ class AgentSettings(BaseSettings):
     )
     AGENT_DOMAIN_CONTEXT: str = Field(
         default="",
-        description="Optional operator-supplied domain knowledge injected into the search prompt "
+        description="Optional operator-supplied domain knowledge appended to the agent system prompt "
         "(e.g. identifier conventions and their filter fields). Empty disables the section.",
     )
     OAUTH2_OUTBOUND_ACTIVE: bool | None = Field(

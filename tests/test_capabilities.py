@@ -18,11 +18,14 @@ from orchestrator_agent.artifacts import (
     QueryArtifact,
     RenderedBlock,
 )
+from orchestrator_agent.capabilities.behavior import PluginCapability
+from orchestrator_agent.capabilities.behavior.artifacts import data_artifact, export_artifact, query_artifact
 from orchestrator_agent.capabilities.hooks import (
+    DeferredToolGate,
     FilterPathGuard,
-    _artifact_for,
     trim_history,
 )
+from orchestrator_agent.capabilities.spec import PluginSpec
 from orchestrator_agent.rendering.charts import aggregate_to_mermaid
 from orchestrator_agent.rendering.tables import search_to_markdown
 from orchestrator_agent.tool_names import (
@@ -34,6 +37,22 @@ from orchestrator_agent.tool_names import (
 )
 
 
+def _artifact_for(tool: str, result):
+    """Dispatch a tool result to its plugin's artifact builder — mirrors the behavior classes.
+
+    The real per-tool mapping now lives in ``behavior/artifacts.py`` (one builder per artifact type);
+    this helper keeps the mapping assertions below tool-keyed and exercises those builders directly.
+    """
+    payload = result.return_value if isinstance(result, ToolReturn) else result
+    if tool in (SEARCH_TOOL, AGGREGATE_TOOL):
+        return query_artifact(tool, payload)
+    if tool == EXPORT_QUERY_TOOL:
+        return export_artifact(tool, payload)
+    if tool == RESOLVE_ENTITY_TOOL:
+        return data_artifact(tool, payload)
+    return None
+
+
 class TestTrimHistory:
     def test_long_history_trimmed_to_window(self):
         msgs = [ModelRequest(parts=[UserPromptPart(content=str(i))]) for i in range(100)]
@@ -43,10 +62,176 @@ class TestTrimHistory:
         assert trimmed[-1] is msgs[-1]
 
     def test_leading_instructions_preserved(self):
-        head = ModelRequest(parts=[UserPromptPart(content="start")], instructions="SYSTEM FRAMING")
+        head = ModelRequest(parts=[UserPromptPart(content="start")], instructions="SYSTEM PROMPT")
         msgs = [head] + [ModelRequest(parts=[UserPromptPart(content=str(i))]) for i in range(100)]
         trimmed = trim_history(msgs)
         assert trimmed[0] is head
+
+
+class TestPluginCapabilityBehavior:
+    """The PluginCapability hook: ownership filtering + artifact attach via after_tool_execute."""
+
+    # tools: are constant NAMES (as in frontmatter); the capability resolves them to live names.
+    SPEC = PluginSpec(id="search", description="d", instructions="# Searching", defer_loading=False, tools=["SEARCH_TOOL"])
+    CAP = PluginCapability(SPEC, query_artifact)
+    SEARCH_DEF = ToolDefinition(name=SEARCH_TOOL, parameters_json_schema={"properties": {}})
+    OTHER_DEF = ToolDefinition(name=EXPORT_QUERY_TOOL, parameters_json_schema={"properties": {}})
+
+    async def _run(self, tool_def, result):
+        return await self.CAP.after_tool_execute(
+            SimpleNamespace(),
+            call=ToolCallPart(tool_name=tool_def.name, args={}),
+            tool_def=tool_def,
+            args={},
+            result=result,
+        )
+
+    def test_instructions_and_identity_from_spec(self):
+        assert self.CAP.id == "search"
+        assert self.CAP.get_instructions() == "# Searching"
+        assert self.CAP.defer_loading is False
+
+    def test_owned_tools_resolved_to_live_names(self):
+        # The ownership filter compares against live tool names; SEARCH_TOOL -> "search".
+        assert self.CAP._tools == {SEARCH_TOOL}
+
+    async def test_owned_tool_result_gets_artifact_metadata(self):
+        out = await self._run(self.SEARCH_DEF, {"query_id": "q-1", "returned": 2, "results": []})
+        assert isinstance(out, ToolReturn)
+        assert isinstance(out.metadata, QueryArtifact)
+        assert out.metadata.query_id == "q-1"
+
+    async def test_unowned_tool_result_passes_through_untouched(self):
+        # export is not in this plugin's tools — the hook must not touch its result.
+        payload = {"query_id": "q-4", "download_path": "/x"}
+        assert await self._run(self.OTHER_DEF, payload) is payload
+
+    async def test_real_loaded_search_plugin_attaches_artifact(self):
+        # Regression: frontmatter `tools:` are constant names; the capability must resolve them to
+        # live names, else a real loaded plugin silently never attaches artifacts.
+        from orchestrator_agent.capabilities.behavior import build_plugin_capability
+        from orchestrator_agent.capabilities.loader import load_plugin_specs
+
+        spec = {s.id: s for s in load_plugin_specs()}["search"]
+        cap = build_plugin_capability(spec)  # selected by `artifact: query` declaration
+        out = await cap.after_tool_execute(
+            SimpleNamespace(),
+            call=ToolCallPart(tool_name=SEARCH_TOOL, args={}),
+            tool_def=ToolDefinition(name=SEARCH_TOOL, parameters_json_schema={"properties": {}}),
+            args={},
+            result={"query_id": "q-real", "returned": 1, "results": []},
+        )
+        assert isinstance(out, ToolReturn)
+        assert isinstance(out.metadata, QueryArtifact)
+
+
+class TestArtifactDeclaration:
+    """build_plugin_capability selects an artifact builder by the frontmatter `artifact:` declaration."""
+
+    def test_artifact_plugin_is_a_plugin_capability(self):
+        from orchestrator_agent.capabilities.behavior import build_plugin_capability
+
+        cap = build_plugin_capability(
+            PluginSpec(id="x", description="d", instructions="i", defer_loading=False, artifact="query")
+        )
+        assert isinstance(cap, PluginCapability)
+
+    def test_no_artifact_is_instructions_only(self):
+        from pydantic_ai.capabilities import Capability
+
+        from orchestrator_agent.capabilities.behavior import build_plugin_capability
+
+        cap = build_plugin_capability(PluginSpec(id="z", description="d", instructions="i", defer_loading=False))
+        assert isinstance(cap, Capability)
+        assert not isinstance(cap, PluginCapability)
+
+    def test_unknown_artifact_rejected_at_validation(self):
+        # `artifact` is typed as ArtifactType — a bad value fails when the spec is built.
+        from pydantic import ValidationError
+
+        with pytest.raises(ValidationError):
+            PluginSpec(id="z", description="d", instructions="i", defer_loading=False, artifact="bogus")
+
+    @pytest.mark.parametrize(
+        "artifact, tool, payload, expected",
+        [
+            ("query", SEARCH_TOOL, {"query_id": "q", "returned": 1, "results": []}, QueryArtifact),
+            ("data", RESOLVE_ENTITY_TOOL, {"entity_id": "e", "entity_type": "SUBSCRIPTION"}, DataArtifact),
+            ("export", EXPORT_QUERY_TOOL, {"query_id": "q", "download_path": "/x"}, ExportArtifact),
+        ],
+    )
+    async def test_declared_binding_attaches_right_artifact_end_to_end(self, artifact, tool, payload, expected):
+        # Drives the real artifact: -> class -> builder path (not the test's _artifact_for helper),
+        # so a mis-bound ARTIFACT_BEHAVIORS or broken artifact() method would fail here.
+        from orchestrator_agent.capabilities.behavior import build_plugin_capability
+
+        tool_const = {
+            SEARCH_TOOL: "SEARCH_TOOL",
+            RESOLVE_ENTITY_TOOL: "RESOLVE_ENTITY_TOOL",
+            EXPORT_QUERY_TOOL: "EXPORT_QUERY_TOOL",
+        }[tool]
+        cap = build_plugin_capability(
+            PluginSpec(id="p", description="d", instructions="i", defer_loading=False, tools=[tool_const], artifact=artifact)
+        )
+        out = await cap.after_tool_execute(
+            SimpleNamespace(),
+            call=ToolCallPart(tool_name=tool, args={}),
+            tool_def=ToolDefinition(name=tool, parameters_json_schema={"properties": {}}),
+            args={},
+            result=payload,
+        )
+        assert isinstance(out, ToolReturn)
+        assert isinstance(out.metadata, expected)
+
+
+class TestDeferredToolGate:
+    """The gate hides a deferred plugin's owned tools until its capability is loaded."""
+
+    DEFERRED_SEARCH = PluginSpec(
+        id="search", description="d", instructions="i", tools=["SEARCH_TOOL"], defer_loading=True
+    )
+    ALWAYS_AGG = PluginSpec(id="aggregate", description="d", instructions="i", defer_loading=False, tools=["AGGREGATE_TOOL"])
+    GATE = DeferredToolGate([DEFERRED_SEARCH, ALWAYS_AGG])
+    DEFS = [ToolDefinition(name=n) for n in (SEARCH_TOOL, AGGREGATE_TOOL, DISCOVER_FILTER_PATHS_TOOL)]
+
+    async def _names(self, loaded):
+        ctx = SimpleNamespace(loaded_capability_ids=set(loaded))
+        return {t.name for t in await self.GATE.prepare_tools(ctx, list(self.DEFS))}
+
+    async def test_deferred_tool_hidden_until_loaded(self):
+        assert SEARCH_TOOL not in await self._names(loaded=[])
+        assert SEARCH_TOOL in await self._names(loaded=["search"])
+
+    async def test_always_on_and_unowned_tools_never_hidden(self):
+        names = await self._names(loaded=[])
+        assert AGGREGATE_TOOL in names  # always-on plugin's tool
+        assert DISCOVER_FILTER_PATHS_TOOL in names  # owned by no plugin (base)
+
+    async def test_no_deferred_plugins_is_passthrough(self):
+        gate = DeferredToolGate([self.ALWAYS_AGG])
+        ctx = SimpleNamespace(loaded_capability_ids=set())
+        out = await gate.prepare_tools(ctx, list(self.DEFS))
+        assert out == self.DEFS
+
+    async def test_two_deferred_plugins_reveal_independently(self):
+        deferred_agg = PluginSpec(
+            id="aggregate", description="d", instructions="i", tools=["AGGREGATE_TOOL"], defer_loading=True
+        )
+        gate = DeferredToolGate([self.DEFERRED_SEARCH, deferred_agg])
+        ctx = SimpleNamespace(loaded_capability_ids={"search"})  # only search loaded
+        names = {t.name for t in await gate.prepare_tools(ctx, list(self.DEFS))}
+        assert SEARCH_TOOL in names  # loaded
+        assert AGGREGATE_TOOL not in names  # still deferred-unloaded
+
+    async def test_tool_shared_with_always_on_owner_is_never_hidden(self):
+        # A tool owned by both a deferred and an always-on plugin stays visible (always-on wins).
+        deferred_dup = PluginSpec(
+            id="search", description="d", instructions="i", tools=["AGGREGATE_TOOL"], defer_loading=True
+        )
+        gate = DeferredToolGate([deferred_dup, self.ALWAYS_AGG])  # both own AGGREGATE_TOOL
+        ctx = SimpleNamespace(loaded_capability_ids=set())
+        names = {t.name for t in await gate.prepare_tools(ctx, list(self.DEFS))}
+        assert AGGREGATE_TOOL in names
 
 
 class TestArtifactMapping:
