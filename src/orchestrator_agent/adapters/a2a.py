@@ -63,6 +63,14 @@ logger = structlog.get_logger(__name__)
 
 NO_RESULTS = "No results"
 
+# Card-level tool description a consuming agent reads. The output-handling note covers only the
+# artifact-bearing replies (a result with a pre-rendered table/chart), not every tool call.
+AGENT_CARD_DESCRIPTION = (
+    "Answers questions about orchestration data. When a reply includes a pre-rendered Markdown "
+    "table or Mermaid chart, relay that block to the user verbatim, without reformatting or "
+    "summarising it."
+)
+
 
 A2A_SKILLS = skills_from_specs()
 
@@ -186,13 +194,13 @@ class A2AAdapter:
 
         agent_card = AgentCard(
             name="WFO Agent",
-            description="Search, filter and aggregate orchestration data",
+            description=AGENT_CARD_DESCRIPTION,
             url=url,
             version="1.0.0",
             capabilities=AgentCapabilities(streaming=True),
             skills=A2A_SKILLS,
             default_input_modes=["application/json"],
-            default_output_modes=["application/json"],
+            default_output_modes=["text/markdown", "application/json"],
         )
 
         task_store = InMemoryTaskStore()
