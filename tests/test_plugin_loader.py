@@ -65,7 +65,9 @@ def test_unknown_owned_tool_constant_raises():
     from orchestrator_agent.capabilities.behavior import owned_tool_names
 
     with pytest.raises(KeyError, match="BOGUS_TOOL"):
-        owned_tool_names(PluginSpec(id="x", description="d", instructions="i", defer_loading=False, tools=["BOGUS_TOOL"]))
+        owned_tool_names(
+            PluginSpec(id="x", description="d", instructions="i", defer_loading=False, tools=["BOGUS_TOOL"])
+        )
 
 
 def test_underscore_prefixed_files_are_not_plugins(tmp_path):

@@ -72,7 +72,9 @@ class TestPluginCapabilityBehavior:
     """The PluginCapability hook: ownership filtering + artifact attach via after_tool_execute."""
 
     # tools: are constant NAMES (as in frontmatter); the capability resolves them to live names.
-    SPEC = PluginSpec(id="search", description="d", instructions="# Searching", defer_loading=False, tools=["SEARCH_TOOL"])
+    SPEC = PluginSpec(
+        id="search", description="d", instructions="# Searching", defer_loading=False, tools=["SEARCH_TOOL"]
+    )
     CAP = PluginCapability(SPEC, query_artifact)
     SEARCH_DEF = ToolDefinition(name=SEARCH_TOOL, parameters_json_schema={"properties": {}})
     OTHER_DEF = ToolDefinition(name=EXPORT_QUERY_TOOL, parameters_json_schema={"properties": {}})
@@ -171,7 +173,9 @@ class TestArtifactDeclaration:
             EXPORT_QUERY_TOOL: "EXPORT_QUERY_TOOL",
         }[tool]
         cap = build_plugin_capability(
-            PluginSpec(id="p", description="d", instructions="i", defer_loading=False, tools=[tool_const], artifact=artifact)
+            PluginSpec(
+                id="p", description="d", instructions="i", defer_loading=False, tools=[tool_const], artifact=artifact
+            )
         )
         out = await cap.after_tool_execute(
             SimpleNamespace(),
@@ -190,7 +194,9 @@ class TestDeferredToolGate:
     DEFERRED_SEARCH = PluginSpec(
         id="search", description="d", instructions="i", tools=["SEARCH_TOOL"], defer_loading=True
     )
-    ALWAYS_AGG = PluginSpec(id="aggregate", description="d", instructions="i", defer_loading=False, tools=["AGGREGATE_TOOL"])
+    ALWAYS_AGG = PluginSpec(
+        id="aggregate", description="d", instructions="i", defer_loading=False, tools=["AGGREGATE_TOOL"]
+    )
     GATE = DeferredToolGate([DEFERRED_SEARCH, ALWAYS_AGG])
     DEFS = [ToolDefinition(name=n) for n in (SEARCH_TOOL, AGGREGATE_TOOL, DISCOVER_FILTER_PATHS_TOOL)]
 
