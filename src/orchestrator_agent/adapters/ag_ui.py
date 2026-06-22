@@ -11,67 +11,43 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""AG-UI adapter — orchestration and custom transport layer.
-
-AGUIWorker owns the full AG-UI request lifecycle (state setup, persistence,
-streaming) so the HTTP endpoint stays a thin request/response handler.
-
-AGUIEventStream / _AGUIAdapter customise the pydantic-ai transport:
-1. Replace full tool results with lightweight ToolArtifact references
-2. Pass through CustomEvent instances (e.g. AGENT_STEP_ACTIVE) that
-   pydantic-ai's default handle_event() would silently drop
-"""
 
 from __future__ import annotations
 
 from collections.abc import AsyncIterator
-from dataclasses import dataclass
-from typing import Any
+from typing import TYPE_CHECKING, Any
 from uuid import UUID
 
-from ag_ui.core import BaseEvent, CustomEvent, EventType, RunAgentInput, ToolCallResultEvent
+from ag_ui.core import BaseEvent, EventType, RunAgentInput, ToolCallResultEvent
 from orchestrator.core.db.models import AgentRunTable
 from pydantic_ai.ag_ui import StateDeps
 from pydantic_ai.messages import FunctionToolResultEvent, ToolReturnPart
-from pydantic_ai.ui import NativeEvent
 from pydantic_ai.ui.ag_ui import AGUIAdapter
 from pydantic_ai.ui.ag_ui import AGUIEventStream as _BaseAGUIEventStream
 from sqlalchemy.orm import Session
 from structlog import get_logger
 
 from orchestrator_agent.artifacts import ToolArtifact
+from orchestrator_agent.mcp_client import bind_outbound_token
 from orchestrator_agent.persistence import PostgresStatePersistence
 from orchestrator_agent.state import SearchState
 
-if __name__ != "__main__":
-    from orchestrator_agent.agent import AgentAdapter
+if TYPE_CHECKING:
+    from orchestrator_agent.agent import WFOAgent
 
 logger = get_logger(__name__)
 
 
-@dataclass
 class AGUIEventStream(_BaseAGUIEventStream[Any, Any]):
-    """Custom event stream for the search agent.
+    """Custom event stream that replaces artifact-bearing tool results with their reference.
 
-    - Replaces tool results that carry ToolArtifact metadata with the artifact JSON,
-      so the AG-UI frontend receives a lightweight reference instead of full data.
-    - Yields CustomEvent instances (AGENT_STEP_ACTIVE) that the base class would drop.
+    Tool results whose metadata is a ``ToolArtifact`` are sent to the frontend as a
+    lightweight JSON reference instead of the full payload, so the UI can fetch full
+    results lazily.
     """
 
-    async def handle_event(self, event: NativeEvent | CustomEvent) -> AsyncIterator[BaseEvent]:
-        # Pass through AG-UI CustomEvents (e.g. AGENT_STEP_ACTIVE) that the
-        # base class match/case would silently discard.
-        # NativeEvent doesn't include CustomEvent in its union, but we receive
-        # them at runtime via the agent's event stream.
-        if isinstance(event, CustomEvent):
-            yield event
-            return
-
-        async for e in super().handle_event(event):
-            yield e
-
     async def handle_function_tool_result(self, event: FunctionToolResultEvent) -> AsyncIterator[BaseEvent]:
-        result = event.result
+        result = event.part
         if isinstance(result, ToolReturnPart) and isinstance(result.metadata, ToolArtifact):
             yield ToolCallResultEvent(
                 message_id=self.new_message_id(),
@@ -95,27 +71,17 @@ class _AGUIAdapter(AGUIAdapter[Any, Any]):
 
 
 class AGUIWorker:
-    """Orchestrates AG-UI request handling: state setup, persistence, stream creation.
-
-    Parallel to A2AWorker — owns the full AG-UI lifecycle so the HTTP endpoint
-    stays a thin request/response handler.
-    """
+    """Orchestrates AG-UI request handling: state setup, persistence, stream creation."""
 
     @staticmethod
     async def run_request(
-        agent: AgentAdapter,
+        agent: "WFOAgent",
         run_input: RunAgentInput,
         db_session: Session,
+        *,
+        auth_token: str | None = None,
     ) -> AsyncIterator[str]:
-        """Execute the full AG-UI lifecycle and return an SSE event iterator.
-
-        Steps:
-        1. Extract user input from messages and inject into state
-        2. Create/fetch an AgentRunTable record
-        3. Set up persistence and load previous state if available
-        4. Create the _AGUIAdapter, run the stream, and yield SSE events
-        5. Commit on success, rollback on failure
-        """
+        """Execute the full AG-UI lifecycle and return an SSE event iterator."""
         prepared = AGUIWorker._prepare_run_input(run_input)
 
         run_id = UUID(prepared.run_id)
@@ -138,27 +104,22 @@ class AGUIWorker:
             initial_state = loaded_state
             initial_state.user_input = prepared.state["user_input"]
             initial_state.run_id = run_id
-            logger.debug(
-                "Loaded previous state from persistence",
-                completed_turns=len(initial_state.memory.completed_turns),
-                current_turn=initial_state.memory.current_turn is not None,
-            )
+            logger.debug("Loaded previous state from persistence")
         else:
             initial_state = SearchState(**prepared.state)
             logger.debug("Created fresh state (no previous snapshot)")
 
-        # Set persistence on agent instance
-        agent._persistence = persistence
-
-        # Create adapter — all event handling (artifacts, custom events) flows through the stream
         adapter = _AGUIAdapter(agent=agent, run_input=prepared)
-        event_stream = adapter.encode_stream(adapter.run_stream(deps=StateDeps(initial_state)))
 
         async def _stream_with_persistence() -> AsyncIterator[str]:
-            """Stream AG-UI events and commit DB on completion."""
+            """Open the MCP session, stream AG-UI events, persist, and commit on completion."""
             try:
-                async for event_str in event_stream:
-                    yield event_str
+                with bind_outbound_token(auth_token):
+                    async with agent:
+                        event_stream = adapter.encode_stream(adapter.run_stream(deps=StateDeps(initial_state)))
+                        async for event_str in event_stream:
+                            yield event_str
+                await persistence.snapshot(initial_state)
                 db_session.commit()
             except Exception as e:
                 logger.error("Error in agent stream", error=str(e), exc_info=True)

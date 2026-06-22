@@ -11,8 +11,9 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-from orchestrator_agent.agent import AgentAdapter
+from orchestrator_agent.agent import WFOAgent, build_agent
 
 __all__ = [
-    "AgentAdapter",
+    "WFOAgent",
+    "build_agent",
 ]

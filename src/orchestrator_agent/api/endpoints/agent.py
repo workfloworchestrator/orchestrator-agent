@@ -22,7 +22,7 @@ from starlette.responses import Response, StreamingResponse
 from structlog import get_logger
 
 from orchestrator_agent.adapters import AGUIWorker
-from orchestrator_agent.agent import AgentAdapter
+from orchestrator_agent.agent import WFOAgent
 from orchestrator_agent.api.dependencies import get_agent
 
 router = APIRouter()
@@ -32,7 +32,7 @@ logger = get_logger(__name__)
 @router.post("/")
 async def agent_conversation(
     request: Request,
-    agent: Annotated[AgentAdapter, Depends(get_agent)],
+    agent: Annotated[WFOAgent, Depends(get_agent)],
 ) -> Response:
     """Agent conversation endpoint using pydantic-ai AG-UI protocol."""
     try:
@@ -42,5 +42,10 @@ async def agent_conversation(
         logger.error("Invalid request body", error=str(e))
         raise HTTPException(status_code=400, detail=f"Invalid request body: {e}")
 
-    stream = await AGUIWorker.run_request(agent=agent, run_input=run_input, db_session=db.session)
+    auth_header = request.headers.get("authorization", "")
+    auth_token = auth_header.removeprefix("Bearer ") if auth_header.startswith("Bearer ") else None
+
+    stream = await AGUIWorker.run_request(
+        agent=agent, run_input=run_input, db_session=db.session, auth_token=auth_token
+    )
     return StreamingResponse(stream, media_type=SSE_CONTENT_TYPE)

@@ -14,7 +14,7 @@
 from orchestrator_agent.adapters.a2a import A2AAdapter, WFOAgentExecutor
 from orchestrator_agent.adapters.ag_ui import AGUIEventStream, AGUIWorker
 from orchestrator_agent.adapters.mcp import MCPApp, MCPWorker
-from orchestrator_agent.adapters.stream import NO_RESULTS, collect_stream_output
+from orchestrator_agent.adapters.stream import NO_RESULTS, collect_stream_output  # noqa: F401  (public re-export)
 
 __all__ = [
     "A2AAdapter",

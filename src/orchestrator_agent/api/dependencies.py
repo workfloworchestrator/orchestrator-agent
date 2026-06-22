@@ -15,15 +15,16 @@ from functools import cache
 
 from fastapi import Request
 
-from orchestrator_agent.agent import AgentAdapter
+from orchestrator_agent.agent import WFOAgent, build_agent
 
 
 @cache
-def get_agent(request: Request) -> AgentAdapter:
+def get_agent(request: Request) -> WFOAgent:
     """Dependency to provide the agent instance.
 
-    The agent is built once and cached for the lifetime of the application.
+    The agent is built once and cached for the lifetime of the application. MCP
+    sessions are opened per-run via ``async with agent:`` in the adapters.
     """
     from orchestrator_agent.settings import agent_settings
 
-    return AgentAdapter(agent_settings.create_model(), debug=agent_settings.AGENT_DEBUG)
+    return build_agent(agent_settings.create_model())

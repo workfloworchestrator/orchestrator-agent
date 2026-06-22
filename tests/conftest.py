@@ -20,8 +20,6 @@ from pydantic_ai.messages import FunctionToolResultEvent, ToolReturnPart
 from pydantic_ai.run import AgentRunResult, AgentRunResultEvent
 
 from orchestrator_agent.artifacts import ToolArtifact
-from orchestrator_agent.events import AgentStepActiveEvent, AgentStepActiveValue
-from orchestrator_agent.utils import current_timestamp_ms
 
 pytestmark = pytest.mark.search
 
@@ -45,7 +43,7 @@ def make_artifact_event(
         tool_call_id=tool_call_id,
         metadata=artifact,
     )
-    return FunctionToolResultEvent(result=part)
+    return FunctionToolResultEvent(part=part)
 
 
 def make_non_artifact_event(
@@ -59,20 +57,12 @@ def make_non_artifact_event(
         content=content,
         tool_call_id=tool_call_id,
     )
-    return FunctionToolResultEvent(result=part)
+    return FunctionToolResultEvent(part=part)
 
 
 def make_text_result_event(text: str = "Execution completed") -> AgentRunResultEvent[str]:
     """AgentRunResultEvent with a text output."""
     return AgentRunResultEvent(result=AgentRunResult(output=text))
-
-
-def make_step_event(step_name: str, reasoning: str | None = None) -> AgentStepActiveEvent:
-    """AGENT_STEP_ACTIVE custom event."""
-    value = AgentStepActiveValue(step=step_name)
-    if reasoning:
-        value["reasoning"] = reasoning
-    return AgentStepActiveEvent(timestamp=current_timestamp_ms(), value=value)
 
 
 def minimal_run_input() -> RunAgentInput:

@@ -1,4 +1,4 @@
-"""Tests for prompt generation functions."""
+"""Tests for assembled plugin instructions and the agent system prompt."""
 
 from __future__ import annotations
 
@@ -8,98 +8,80 @@ os.environ.setdefault("DATABASE_URI", "postgresql://test:test@localhost:5432/tes
 
 import pytest
 
-from orchestrator_agent.prompts import (
-    get_aggregation_execution_prompt,
-    get_planning_prompt,
-    get_result_actions_prompt,
-    get_search_execution_prompt,
-    get_text_response_prompt,
-)
-from orchestrator_agent.settings import SearchEffort
-from orchestrator_agent.state import SearchState
+from orchestrator_agent.capabilities.loader import load_plugin_specs, load_system_prompt
+
+_DOMAIN = "orchestrator_agent.capabilities.loader.agent_settings.AGENT_DOMAIN_CONTEXT"
 
 
-def _make_state(user_input: str = "show subscriptions") -> SearchState:
-    return SearchState(user_input=user_input)
+def _instructions(plugin_id: str) -> str:
+    return {s.id: s.instructions for s in load_plugin_specs()}[plugin_id]
 
 
-class TestGetSearchExecutionPrompt:
-    @pytest.mark.parametrize(
-        "required",
-        [
-            pytest.param(["Searching", "run_search", "discover_filter_paths", "set_filter_tree"], id="key-elements"),
-            pytest.param(["Filtering Rules", "MANDATORY FIRST STEP"], id="filtering-rules"),
-            pytest.param(["PREFER LENIENT OPERATORS", "like", "between"], id="lenient-operators"),
-            pytest.param(["automatically retries"], id="semantic-fallback-note"),
-            pytest.param(["KEEP KNOWN STRUCTURED FILTERS", "status", "product"], id="structured-filter-retention"),
-            pytest.param(["EXTRACT IDENTIFIERS", "highest-signal"], id="identifier-extraction"),
-            pytest.param(["customer/organisation", "PRODUCT NAME vs TYPE"], id="customer-and-product-guidance"),
-        ],
-    )
-    def test_prompt_contains(self, required):
-        prompt = get_search_execution_prompt(_make_state())
-        missing = [snippet for snippet in required if snippet not in prompt]
-        assert not missing, f"missing from search prompt: {missing}"
+class TestSystemPrompt:
+    def test_text_only_rendering_rules(self):
+        system_prompt = load_system_prompt()
+        assert "Markdown" in system_prompt
+        # The per-call "don't restate the rows" rule is injected with the result (base.py
+        # _injection_notice). The system prompt states the global text-only format and points the
+        # model at that per-call note, rather than duplicating the detail.
+        assert "chart or table" in system_prompt
+        assert "automatically" not in system_prompt
 
 
-class TestGetAggregationExecutionPrompt:
+class TestSearchInstructions:
+    def test_contains_intent_elements(self):
+        # Thin, intent-only prompt: how to filter/choose operators lives in the MCP tool descriptions.
+        text = _instructions("search")
+        for snippet in ("Searching", "Run the search", "entity_type"):
+            assert snippet in text
+
+    def test_filtering_mechanics_moved_to_server(self):
+        # The filter-building rules now live in orchestrator-core's tool descriptions, not the prompt.
+        text = _instructions("search")
+        for moved in ("PREFER LENIENT OPERATORS", "Filtering Rules", "MANDATORY FIRST STEP", "fallback_used"):
+            assert moved not in text
+
+    def test_prompts_do_not_name_tools(self):
+        # Prompts describe intent; the model binds to a tool from its description. No tool names,
+        # no leftover ${...} placeholders.
+        text = _instructions("search")
+        assert "${" not in text
+        for tool_name in ("discover_filter_paths", "get_valid_operators"):
+            assert tool_name not in text
+
+
+class TestAggregationInstructions:
+    def test_contains_intent_elements(self):
+        text = _instructions("aggregate")
+        assert "Aggregating" in text
+        assert "Run the aggregation" in text
+        assert "group_by" in text
+        assert "temporal_group_by" in text
+
+    def test_filtering_mechanics_moved_to_server(self):
+        text = _instructions("aggregate")
+        for moved in ("Filtering Rules", "PREFER LENIENT OPERATORS", "MANDATORY FIRST STEP"):
+            assert moved not in text
+
+
+class TestEntityInstructions:
     def test_contains_key_elements(self):
-        prompt = get_aggregation_execution_prompt(_make_state())
-        assert "Aggregating" in prompt
-        assert "run_aggregation" in prompt
-        assert "set_temporal_grouping" in prompt
-        assert "set_grouping" in prompt
-        assert "set_aggregations" in prompt
-
-    def test_includes_filtering_rules(self):
-        prompt = get_aggregation_execution_prompt(_make_state())
-        assert "Filtering Rules" in prompt
-
-    def test_aggregation_has_no_semantic_fallback_note(self):
-        prompt = get_aggregation_execution_prompt(_make_state())
-        assert "automatically retries" not in prompt
-        assert "PREFER LENIENT OPERATORS" in prompt
+        text = _instructions("entity")
+        assert "resolve it" in text
+        assert "id-prefix" in text
+        assert "NOT an export" in text
 
 
-class TestGetTextResponsePrompt:
+class TestExportInstructions:
     def test_contains_key_elements(self):
-        prompt = get_text_response_prompt(_make_state())
-        assert "Responding" in prompt
-        assert "Available Capabilities" in prompt
-        assert "SUBSCRIPTION" in prompt
-
-
-class TestGetPlanningPrompt:
-    def test_contains_key_elements(self):
-        prompt = get_planning_prompt(_make_state())
-        assert "Execution Planning" in prompt
-        assert "Break into tasks" in prompt
-        assert "RESULT_ACTIONS" in prompt
-
-    def test_no_redundant_tasks_warning(self):
-        prompt = get_planning_prompt(_make_state())
-        assert "Do NOT create redundant tasks" in prompt
-
-    def test_mentions_id_prefix_single_result_actions_task(self):
-        prompt = get_planning_prompt(_make_state())
-        assert "id-prefix" in prompt
-        assert "RESULT_ACTIONS" in prompt
-
-
-class TestGetResultActionsPrompt:
-    def test_contains_key_elements(self):
-        prompt = get_result_actions_prompt(_make_state())
-        assert "Acting on Results" in prompt
-        assert "prepare_export" in prompt
-        assert "fetch_entity_details" in prompt
-
-    def test_mentions_get_entity_by_id_for_id_or_prefix(self):
-        prompt = get_result_actions_prompt(_make_state())
-        assert "get_entity_by_id" in prompt
-        assert "id-prefix" in prompt
+        text = _instructions("export")
+        assert "downloadable export" in text
+        assert "EXPLICITLY" in text
 
 
 class TestDomainContextSection:
+    """Operator domain knowledge is injected once into the agent-level system prompt, not per-plugin."""
+
     @pytest.mark.parametrize(
         "context, expect_section",
         [
@@ -108,61 +90,15 @@ class TestDomainContextSection:
             pytest.param("   ", False, id="whitespace-only"),
         ],
     )
-    def test_domain_section(self, monkeypatch, context, expect_section):
-        monkeypatch.setattr("orchestrator_agent.prompts.agent_settings.AGENT_DOMAIN_CONTEXT", context)
-        prompt = get_search_execution_prompt(_make_state())
-        assert ("## Domain Knowledge" in prompt) is expect_section
+    def test_domain_section_in_system_prompt(self, monkeypatch, context, expect_section):
+        monkeypatch.setattr(_DOMAIN, context)
+        system_prompt = load_system_prompt()
+        assert ("## Domain Knowledge" in system_prompt) is expect_section
         if expect_section:
-            assert context.strip() in prompt
+            assert context.strip() in system_prompt
 
-
-class TestPlannerEffortGuidance:
-    @pytest.mark.parametrize(
-        "effort, expect_clarify",
-        [
-            pytest.param(SearchEffort.HIGH, False, id="high-proceeds"),
-            pytest.param(SearchEffort.MEDIUM, True, id="medium-asks-when-ambiguous"),
-            pytest.param(SearchEffort.LOW, True, id="low-prefers-asking"),
-        ],
-    )
-    def test_planner_clarify_bias(self, monkeypatch, effort, expect_clarify):
-        monkeypatch.setattr("orchestrator_agent.prompts.agent_settings.AGENT_SEARCH_EFFORT", effort)
-        prompt = get_planning_prompt(_make_state())
-        assert ("clarifying question" in prompt) is expect_clarify
-
-
-class TestEmptyResultsGuidance:
-    @pytest.mark.parametrize(
-        "effort, expect_auto_retry",
-        [
-            pytest.param(SearchEffort.HIGH, True, id="high-auto-retries"),
-            pytest.param(SearchEffort.MEDIUM, True, id="medium-auto-retries"),
-            pytest.param(SearchEffort.LOW, False, id="low-asks-instead"),
-        ],
-    )
-    def test_empty_results_note(self, monkeypatch, effort, expect_auto_retry):
-        monkeypatch.setattr("orchestrator_agent.prompts.agent_settings.AGENT_SEARCH_EFFORT", effort)
-        prompt = get_search_execution_prompt(_make_state())
-        assert ("automatically retries" in prompt) is expect_auto_retry
-        if not expect_auto_retry:
-            assert "ask whether to broaden the search" in prompt
-
-
-class TestRetrieverGuidance:
-    @pytest.mark.parametrize(
-        "embeddings_enabled, expect_hybrid",
-        [
-            pytest.param(True, True, id="embeddings-on"),
-            pytest.param(False, False, id="embeddings-off"),
-        ],
-    )
-    def test_retriever_guidance(self, monkeypatch, embeddings_enabled, expect_hybrid):
-        monkeypatch.setattr("orchestrator_agent.prompts.llm_settings.EMBEDDING_API_ENABLED", embeddings_enabled)
-        prompt = get_search_execution_prompt(_make_state())
-        assert "CHOOSE A RETRIEVER" in prompt
-        if expect_hybrid:
-            assert "retriever=HYBRID" in prompt
-            assert "cannot match opaque tokens" in prompt
-        else:
-            assert "retriever=FUZZY" in prompt
-            assert "retriever=HYBRID" not in prompt
+    def test_domain_context_not_in_plugin_instructions(self, monkeypatch):
+        # The block lives in the system prompt now — no plugin body should carry it.
+        monkeypatch.setattr(_DOMAIN, "IS#### maps")
+        assert "## Domain Knowledge" not in _instructions("search")
+        assert "## Domain Knowledge" not in _instructions("aggregate")

@@ -19,8 +19,27 @@ details).  Setup tools (filters, grouping, etc.) return plain types and are
 *not* wrapped in a ToolArtifact.
 """
 
+from typing import Literal
+
 from orchestrator.core.search.query.results import VisualizationType
 from pydantic import BaseModel, Field
+
+
+class RenderedBlock(BaseModel):
+    """A pre-rendered output block ready to inject into the agent's text reply."""
+
+    type: Literal["mermaid", "markdown"]
+    content: str
+
+    def to_markdown(self) -> str:
+        """Render as injectable Markdown.
+
+        Mermaid gets a code fence; Markdown passes through raw (a fenced table would render as
+        literal source instead of a table).
+        """
+        if self.type == "mermaid":
+            return f"```mermaid\n{self.content}\n```"
+        return self.content
 
 
 class ToolArtifact(BaseModel):
@@ -34,15 +53,13 @@ class ToolArtifact(BaseModel):
 
 
 class QueryArtifact(ToolArtifact):
-    """Lightweight reference returned by query tools.
-
-    Client fetches full results via GET /queries/{query_id}/results.
-    """
+    """Lightweight reference returned by query tools."""
 
     query_id: str
     total_results: int
     visualization_type: VisualizationType = Field(default_factory=VisualizationType)
     search_type: str = ""
+    rendered_block: RenderedBlock | None = None
 
 
 class DataArtifact(ToolArtifact):

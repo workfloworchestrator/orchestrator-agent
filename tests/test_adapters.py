@@ -9,6 +9,8 @@ from __future__ import annotations
 import asyncio
 import json
 import uuid
+from contextlib import asynccontextmanager
+from types import SimpleNamespace
 from typing import Any
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -32,20 +34,18 @@ from a2a.types import (
     TextPart,
 )
 from ag_ui.core import RunAgentInput, ToolCallResultEvent, UserMessage
+from pydantic_ai.messages import ToolReturnPart
 
-from orchestrator_agent.adapters.a2a import A2A_SKILLS, WFOAgentExecutor, _build_state_fallback
+from orchestrator_agent.adapters.a2a import A2A_SKILLS, NO_RESULTS, WFOAgentExecutor
 from orchestrator_agent.adapters.ag_ui import AGUIEventStream, AGUIWorker, _AGUIAdapter
 from orchestrator_agent.adapters.mcp import MCPApp, MCPWorker
-from orchestrator_agent.adapters.stream import NO_RESULTS, collect_stream_output
+from orchestrator_agent.adapters.stream import collect_stream_output
 from orchestrator_agent.artifacts import QueryArtifact
-from orchestrator_agent.events import AgentStepActiveEvent
-from orchestrator_agent.memory import ToolStep
-from orchestrator_agent.state import SearchState, TaskAction
+from orchestrator_agent.state import SearchState
 
 from .conftest import (
     make_artifact_event,
     make_non_artifact_event,
-    make_step_event,
     make_text_result_event,
     minimal_run_input,
     mock_event_stream,
@@ -58,11 +58,30 @@ SAMPLE_ARTIFACT = QueryArtifact(
 )
 
 
+def _agent_mock(event_stream_factory) -> MagicMock:
+    """Build an agent mock that is an async context manager and streams the given events.
+
+    `run_stream_events(...)` must return an async context manager (matching pydantic-ai),
+    so we wrap the event iterator in an async CM.
+    """
+    agent = MagicMock()
+    agent.__aenter__ = AsyncMock(return_value=agent)
+    agent.__aexit__ = AsyncMock(return_value=False)
+
+    @asynccontextmanager
+    async def _run_stream_events(*args, **kwargs):
+        agent._last_call = (args, kwargs)
+        yield event_stream_factory()
+
+    agent.run_stream_events = MagicMock(side_effect=_run_stream_events)
+    return agent
+
+
 class TestCollectStreamOutput:
     @pytest.mark.asyncio
     async def test_artifacts_take_priority_over_text(self):
         stream = mock_event_stream(
-            make_artifact_event("run_search", SAMPLE_ARTIFACT),
+            make_artifact_event("search", SAMPLE_ARTIFACT),
             make_text_result_event("Execution completed"),
         )
         result = await collect_stream_output(stream)
@@ -71,7 +90,7 @@ class TestCollectStreamOutput:
     @pytest.mark.asyncio
     async def test_empty_stream(self):
         result = await collect_stream_output(mock_event_stream())
-        assert result == NO_RESULTS
+        assert result == "No results"
 
 
 class TestAGUIEventStream:
@@ -81,7 +100,7 @@ class TestAGUIEventStream:
     @pytest.mark.asyncio
     async def test_artifact_becomes_lightweight_json(self):
         stream = self._make_stream()
-        event = make_artifact_event("run_search", SAMPLE_ARTIFACT)
+        event = make_artifact_event("search", SAMPLE_ARTIFACT)
 
         results = [e async for e in stream.handle_function_tool_result(event)]
 
@@ -89,17 +108,9 @@ class TestAGUIEventStream:
         assert results[0].content == SAMPLE_ARTIFACT.model_dump_json()
 
     @pytest.mark.asyncio
-    async def test_custom_event_passes_through(self):
-        stream = self._make_stream()
-        results = [e async for e in stream.handle_event(make_step_event("planning"))]
-
-        assert isinstance(results[0], AgentStepActiveEvent)
-        assert results[0].value.get("step") == "planning"
-
-    @pytest.mark.asyncio
     async def test_non_artifact_tool_delegates_to_base(self):
         stream = self._make_stream()
-        event = make_non_artifact_event("set_filters", content="filters applied")
+        event = make_non_artifact_event("discover_filter_paths", content="filters applied")
 
         results = [e async for e in stream.handle_function_tool_result(event)]
 
@@ -108,16 +119,12 @@ class TestAGUIEventStream:
         assert results[0].content == "filters applied"
 
 
-def _make_request_context(user_text: str = "show subscriptions", skill_id: str | None = None) -> RequestContext:
+def _make_request_context(user_text: str = "show subscriptions") -> RequestContext:
     """Create a RequestContext for testing."""
-    metadata = {}
-    if skill_id:
-        metadata["skill_id"] = skill_id
     msg = Message(
         role=Role.user,
         parts=[Part(root=TextPart(text=user_text))],
         message_id=str(uuid.uuid4()),
-        metadata=metadata or None,
     )
     params = MessageSendParams(message=msg)
     return RequestContext(request=params)
@@ -136,59 +143,67 @@ async def _collect_events(queue: EventQueue) -> list[Any]:
 
 
 class TestWFOAgentExecutor:
-    @pytest.fixture
-    def executor(self):
-        agent = AsyncMock()
-        return WFOAgentExecutor(agent), agent
+    @pytest.fixture(autouse=True)
+    def _stub_persistence(self):
+        """Stub PostgresStatePersistence so executor tests need no real DB.
+
+        load_state -> None, snapshot -> no-op.
+        """
+        with patch("orchestrator_agent.adapters.a2a.PostgresStatePersistence") as mock_cls:
+            instance = mock_cls.return_value
+            instance.load_state = AsyncMock(return_value=None)
+            instance.snapshot = AsyncMock()
+            yield
 
     @pytest.mark.asyncio
     @patch("orchestrator.core.db.db")
-    async def test_artifact_emitted_as_a2a_artifact(self, _mock_db, executor):
+    async def test_artifact_emitted_as_a2a_artifact(self, _mock_db):
         """Artifacts from agent stream become A2A TaskArtifactUpdateEvents."""
-        ex, agent = executor
-        agent.run_stream_events = MagicMock(
-            return_value=mock_event_stream(
-                make_non_artifact_event("set_filters", content="filters applied"),
-                make_artifact_event("run_search", SAMPLE_ARTIFACT),
+        agent = _agent_mock(
+            lambda: mock_event_stream(
+                make_non_artifact_event("discover_filter_paths", content="filters applied"),
+                make_artifact_event("search", SAMPLE_ARTIFACT),
                 make_text_result_event("Execution completed"),
             )
         )
+        ex = WFOAgentExecutor(agent)
 
         ctx = _make_request_context()
         queue = EventQueue()
         await ex.execute(ctx, queue)
         events = await _collect_events(queue)
 
-        # Should have: working, artifact, completed
         status_events = [e for e in events if isinstance(e, TaskStatusUpdateEvent)]
         artifact_events = [e for e in events if isinstance(e, TaskArtifactUpdateEvent)]
         assert len(artifact_events) == 1
-        assert artifact_events[0].artifact.parts[0].root.text == SAMPLE_ARTIFACT.model_dump_json()
+        # Structured tool result rides A2A as a DataPart (not raw-JSON text), so it survives
+        # for rich/direct clients without polluting text-only consumers.
+        assert artifact_events[0].artifact.parts[0].root.data == json.loads(SAMPLE_ARTIFACT.model_dump_json())
         assert status_events[0].status.state == TaskState.working
         assert status_events[-1].status.state == TaskState.completed
-        # Completed message should contain artifact content, not generic "Execution completed"
+        # Completed message is the agent's own (markdown) answer — never raw tool JSON.
         completed_text = status_events[-1].status.message.parts[0].root.text
-        assert completed_text == SAMPLE_ARTIFACT.model_dump_json()
+        assert completed_text == "Execution completed"
 
     @pytest.mark.asyncio
-    @pytest.mark.parametrize(("skill_id", "expected"), [("search", TaskAction.SEARCH), ("nonexistent", None)])
     @patch("orchestrator.core.db.db")
-    async def test_skill_id_routing(self, _mock_db, executor, skill_id, expected):
-        ex, agent = executor
-        agent.run_stream_events = MagicMock(return_value=mock_event_stream(make_text_result_event("Done")))
+    async def test_passes_user_input_to_agent(self, _mock_db):
+        agent = _agent_mock(lambda: mock_event_stream(make_text_result_event("Done")))
+        ex = WFOAgentExecutor(agent)
 
-        ctx = _make_request_context(skill_id=skill_id)
+        ctx = _make_request_context("show subscriptions")
         queue = EventQueue()
         await ex.execute(ctx, queue)
 
-        assert agent.run_stream_events.call_args.kwargs["target_action"] == expected
+        args, _kwargs = agent._last_call
+        assert args[0] == "show subscriptions"
 
     @pytest.mark.asyncio
     @patch("orchestrator.core.db.db")
-    async def test_completed_with_text_output(self, _mock_db, executor):
+    async def test_completed_with_text_output(self, _mock_db):
         """Text-only output results in completed status with message."""
-        ex, agent = executor
-        agent.run_stream_events = MagicMock(return_value=mock_event_stream(make_text_result_event("Done")))
+        agent = _agent_mock(lambda: mock_event_stream(make_text_result_event("Done")))
+        ex = WFOAgentExecutor(agent)
 
         ctx = _make_request_context()
         queue = EventQueue()
@@ -201,15 +216,33 @@ class TestWFOAgentExecutor:
 
     @pytest.mark.asyncio
     @patch("orchestrator.core.db.db")
-    async def test_failed_on_error(self, _mock_db, executor):
+    async def test_no_output_yields_no_results(self, _mock_db):
+        agent = _agent_mock(lambda: mock_event_stream())
+        ex = WFOAgentExecutor(agent)
+
+        ctx = _make_request_context()
+        queue = EventQueue()
+        await ex.execute(ctx, queue)
+        events = await _collect_events(queue)
+
+        status_events = [e for e in events if isinstance(e, TaskStatusUpdateEvent)]
+        assert status_events[-1].status.state == TaskState.completed
+        assert status_events[-1].status.message.parts[0].root.text == NO_RESULTS
+
+    @pytest.mark.asyncio
+    @patch("orchestrator.core.db.db")
+    async def test_failed_on_error(self, _mock_db):
         """Exception during execution results in failed status."""
-        ex, agent = executor
 
-        async def failing_stream(*args, **kwargs):
-            raise RuntimeError("boom")
-            yield  # noqa: F401 — makes this an async generator
+        def failing_stream():
+            async def gen():
+                raise RuntimeError("boom")
+                yield  # noqa: F401 — makes this an async generator
 
-        agent.run_stream_events = MagicMock(return_value=failing_stream())
+            return gen()
+
+        agent = _agent_mock(failing_stream)
+        ex = WFOAgentExecutor(agent)
 
         ctx = _make_request_context()
         queue = EventQueue()
@@ -221,8 +254,8 @@ class TestWFOAgentExecutor:
 
     @pytest.mark.asyncio
     @patch("orchestrator.core.db.db")
-    async def test_cancel(self, _mock_db, executor):
-        ex, _agent = executor
+    async def test_cancel(self, _mock_db):
+        ex = WFOAgentExecutor(_agent_mock(lambda: mock_event_stream()))
         ctx = _make_request_context()
         queue = EventQueue()
         await ex.cancel(ctx, queue)
@@ -233,79 +266,24 @@ class TestWFOAgentExecutor:
         assert events[0].status.state == TaskState.canceled
 
 
-class TestWFOAgentExecutorStateFallback:
-    """Tests for state-based fallback when event stream yields no useful output."""
-
-    @pytest.fixture
-    def executor(self):
-        agent = AsyncMock()
-        return WFOAgentExecutor(agent), agent
-
-    @pytest.mark.asyncio
-    @patch("orchestrator.core.db.db")
-    async def test_state_fallback_over_execution_completed(self, _mock_db, executor):
-        """When agent yields only 'Execution completed' but state has tool steps, use state."""
-        ex, agent = executor
-
-        async def stream_with_state_mutation(*args, **kwargs):
-            deps = kwargs.get("deps")
-            if deps:
-                deps.state.memory.start_turn(deps.state.user_input)
-                deps.state.memory.start_step("Search")
-                deps.state.memory.record_tool_step(
-                    ToolStep(step_type="run_search", description="Searched 5 subscriptions")
-                )
-                deps.state.memory.finish_step()
-                deps.state.memory.complete_turn(assistant_answer="Searched 5 subscriptions.")
-            yield make_text_result_event("Execution completed")
-
-        agent.run_stream_events = MagicMock(side_effect=stream_with_state_mutation)
-
-        ctx = _make_request_context()
-        queue = EventQueue()
-        await ex.execute(ctx, queue)
-        events = await _collect_events(queue)
-
-        status_events = [e for e in events if isinstance(e, TaskStatusUpdateEvent)]
-        completed = status_events[-1]
-        assert completed.status.state == TaskState.completed
-        message_text = completed.status.message.parts[0].root.text
-        assert "Searched 5 subscriptions" in message_text
-        assert message_text != "Execution completed"
-
-
-def _make_state_with_tool_steps(*descriptions: str) -> SearchState:
-    """Create a SearchState with completed turn containing tool steps."""
-    state = SearchState(user_input="test query")
-    state.memory.start_turn("test query")
-    state.memory.start_step("Search")
-    for desc in descriptions:
-        state.memory.record_tool_step(ToolStep(step_type="run_search", description=desc))
-    state.memory.finish_step()
-    state.memory.complete_turn(assistant_answer="done")
-    return state
-
-
-class TestStateFallback:
-    """Tests for state-based fallback when event stream yields no useful output."""
-
-    def test_build_state_fallback_with_descriptions(self):
-        state = _make_state_with_tool_steps("Searched 5 subscriptions", "Fetched details for sub-1")
-        result = _build_state_fallback(state)
-        assert result == "Searched 5 subscriptions. Fetched details for sub-1."
-
-    def test_build_state_fallback_empty(self):
-        state = SearchState(user_input="test")
-        result = _build_state_fallback(state)
-        assert result == "Execution completed"
-
-
 class TestA2AEndpoint:
     """HTTP-level tests for the A2A adapter via a2a-sdk."""
 
+    @pytest.fixture(autouse=True)
+    def _stub_persistence(self):
+        """Stub PostgresStatePersistence so HTTP-level tests need no real DB.
+
+        load_state -> None, snapshot -> no-op.
+        """
+        with patch("orchestrator_agent.adapters.a2a.PostgresStatePersistence") as mock_cls:
+            instance = mock_cls.return_value
+            instance.load_state = AsyncMock(return_value=None)
+            instance.snapshot = AsyncMock()
+            yield
+
     @pytest.fixture
     async def a2a_app(self):
-        agent = AsyncMock()
+        agent = _agent_mock(lambda: mock_event_stream(make_text_result_event("Done")))
         executor = WFOAgentExecutor(agent)
         task_store = InMemoryTaskStore()
         request_handler = DefaultRequestHandler(
@@ -347,10 +325,10 @@ class TestA2AEndpoint:
     @pytest.mark.asyncio
     @patch("orchestrator.core.db.db")
     async def test_message_send_endpoint_returns_completed(self, _mock_db, a2a_app):
-        """HTTP message/send returns a JSON-RPC response with completed task and artifacts."""
-        a2a_app.agent.run_stream_events = MagicMock(
-            return_value=mock_event_stream(
-                make_artifact_event("run_search", SAMPLE_ARTIFACT),
+        """HTTP message/send returns a JSON-RPC response with a completed task and artifacts."""
+        a2a_app.executor.agent = _agent_mock(
+            lambda: mock_event_stream(
+                make_artifact_event("search", SAMPLE_ARTIFACT),
                 make_text_result_event("Execution completed"),
             )
         )
@@ -371,8 +349,6 @@ class TestA2AEndpoint:
     @patch("orchestrator.core.db.db")
     async def test_message_stream_endpoint_returns_completed(self, _mock_db, a2a_app):
         """HTTP message/stream returns SSE events ending with completed status."""
-        a2a_app.agent.run_stream_events = MagicMock(return_value=mock_event_stream(make_text_result_event("Done")))
-
         transport = httpx.ASGITransport(app=a2a_app.app)
         async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
             resp = await client.post("/", json=self._jsonrpc_request("message/stream"))
@@ -402,35 +378,54 @@ class TestA2AEndpoint:
         assert len(card["skills"]) == len(A2A_SKILLS)
 
 
+def _run_agent_mock(output: str = "", messages: list | None = None) -> MagicMock:
+    """An agent mock whose `run(...)` returns a result with the given output and `all_messages()`.
+
+    It's also an async context manager. The MCP worker uses `agent.run`, not the streaming path.
+    """
+    agent = MagicMock()
+    agent.__aenter__ = AsyncMock(return_value=agent)
+    agent.__aexit__ = AsyncMock(return_value=False)
+    result = MagicMock(output=output)
+    result.all_messages.return_value = messages or []
+    agent.run = AsyncMock(return_value=result)
+    return agent
+
+
 class TestMCPWorker:
     @pytest.mark.asyncio
     @patch("orchestrator_agent.adapters.mcp.db")
-    async def test_passes_query_and_action_to_agent(self, _mock_db):
-        agent = MagicMock()
-        agent.run_stream_events = MagicMock(return_value=mock_event_stream(make_text_result_event("Done")))
+    async def test_returns_prose_when_no_artifact_data(self, _mock_db):
+        # No artifact-bearing tool result -> just the agent's final answer.
+        agent = _run_agent_mock(output="There are 7 active subscriptions.")
 
-        worker = MCPWorker(agent=agent)
-        await worker.run_skill("show subscriptions", target_action=TaskAction.SEARCH)
+        out = await MCPWorker(agent=agent).run("show subscriptions")
 
-        call_kwargs = agent.run_stream_events.call_args.kwargs
-        assert call_kwargs["deps"].state.user_input == "show subscriptions"
-        assert call_kwargs["target_action"] == TaskAction.SEARCH
+        assert out == "There are 7 active subscriptions."
+        assert agent.run.call_args.args[0] == "show subscriptions"
+
+    @pytest.mark.asyncio
+    @patch("orchestrator_agent.adapters.mcp.db")
+    async def test_appends_artifact_payload_as_json(self, _mock_db):
+        # An artifact-bearing tool result -> its payload JSON is appended after the prose.
+        part = ToolReturnPart(tool_name="search", content={"query_id": "q-1", "returned": 2}, tool_call_id="c1")
+        part.metadata = QueryArtifact(description="d", query_id="q-1", total_results=2)
+        agent = _run_agent_mock(output="Found 2.", messages=[SimpleNamespace(parts=[part])])
+
+        out = await MCPWorker(agent=agent).run("find subs")
+
+        assert out.startswith("Found 2.")
+        assert "q-1" in out  # the structured payload rides along as JSON
 
     @pytest.mark.asyncio
     @patch("orchestrator_agent.adapters.mcp.db")
     async def test_exception_propagates(self, _mock_db):
-        """Exception in agent stream is re-raised after logging."""
-        agent = MagicMock()
+        """Exception during the agent run is re-raised after logging."""
+        agent = _run_agent_mock()
+        agent.run.side_effect = RuntimeError("boom")
 
-        async def failing_stream(*args, **kwargs):
-            raise RuntimeError("boom")
-            yield  # noqa: F401
-
-        agent.run_stream_events = MagicMock(return_value=failing_stream())
-
-        worker = MCPWorker(agent=agent)
         with pytest.raises(RuntimeError, match="boom"):
-            await worker.run_skill("find subs")
+            await MCPWorker(agent=agent).run("find subs")
 
 
 class TestMCPAppInit:
@@ -445,43 +440,37 @@ class TestMCPAppInit:
 
     @pytest.mark.asyncio
     @pytest.mark.parametrize(
-        ("tool", "query", "expected_action"),
+        ("tool", "query"),
         [
-            ("search", "find active subs", TaskAction.SEARCH),
-            ("aggregate", "count by product", TaskAction.AGGREGATION),
-            ("ask", "what is happening?", None),
+            ("search", "find active subs"),  # auto-derived from the search plugin
+            ("aggregate", "count by product"),  # auto-derived from the aggregate plugin
+            ("entity", "show subscription abc"),  # auto-derived from the entity plugin
+            ("export", "export the last results"),  # auto-derived from the export plugin
+            ("ask", "what is happening?"),  # generic catch-all
         ],
     )
     @patch("orchestrator_agent.adapters.mcp.db")
-    async def test_tool_delegates_to_worker(self, _mock_db, tool, query, expected_action):
+    async def test_tool_delegates_to_worker(self, _mock_db, tool, query):
         agent = MagicMock()
         app = MCPApp(agent)
-        app.worker.run_skill = AsyncMock(return_value="result")
+        app.worker.run = AsyncMock(return_value="result")
 
         await app.server.call_tool(tool, {"query": query})
 
-        app.worker.run_skill.assert_called_once()
-        ca = app.worker.run_skill.call_args
-        assert ca.args[0] == query
-        actual_action = ca.args[1] if len(ca.args) > 1 else ca.kwargs.get("target_action")
-        assert actual_action == expected_action
+        app.worker.run.assert_called_once()
+        assert app.worker.run.call_args.args[0] == query
 
     @pytest.mark.asyncio
     @patch("orchestrator_agent.adapters.mcp.db")
-    async def test_tool_get_entity_details_delegates_to_worker(self, _mock_db):
-        import uuid as _uuid
+    async def test_tools_auto_registered_one_per_plugin(self, _mock_db):
+        # The MCP surface is derived from the plugin set — one tool per advertised plugin, plus `ask`.
+        from orchestrator_agent.capabilities import load_plugin_specs
 
-        agent = MagicMock()
-        app = MCPApp(agent)
-        app.worker.run_skill = AsyncMock(return_value="details result")
-
-        entity_id = _uuid.uuid4()
-        await app.server.call_tool("get_entity_details", {"entity_type": "SUBSCRIPTION", "entity_id": str(entity_id)})
-
-        call_kwargs = app.worker.run_skill.call_args
-        assert call_kwargs.args[1] == TaskAction.RESULT_ACTIONS
-        assert "SUBSCRIPTION" in call_kwargs.args[0]
-        assert str(entity_id) in call_kwargs.args[0]
+        app = MCPApp(MagicMock())
+        names = {t.name for t in await app.server.list_tools()}
+        advertised = {s.id for s in load_plugin_specs() if s.advertise}
+        assert advertised <= names  # every advertised plugin is a tool
+        assert "ask" in names
 
 
 class TestMCPAppLifecycle:
@@ -500,18 +489,6 @@ class TestMCPAppLifecycle:
                 assert ctx is app
             mock_cm.__aenter__.assert_called_once()
             mock_cm.__aexit__.assert_called_once()
-
-
-class TestAGUIEventStreamSuperDelegate:
-    @pytest.mark.asyncio
-    async def test_non_custom_event_delegates_to_super(self):
-        """Non-CustomEvent NativeEvents fall through to the base class handler."""
-        stream = AGUIEventStream(run_input=minimal_run_input())
-        event = make_text_result_event("Done")  # AgentRunResultEvent — not a CustomEvent
-
-        # Should not raise; base class may or may not yield events for this type
-        results = [e async for e in stream.handle_event(event)]
-        assert isinstance(results, list)
 
 
 class TestAGUIAdapterBuildEventStream:
@@ -589,11 +566,17 @@ class TestAGUIWorkerRunRequest:
             forwarded_props={},
         )
 
+    def _agent(self) -> MagicMock:
+        agent = MagicMock()
+        agent.__aenter__ = AsyncMock(return_value=agent)
+        agent.__aexit__ = AsyncMock(return_value=False)
+        return agent
+
     @pytest.mark.asyncio
     @patch("orchestrator_agent.adapters.ag_ui.PostgresStatePersistence")
     @patch("orchestrator_agent.adapters.ag_ui._AGUIAdapter")
     async def test_run_request_new_run_streams_events(self, mock_adapter_cls, mock_persistence_cls):
-        agent = MagicMock()
+        agent = self._agent()
         db_session = MagicMock()
         db_session.get.return_value = None  # No existing run
 
@@ -616,6 +599,7 @@ class TestAGUIWorkerRunRequest:
         assert chunks == ["data: event1\n\n", "data: event2\n\n"]
         db_session.add.assert_called_once()
         db_session.commit.assert_called()
+        mock_persistence.snapshot.assert_awaited_once()
 
     @pytest.mark.asyncio
     @patch("orchestrator_agent.adapters.ag_ui.PostgresStatePersistence")
@@ -623,7 +607,7 @@ class TestAGUIWorkerRunRequest:
     async def test_run_request_existing_run_skips_insert(self, mock_adapter_cls, mock_persistence_cls):
         from orchestrator.core.db.models import AgentRunTable
 
-        agent = MagicMock()
+        agent = self._agent()
         db_session = MagicMock()
         existing_run = MagicMock(spec=AgentRunTable)
         db_session.get.return_value = existing_run  # Run already exists
@@ -650,7 +634,7 @@ class TestAGUIWorkerRunRequest:
     @patch("orchestrator_agent.adapters.ag_ui.PostgresStatePersistence")
     @patch("orchestrator_agent.adapters.ag_ui._AGUIAdapter")
     async def test_run_request_loads_previous_state(self, mock_adapter_cls, mock_persistence_cls):
-        agent = MagicMock()
+        agent = self._agent()
         db_session = MagicMock()
         db_session.get.return_value = None
 
@@ -659,25 +643,19 @@ class TestAGUIWorkerRunRequest:
         mock_persistence.load_state.return_value = previous_state
         mock_persistence_cls.return_value = mock_persistence
 
-        captured_deps = {}
-
         async def empty_stream():
             return
             yield  # noqa: F401
 
-        def capture_run_stream(deps):
-            captured_deps["deps"] = deps
-            return mock_event_stream()
-
         mock_adapter = MagicMock()
-        mock_adapter.run_stream.side_effect = capture_run_stream
+        mock_adapter.run_stream.return_value = mock_event_stream()
         mock_adapter.encode_stream.return_value = empty_stream()
         mock_adapter_cls.return_value = mock_adapter
 
         stream = await AGUIWorker.run_request(agent, self._make_run_input("new query"), db_session)
         _ = [c async for c in stream]
 
-        # Adapter was constructed; the previous state's user_input is updated
+        # The previous state's user_input is updated to the new request.
         call_kwargs = mock_adapter_cls.call_args.kwargs
         initial_state = call_kwargs["run_input"].state
         assert initial_state["user_input"] == "new query"
@@ -686,7 +664,7 @@ class TestAGUIWorkerRunRequest:
     @patch("orchestrator_agent.adapters.ag_ui.PostgresStatePersistence")
     @patch("orchestrator_agent.adapters.ag_ui._AGUIAdapter")
     async def test_run_request_rollback_on_stream_error(self, mock_adapter_cls, mock_persistence_cls):
-        agent = MagicMock()
+        agent = self._agent()
         db_session = MagicMock()
         db_session.get.return_value = None
 
