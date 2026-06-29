@@ -129,3 +129,14 @@ def test_agent_domain_context_accepts_value():
     assert AgentSettings(AGENT_DOMAIN_CONTEXT="circuit codes map to imsCircuitId").AGENT_DOMAIN_CONTEXT == (
         "circuit codes map to imsCircuitId"
     )
+
+
+def test_langfuse_disabled_by_default():
+    settings = AgentSettings()
+    assert settings.LANGFUSE_ENABLED is False
+
+
+@patch.dict("os.environ", {"LANGFUSE_ENABLED": "true"})
+def test_langfuse_enabled_from_env():
+    settings = AgentSettings()
+    assert settings.LANGFUSE_ENABLED is True
