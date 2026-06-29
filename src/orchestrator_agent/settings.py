@@ -49,6 +49,11 @@ class AgentSettings(BaseSettings):
         default=None,
         description="Enable OAuth2 client-credentials auth on outgoing requests. When unset, follows OAUTH2_ACTIVE.",
     )
+    LANGFUSE_ENABLED: bool = Field(
+        default=False,
+        description="Enable Langfuse OpenTelemetry tracing. Requires the 'langfuse' extra and the "
+        "LANGFUSE_PUBLIC_KEY / LANGFUSE_SECRET_KEY / LANGFUSE_HOST environment variables.",
+    )
 
     def create_model(self) -> str | Model:
         """Create a pydantic-ai model from settings.

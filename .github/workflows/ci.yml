@@ -42,9 +42,17 @@ jobs:
           fail_ci_if_error: false
 
   build:
-    name: Build container image
+    name: Build container image (${{ matrix.variant }})
     needs: test
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - variant: default
+            extra_args: ""
+          - variant: langfuse
+            extra_args: "--extra langfuse"
 
     steps:
       - uses: actions/checkout@v6
@@ -58,15 +66,27 @@ jobs:
           context: .
           platforms: linux/amd64,linux/arm64
           push: false
+          build-args: |
+            UV_EXTRA_ARGS=${{ matrix.extra_args }}
 
   deploy:
-    name: Push container image
+    name: Push container image (${{ matrix.variant }})
     needs: build
     if: github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/')
     runs-on: ubuntu-latest
     permissions:
       contents: read
       packages: write
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - variant: default
+            extra_args: ""
+            suffix: ""
+          - variant: langfuse
+            extra_args: "--extra langfuse"
+            suffix: "-langfuse"
     env:
       REGISTRY: ghcr.io
       IMAGE_NAME: ${{ github.repository }}
@@ -89,6 +109,8 @@ jobs:
         uses: docker/metadata-action@v5
         with:
           images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
+          flavor: |
+            suffix=${{ matrix.suffix }},onlatest=true
           tags: |
             type=sha
             type=raw,value=latest,enable=${{ !contains(github.ref, '-') }}
@@ -103,3 +125,5 @@ jobs:
           push: true
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
+          build-args: |
+            UV_EXTRA_ARGS=${{ matrix.extra_args }}

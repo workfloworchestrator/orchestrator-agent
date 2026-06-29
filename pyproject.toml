@@ -16,6 +16,9 @@ dependencies = [
     "pyyaml>=6.0",
 ]
 
+[project.optional-dependencies]
+langfuse = ["langfuse>=3.0.0"]
+
 [dependency-groups]
 dev = [
     "mypy>=1.9",

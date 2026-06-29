@@ -24,6 +24,7 @@ from orchestrator_agent.adapters import A2AAdapter, MCPApp
 from orchestrator_agent.agent import build_agent
 from orchestrator_agent.api.api import api_router
 from orchestrator_agent.mcp_client import build_core_toolset, verify_tool_contract
+from orchestrator_agent.observability import configure_langfuse, shutdown_langfuse
 from orchestrator_agent.security import AuthMiddleware, create_auth_manager
 from orchestrator_agent.settings import agent_settings
 
@@ -34,6 +35,8 @@ logger = structlog.get_logger(__name__)
 async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     """Application lifespan: DB init, migration, adapter startup/shutdown."""
     init_database(agent_settings)  # type: ignore[arg-type]  # AgentSettings has DATABASE_URI which is all init_database needs
+
+    langfuse_client = configure_langfuse()
 
     # Fail loud at startup if the live MCP server's tools have drifted from what the agent expects.
     await verify_tool_contract(build_core_toolset())
@@ -61,6 +64,10 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     yield
 
     await stack.__aexit__(None, None, None)
+
+    if langfuse_client is not None:
+        shutdown_langfuse(langfuse_client)
+
     logger.info("Agent adapters stopped")
 
 
