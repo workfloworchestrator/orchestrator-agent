@@ -34,8 +34,8 @@ docker compose up --build
 ## Demos
 
 ```bash
-# Install demo dependencies
-uv sync --group demo
+# Install demo dependencies (included in the default dev group)
+uv sync
 
 # AG-UI: stream a search query
 uv run demos/agui_client.py "find active subscriptions"
