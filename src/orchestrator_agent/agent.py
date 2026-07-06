@@ -27,7 +27,7 @@ from typing import TYPE_CHECKING
 
 import structlog
 from pydantic_ai import Agent
-from pydantic_ai.ag_ui import StateDeps
+from pydantic_ai.ui import StateDeps
 
 from orchestrator_agent.capabilities.hooks import build_capabilities
 from orchestrator_agent.capabilities.loader import load_system_prompt
