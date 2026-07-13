@@ -81,16 +81,25 @@ class _ContextVarBearerAuth(httpx.Auth):
     falls back to the cached service (client-credentials) token. The token is
     read inside :meth:`async_auth_flow` so a single long-lived ``MCPToolset``
     connection serves requests for different users without rebuilding.
+
+    On a 401/403 against the service token, the cache is stale (client-credentials
+    tokens expire) -- refresh once and retry, mirroring
+    ``oauth2_lib.async_api_client.AsyncAuthMixin.request``. A bound per-run token is
+    forwarded as-is and never refreshed: it's the caller's credential, not ours.
     """
 
     async def async_auth_flow(self, request: httpx.Request) -> AsyncGenerator[httpx.Request, httpx.Response]:
-        token = _outbound_token.get()
-        if token is None:
-            # Service (client-credentials) token; returns None when outbound auth is disabled.
-            token = await token_manager.get_token()
+        per_run_token = _outbound_token.get()
+        token = per_run_token if per_run_token is not None else await token_manager.get_token()
         if token:
             request.headers["Authorization"] = f"Bearer {token}"
-        yield request
+
+        response = yield request
+
+        if per_run_token is None and response.status_code in (401, 403) and token_manager.auth_enabled:
+            token = await token_manager.refresh_token()
+            request.headers["Authorization"] = f"Bearer {token}"
+            yield request
 
     def sync_auth_flow(self, request: httpx.Request) -> Generator[httpx.Request, httpx.Response, None]:
         # MCP HTTP transport is async-only; sync flow is never exercised but httpx requires it.
