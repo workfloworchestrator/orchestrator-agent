@@ -22,7 +22,7 @@ from http import HTTPStatus
 
 import structlog
 from fastapi import HTTPException
-from httpx import AsyncClient
+from httpx2 import AsyncClient
 from oauth2_lib.fastapi import AuthManager, OIDCAuth, OIDCConfig, OIDCUserModel
 from oauth2_lib.settings import oauth2lib_settings
 from starlette.datastructures import Headers
