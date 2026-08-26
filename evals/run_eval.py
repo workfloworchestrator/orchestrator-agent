@@ -33,15 +33,15 @@ from pydantic_ai import Agent
 Agent.instrument_all()
 
 from pydantic_evals import Dataset
-from pydantic_evals.reporting import EvaluationReportAdapter
+from pydantic_evals.reporting import EvaluationReport, EvaluationReportAdapter
 
-from orchestrator_agent.agent import build_agent, new_deps
+from orchestrator_agent.agent import WFOAgent, build_agent, new_deps
 from orchestrator_agent.settings import agent_settings
 
-_agent = None
+_agent: WFOAgent | None = None
 
 
-def _get_agent():
+def _get_agent() -> WFOAgent:
     """Build the agent on first use so e.g. --help works without credentials."""
     global _agent
     if _agent is None:
@@ -58,7 +58,7 @@ async def run_wfo_agent(question: str) -> str:
     return result.output
 
 
-def compare_to_baseline(report, baseline, tolerance: float) -> list[str]:
+def compare_to_baseline(report: EvaluationReport, baseline: EvaluationReport, tolerance: float) -> list[str]:
     """Per-case regressions of this run against a stored baseline report.
 
     Compares every score and assertion of every case present in both reports:
