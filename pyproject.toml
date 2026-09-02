@@ -5,7 +5,7 @@ description = "Standalone WFO search agent for Kagent deployment"
 license = "Apache-2.0"
 requires-python = ">=3.11,<3.14"
 dependencies = [
-    "orchestrator-core>=5.1.0",
+    "orchestrator-core>=5.3.0",
     "pydantic-ai-slim[mcp]>=2.0,<3",
     "ag-ui-protocol==0.1.10",
     "a2a-sdk[http-server]>=0.3.25",
@@ -128,9 +128,10 @@ disallow_incomplete_defs = false
 
 [tool.uv]
 index-url = "https://pypi.org/simple"
-# orchestrator-core (prod) requires pydantic>=2.13; crewai (dev-only demos) declares <2.13.
-# Favour the prod-supported pydantic and let the dev-only crewai run against it.
+# orchestrator-core (prod) requires pydantic~=2.13.0/pydantic-settings~=2.15.0; crewai (dev-only
+# demos) declares pydantic<2.13 but allows pydantic-settings<3. Favour the prod-supported versions
+# and let the dev-only crewai run against them.
 override-dependencies = [
     "pydantic>=2.13,<2.14",
-    "pydantic-settings>=2.14.2,<2.15",
+    "pydantic-settings>=2.15.0,<2.16",
 ]
