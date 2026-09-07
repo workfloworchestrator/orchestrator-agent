@@ -103,6 +103,45 @@ class TestOAuthTokenManager:
             timeout=30,
         )
 
+    async def test_get_token_refreshes_proactively_before_expiry(self, monkeypatch, _enable_oauth):
+        mgr = OAuthTokenManager()
+
+        fake_time = {"now": 1_000.0}
+        monkeypatch.setattr("orchestrator_agent.auth.time.monotonic", lambda: fake_time["now"])
+
+        mock_client = AsyncMock(spec=httpx.AsyncClient)
+        mock_client.post.side_effect = [
+            _make_response(200, {"access_token": "tok-1", "expires_in": 60}),
+            _make_response(200, {"access_token": "tok-2", "expires_in": 60}),
+        ]
+        mock_client.__aenter__ = AsyncMock(return_value=mock_client)
+        mock_client.__aexit__ = AsyncMock(return_value=False)
+
+        with patch("orchestrator_agent.auth.httpx.AsyncClient", return_value=mock_client):
+            assert await mgr.get_token() == "tok-1"
+
+            fake_time["now"] += 10  # still within expires_in - buffer
+            assert await mgr.get_token() == "tok-1"
+
+            fake_time["now"] += 60  # past expiry (minus buffer): refetch, no 401/403 needed
+            assert await mgr.get_token() == "tok-2"
+
+        assert mock_client.post.call_count == 2
+
+    async def test_get_token_caches_indefinitely_when_expires_in_missing(self, _enable_oauth):
+        mgr = OAuthTokenManager()
+
+        mock_client = AsyncMock(spec=httpx.AsyncClient)
+        mock_client.post.return_value = _make_response(200, {"access_token": "tok-123"})
+        mock_client.__aenter__ = AsyncMock(return_value=mock_client)
+        mock_client.__aexit__ = AsyncMock(return_value=False)
+
+        with patch("orchestrator_agent.auth.httpx.AsyncClient", return_value=mock_client):
+            assert await mgr.get_token() == "tok-123"
+            assert await mgr.get_token() == "tok-123"
+
+        assert mock_client.post.call_count == 1
+
     async def test_auth_enabled_follows_oauth_active_when_unset(self, monkeypatch):
         monkeypatch.setattr("orchestrator_agent.auth.agent_settings.OAUTH2_OUTBOUND_ACTIVE", None)
         mgr = OAuthTokenManager()

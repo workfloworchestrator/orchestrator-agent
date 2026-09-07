@@ -11,6 +11,8 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+import time
+
 import httpx
 import structlog
 from oauth2_lib.settings import oauth2lib_settings
@@ -19,12 +21,17 @@ from orchestrator_agent.settings import agent_settings
 
 logger = structlog.get_logger(__name__)
 
+# Refresh this many seconds before the token's reported expiry, so a request
+# doesn't race a token that's about to expire.
+TOKEN_EXPIRY_BUFFER_SECONDS = 30
+
 
 class OAuthTokenManager:
     """Manages OAuth2 client credentials tokens with caching."""
 
     def __init__(self) -> None:
         self._token: str | None = None
+        self._expires_at: float | None = None
 
     @property
     def auth_enabled(self) -> bool:
@@ -32,10 +39,17 @@ class OAuthTokenManager:
             return oauth2lib_settings.OAUTH2_ACTIVE
         return agent_settings.OAUTH2_OUTBOUND_ACTIVE
 
+    def _token_is_fresh(self) -> bool:
+        if self._token is None:
+            return False
+        if self._expires_at is None:
+            return True
+        return time.monotonic() < self._expires_at
+
     async def get_token(self) -> str | None:
         if not self.auth_enabled:
             return None
-        if self._token is not None:
+        if self._token_is_fresh():
             return self._token
         return await self._fetch_token()
 
@@ -57,13 +71,20 @@ class OAuthTokenManager:
             )
         response.raise_for_status()
 
-        token = response.json()["access_token"]
+        payload = response.json()
+        token = payload["access_token"]
         self._token = token
-        logger.debug("OAuth2 token acquired")
+        self._expires_at = (
+            time.monotonic() + expires_in - TOKEN_EXPIRY_BUFFER_SECONDS
+            if (expires_in := payload.get("expires_in"))
+            else None
+        )
+        logger.debug("OAuth2 token acquired", expires_in=payload.get("expires_in"))
         return token
 
     async def refresh_token(self) -> str:
         self._token = None
+        self._expires_at = None
         return await self._fetch_token()
 
     def get_auth_headers(self) -> dict[str, str]:
