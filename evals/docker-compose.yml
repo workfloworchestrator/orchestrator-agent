@@ -1,0 +1,47 @@
+# Backing services for the eval: a bare orchestrator-core with its MCP server
+# and a seeded database. The agent itself runs in-process (pydantic-evals), so
+# it is NOT part of this stack — the candidate under test is the working tree.
+#
+#   docker compose -f evals/docker-compose.yml up -d --wait
+services:
+  postgres:
+    image: pgvector/pgvector:pg17
+    environment:
+      POSTGRES_USER: nwa
+      POSTGRES_PASSWORD: nwa
+      POSTGRES_DB: orchestrator-core
+    ports:
+      - "5433:5432"
+    healthcheck:
+      test: ["CMD", "pg_isready", "--username", "nwa"]
+      interval: 3s
+      timeout: 3s
+      retries: 20
+
+  orchestrator:
+    # Keep in sync with a released orchestrator-core that carries the search
+    # MCP toolset the agent's tool contract requires (>= 5.1.0).
+    image: ${CORE_IMAGE:-ghcr.io/workfloworchestrator/orchestrator-core:5.1.0}
+    environment:
+      DATABASE_URI: postgresql+psycopg://nwa:nwa@postgres/orchestrator-core
+      MCP_ENABLED: "True"
+      OAUTH2_ACTIVE: "False"
+      TESTING: "False"
+    volumes:
+      - ./docker/core/wsgi.py:/home/orchestrator/wsgi.py:ro
+      - ./docker/core/main.py:/home/orchestrator/main.py:ro
+      - ./docker/core/seed.py:/home/orchestrator/seed.py:ro
+      - ./docker/core/demo_products.py:/home/orchestrator/demo_products.py:ro
+      - ./docker/core/entrypoint.sh:/home/orchestrator/entrypoint.sh:ro
+    entrypoint: ["/home/orchestrator/entrypoint.sh"]
+    ports:
+      - "8086:8080"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8080/api/health/')"]
+      start_period: 30s
+      interval: 5s
+      timeout: 5s
+      retries: 30

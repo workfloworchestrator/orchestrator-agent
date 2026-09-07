@@ -1,0 +1,45 @@
+name: Eval
+
+# Golden-set behavior benchmark (pydantic-evals) of the agent code on this
+# branch, run in-process against a live orchestrator-core MCP server. Each run
+# invokes a real LLM (secrets.EVAL_AGENT_API_KEY) so it does not run per-push:
+# manually, nightly, or on PRs labeled 'eval'.
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: '30 3 * * *'
+  pull_request:
+    types: [labeled, synchronize, reopened]
+
+jobs:
+  eval:
+    name: Golden-set benchmark
+    runs-on: ubuntu-latest
+    if: >-
+      github.event_name != 'pull_request' ||
+      contains(github.event.pull_request.labels.*.name, 'eval')
+    env:
+      AGENT_MODEL: ${{ vars.EVAL_AGENT_MODEL || 'openai:gpt-4o' }}
+      AGENT_API_KEY: ${{ secrets.EVAL_AGENT_API_KEY }}
+
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v7
+        with:
+          version: "0.10.8"
+          python-version: "3.13"
+
+      - name: Start backing services (orchestrator-core MCP + seeded database)
+        run: docker compose -f evals/docker-compose.yml up -d --wait --wait-timeout 300
+
+      - name: Run the golden-set benchmark
+        working-directory: evals
+        run: |
+          uv sync
+          uv run python run_eval.py --baseline baseline_report.json --fail-under 0.7
+
+      - name: Service logs on failure
+        if: failure()
+        run: docker compose -f evals/docker-compose.yml logs --tail 100

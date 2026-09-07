@@ -1,0 +1,172 @@
+# yaml-language-server: $schema=wfo_search_dataset_schema.json
+name: wfo_search_dataset
+cases:
+- name: fuzzy-search-nodes
+  inputs: find subscriptions for network nodes
+  metadata:
+    failure_modes:
+    - fuzzy-search
+    curation_note: Plain descriptive request; one fuzzy/semantic search, no filters
+      needed.
+  expected_output: null
+  evaluators:
+  - TrajectoryMatch:
+      expected_trajectory:
+      - search
+      order: exact
+  - ArgumentCorrectness:
+      tool_name: search
+      expected_arguments:
+        entity_type: SUBSCRIPTION
+- name: filtered-search-active
+  inputs: find all active subscriptions
+  metadata:
+    failure_modes:
+    - structured-filters
+    curation_note: A concrete dimension (status) must become a structured filter,
+      and filter paths must come from discover_filter_paths, never guessed. in_order
+      tolerates an extra get_valid_operators check at a small precision cost.
+  expected_output: null
+  evaluators:
+  - TrajectoryMatch:
+    - discover_filter_paths
+    - search
+  - ArgumentCorrectness:
+      tool_name: discover_filter_paths
+      expected_arguments:
+        entity_type: SUBSCRIPTION
+- name: count-subscriptions
+  inputs: how many subscriptions are there in total?
+  metadata:
+    failure_modes:
+    - aggregation
+    curation_note: A "how many" question is one count, not a search whose rows get
+      counted.
+  expected_output: null
+  evaluators:
+  - TrajectoryMatch:
+      expected_trajectory:
+      - aggregate
+      order: exact
+  - ArgumentCorrectness:
+      tool_name: aggregate
+      expected_arguments:
+        entity_type: SUBSCRIPTION
+- name: count-by-status
+  inputs: how many subscriptions are there per status?
+  metadata:
+    failure_modes:
+    - aggregation
+    - structured-filters
+    curation_note: Grouped count; group_by paths need discovery just like filters.
+  expected_output: null
+  evaluators:
+  - TrajectoryMatch:
+    - discover_filter_paths
+    - aggregate
+  - ArgumentCorrectness:
+      tool_name: aggregate
+      expected_arguments:
+        entity_type: SUBSCRIPTION
+- name: resolve-by-prefix
+  inputs: show details for subscription aa1b2c3d
+  metadata:
+    failure_modes:
+    - entity-lookup
+    curation_note: An id-prefix reference goes straight to resolve_entity, not search.
+  expected_output: null
+  evaluators:
+  - TrajectoryMatch:
+      expected_trajectory:
+      - resolve_entity
+      order: exact
+  - ArgumentCorrectness:
+      tool_name: resolve_entity
+      expected_arguments:
+        entity_type: SUBSCRIPTION
+        id_or_prefix: aa1b2c3d
+- name: fetch-by-full-uuid
+  inputs: look up subscription aa1b2c3d-0000-4000-8000-000000000003 and give me its
+    details
+  metadata:
+    failure_modes:
+    - entity-lookup
+    curation_note: '"Give me" is a details fetch, not an export; with a full UUID
+      in hand the direct details fetch is the ideal route, and the UUID must pass
+      through verbatim.'
+  expected_output: null
+  evaluators:
+  - TrajectoryMatch:
+      expected_trajectory:
+      - get_subscription_details
+      order: exact
+  - ArgumentCorrectness:
+      tool_name: get_subscription_details
+      expected_arguments:
+        subscription_id: aa1b2c3d-0000-4000-8000-000000000003
+- name: search-workflows
+  inputs: search for workflows containing 'validate'
+  metadata:
+    failure_modes:
+    - fuzzy-search
+    - entity-type
+    curation_note: The entity type must switch to WORKFLOW; the term is the query
+      text.
+  expected_output: null
+  evaluators:
+  - TrajectoryMatch:
+      expected_trajectory:
+      - search
+      order: exact
+  - ArgumentCorrectness:
+      tool_name: search
+      expected_arguments:
+        entity_type: WORKFLOW
+        query_text: validate
+- name: export-after-search
+  inputs: find core link subscriptions and export them as CSV
+  metadata:
+    failure_modes:
+    - export
+    curation_note: Explicit "export as CSV" sanctions export_query, after the search
+      that produces the query to export.
+  expected_output: null
+  evaluators:
+  - TrajectoryMatch:
+      expected_trajectory:
+      - search
+      - export_query
+      order: exact
+  - ArgumentCorrectness:
+      tool_name: search
+      expected_arguments:
+        entity_type: SUBSCRIPTION
+- name: negative-offtopic
+  inputs: what is the weather in Amsterdam today?
+  metadata:
+    failure_modes:
+    - negative-example
+    curation_note: Out of scope for the orchestrator; the correct behavior is to answer/decline
+      without calling any tool (empty expected trajectory scores 1.0 only when the
+      agent also calls nothing).
+  expected_output: null
+  evaluators:
+  - TrajectoryMatch:
+      expected_trajectory: []
+      order: exact
+- name: negative-no-export
+  inputs: show me the active subscriptions, no need for a file
+  metadata:
+    failure_modes:
+    - export
+    - structured-filters
+    curation_note: '"Show me" is viewing, explicitly not an export; a trajectory ending
+      in export_query loses precision here.'
+  expected_output: null
+  evaluators:
+  - TrajectoryMatch:
+    - discover_filter_paths
+    - search
+evaluators:
+- MaxToolCalls: 8
+report_evaluators: []
