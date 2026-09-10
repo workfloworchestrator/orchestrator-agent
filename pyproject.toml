@@ -5,7 +5,7 @@ description = "Standalone WFO search agent for Kagent deployment"
 license = "Apache-2.0"
 requires-python = ">=3.11,<3.14"
 dependencies = [
-    "orchestrator-core>=5.3.0",
+    "orchestrator-core>=5.4.0a4",
     "pydantic-ai-slim[mcp]>=2.0,<3",
     "ag-ui-protocol==0.1.10",
     "a2a-sdk[http-server]>=0.3.25",
