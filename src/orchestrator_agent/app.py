@@ -23,6 +23,7 @@ from orchestrator.core.db import init_database
 from orchestrator_agent.adapters import A2AAdapter, MCPApp
 from orchestrator_agent.agent import build_agent
 from orchestrator_agent.api.api import api_router
+from orchestrator_agent.form_fill import build_form_fill_skill
 from orchestrator_agent.mcp_client import build_core_toolset, verify_tool_contract
 from orchestrator_agent.observability import configure_langfuse, shutdown_langfuse
 from orchestrator_agent.security import AuthMiddleware, create_auth_manager
@@ -42,7 +43,8 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     await verify_tool_contract(build_core_toolset())
 
     a2a_url = f"{agent_settings.BASE_URL}/"
-    a2a = A2AAdapter(build_agent(agent_settings.create_model()), url=a2a_url)
+    model = agent_settings.create_model()
+    a2a = A2AAdapter(build_agent(model, form_fill=build_form_fill_skill(model)), url=a2a_url)
     a2a.add_routes(app)
 
     mcp_app = MCPApp(build_agent(agent_settings.create_model()))
@@ -59,6 +61,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         a2a_url=a2a_url,
         mcp_path="/mcp",
         agent_model=agent_settings.AGENT_MODEL,
+        form_fill_skill="literal",
     )
 
     yield

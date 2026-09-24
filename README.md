@@ -49,8 +49,6 @@ uv run demos/mcp_client.py
 # MCP: single tool
 uv run demos/mcp_client.py search "active subscriptions"
 
-# A2A: delegate to the agent via CrewAI
-uv run demos/a2a_client.py <subscription-uuid>
 ```
 
 ## Configuration
@@ -127,7 +125,7 @@ Request ──► AG-UI adapter ──► async with Agent: ──► run_stream
          ──► MCP adapter  ──►   └─► MCPToolset ──► orchestrator-core /mcp
 ```
 
-Capabilities are always-on (`defer_loading=False`). The domain capabilities — **search**, **aggregate**, **entity** (details/lookup), **export** — are **plugins**: authored Markdown files loaded at startup (see [Plugins](#plugins) below). Each plugin becomes one pydantic-ai capability that bundles its instructions and, when it declares `artifact:`, the matching behaviour — mapping *its* tools' JSON results into `QueryArtifact` / `DataArtifact` / `ExportArtifact` metadata for the AG-UI/A2A transport (`capabilities/behavior/`). Two hooks remain cross-cutting (single invariants across all tools, not plugin-owned): `FilterPathGuard` enforces that any `filters`/`group_by` call is preceded by `discover_filter_paths` (paths are DB-specific and must not be guessed), and `ProcessHistory` does sliding-window history trimming. Grouped aggregations and search results are rendered deterministically in code (a Mermaid chart / Markdown table carried as a `RenderedBlock`) and injected into the answer, so they appear even on text-only clients. MCP tools require an open session, so every run happens inside `async with agent:`.
+Capabilities are always-on (`defer_loading=False`). The domain capabilities — **search**, **aggregate**, **entity** (details/lookup), **export**, **workflow** (start a workflow via its input form) — are **plugins**: authored Markdown files loaded at startup (see [Plugins](#plugins) below). Each plugin becomes one pydantic-ai capability that bundles its instructions and, when it declares `artifact:`, the matching behaviour — mapping *its* tools' JSON results into `QueryArtifact` / `DataArtifact` / `ExportArtifact` metadata for the AG-UI/A2A transport (`capabilities/behavior/`). Three hooks remain cross-cutting (single invariants across all tools, not plugin-owned): `FilterPathGuard` enforces that any `filters`/`group_by` call is preceded by `discover_filter_paths` (paths are DB-specific and must not be guessed), `WriteToolGate` hides core's write tools from the model (starting a workflow is the deterministic form-fill skill's job — see [Workflow form-fill](#workflow-form-fill-a2a-deterministic-jev-decided)), and `ProcessHistory` does sliding-window history trimming. Grouped aggregations and search results are rendered deterministically in code (a Mermaid chart / Markdown table carried as a `RenderedBlock`) and injected into the answer, so they appear even on text-only clients. MCP tools require an open session, so every run happens inside `async with agent:`.
 
 ### Plugins
 
@@ -198,5 +196,83 @@ deferred `search` makes the model `load_capability`→`discover_filter_paths`→
 guessing). pydantic-ai's defer alone hides only instructions, not toolset tools — the gate closes
 that gap, keying on the same `tools:` ownership. All built-ins are `false` (always-on). The seam
 exists for when the capability set grows large enough that on-demand loading is worth the routing.
+
+### Workflow form-fill (A2A, deterministic)
+
+Starting a workflow is **not done by the model**. It is a deterministic skill (`form_fill/`) that runs
+inside the agent as a pydantic-ai capability: on the first model request of a run it gets the message
+first and, when it claims it, the model is skipped and the skill's reply is the run's output
+(`SkipModelRequest`); it also owns the handoff tool. Over A2A the caller is another agent — it reads
+and writes structured text more reliably than prose, and it does the talking to the human. The skill:
+
+1. **Routes** — deciding *that* a request starts a workflow and *which* one is a judgment call, so the
+   model makes it: it reads `list_workflows` and hands off with the `start_workflow_form(workflow_key)`
+   tool. That is all the model does — on the request that follows, the skill walks the first pages and
+   its contract reply ends the run in place of the model's text. A subscription id in the request is
+   checked against core's `get_subscription_available_workflows`; if the workflow cannot run on it, the
+   reason is the reply (with the workflows that can), not a walk into a 400.
+2. **Walks the form from page 0** with core's `get_workflow_form`, using the values the caller gave (a JSON
+   object keyed by field name); a choice with a single option (a single-product workflow's product page) is taken. Pages
+   are dynamic (later pages depend on earlier answers), so the walk re-runs from page 0 every turn: a
+   correction just changes what core generates next.
+3. **Stops** at the first page with a required field nobody supplied, replying in the caller contract:
+
+   ```
+   Form "Demo Lightpath" (workflow `create_demo_lightpath`), page 1 — values needed:
+   - customer_name (required): free text
+   - speed (required): one of `1000` (1 Gbit/s), `10000` (10 Gbit/s), `100000` (100 Gbit/s)
+   - speed_policer (optional, default False): `true` or `false`
+   Filled so far: product: … (Demo Lightpath)
+   Reply with a JSON object keyed by field name, e.g. {"customer_name": "...", "speed": "..."}, or `cancel` to abandon the form. Ask the user for anything you don't know.
+   ```
+   Free text, `Accept` fields, JSON-shaped fields (their keys spelled out) and validation errors from core
+   are all handled this way: the caller extracts the value from the human and sends it back structured.
+4. **Confirms** — at `complete: true` it lists every value and asks the caller to have the user confirm:
+   `yes` starts, `no` cancels, a JSON object with corrected values re-walks.
+5. **Starts** — `create_workflow` from code with exactly the last walk's validated pages, and returns the
+   process id. The session (`SearchState.form_fill`) is persisted per `contextId`, so the whole exchange
+   spans as many A2A turns as it needs. That is the one thing asked of any caller: continue a
+   conversation by reusing the `contextId`, as the A2A protocol intends (kagent's remote tool does; a
+   caller that omits it gets a fresh context, and no memory, per message).
+
+Values are never judged by the agent: they go to core as sent and core's form validation is the only
+validation, with its per-field messages relayed. An agent caller sends the format the stop asks for; a
+person answering through kagent picks chips, which the adapter maps back to values, or types free text,
+which, when core rejects it, is interpreted once, a page at a time, into the fields' values: one run of the
+agent's model with an output typed per field (`form_fill/interpret.py`). The interpreter is one protocol
+attribute of the skill, so another engine drops in behind the same protocol.
+
+Core's tool results are validated with core's own response models and its tool arguments are built from
+core's request models (the agent depends on orchestrator-core), so the skill never picks keys out of a
+dict; only the page schema itself, written for a browser form, is interpreted here, in
+`form_fill/core_bridge.py`, a module that exists to be deleted once core's form tool returns fields.
+
+No LLM runs anywhere in that path: sub-second per page, and the two failure modes an LLM-driven loop
+showed in testing — confirming before the form was complete, and starting without re-confirming after the
+last page — cannot happen. The model never sees core's write tools (`WriteToolGate` hides
+`create_workflow` / `resume_workflow_process` / `abort_workflow_process`), so writes only ever go through
+this skill. Routing in front of the model and prefilling pages from the conversation with a typed decision
+engine (Jev) live on a separate branch; here the contract after the handoff is literal as described, and a
+handed-off key core does not know is a tool retry, so the model corrects itself.
+
+**A2A protocol version.** The A2A endpoint speaks protocol v1.0 only (a2a-sdk 1.x, protobuf types; the
+agent card is at `/.well-known/agent-card.json`). A v1 client sends `A2A-Version: 1.0`; kagent 1.x's
+remote tool is one. v0.3 callers (`message/send`) are not served.
+
+**kagent human-in-the-loop (native prompts).** kagent ≥ 1.0.0-alpha1 uses another agent as a tool through
+its `remote_a2a_tool`, which understands the A2A extension `https://kagent.dev/extensions/hitl/v1`: when a
+remote task ends in `input-required` with an `ask_user_request` or `tool_approval_request` in the status
+message's metadata, the kagent parent pauses and shows the human *our* questions (with choices) or an
+Approve/Reject for *our* call — no LLM relays anything — and resumes the **same task** with the answer.
+The agent card declares the extension; when a caller requests it (the `A2A-Extensions` header, as the
+v1 protocol names it), every stop of the form-fill skill becomes such a pause: the values still
+needed become one question per field (enum options as choices, JSON fields with their shape spelled out,
+optional fields marked with their default), and the final confirmation becomes a `tool_approval_request`
+for `create_workflow` with the full values as `args`. The human's `ask_user_response` is mapped back onto
+the same JSON-object contract, a `tool_approval_response` resolves the pending start (a rejection whose
+reason is a JSON object of values is a correction; any other rejection cancels). The whole form is then
+one task that pauses N times, so the session is keyed on the task id. Our payloads are validated against
+kagent 1.0's own wire module (`tests/test_form_fill_hitl.py` for the shapes; a conformance script runs
+kagent's parser on our JSON). Callers without the extension get the plain text contract as before.
 
 The **A2A adapter** uses [a2a-sdk](https://github.com/google/a2a-sdk) server primitives (`AgentExecutor`, `DefaultRequestHandler`, `A2AFastAPIApplication`). The SDK handles JSON-RPC routing, SSE streaming, task lifecycle, and agent card serving. The adapter implements a single `WFOAgentExecutor.execute()` method that drives the pydantic-ai event stream and publishes A2A events via `TaskUpdater`. The `AgentCard.skills` list is projected from the advertised capability specs (`skills_from_specs`), keeping the advertised skills in sync with the configured capabilities.

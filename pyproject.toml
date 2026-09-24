@@ -8,7 +8,7 @@ dependencies = [
     "orchestrator-core>=5.4.0",
     "pydantic-ai-slim[mcp]>=2.0,<3",
     "ag-ui-protocol==0.1.10",
-    "a2a-sdk[http-server]>=0.3.25",
+    "a2a-sdk[http-server]>=1.1.5,<2",
     "mcp>=1.28.1,<2",
     "uvicorn[standard]>=0.30.0",
     "structlog>=24.0.0",
@@ -30,7 +30,6 @@ dev = [
     "httpx>=0.27",
     "ruff>=0.12.0",
     "types-pyyaml>=6.0.12.20260518",
-    "crewai[a2a]==1.15.20",
 ]
 
 [build-system]
@@ -128,9 +127,8 @@ disallow_incomplete_defs = false
 
 [tool.uv]
 index-url = "https://pypi.org/simple"
-# orchestrator-core (prod) requires pydantic~=2.13.0/pydantic-settings~=2.15.0; crewai (dev-only
-# demos) declares pydantic<2.13 but allows pydantic-settings<3. Favour the prod-supported versions
-# and let the dev-only crewai run against them.
+# orchestrator-core (prod) requires pydantic~=2.13.0 / pydantic-settings~=2.15.0: keep every
+# dependency on the prod-supported versions.
 override-dependencies = [
     "pydantic>=2.13,<2.14",
     "pydantic-settings>=2.15.0,<2.16",
