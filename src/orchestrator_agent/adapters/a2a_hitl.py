@@ -11,17 +11,20 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""kagent's human-in-the-loop extension on the A2A executor's side.
+"""The form-fill side of an A2A turn, kagent's human-in-the-loop extension included.
 
 The form-fill skill itself runs inside the agent (``form_fill.capability``); what is left for the
-transport is reading the response payload, keeping a paused form with its task, turning the human's
-response into the contract the skill reads (a JSON object keyed by field name, ``yes`` / ``no``), and
-turning a stop into the pause payload.
+transport is in ``FormTurn``: before the run, which form session the skill continues and what text it
+reads (a human's response through the extension becomes the contract: a JSON object keyed by field name,
+``yes`` / ``no``); after the run, what the skill's reply becomes on the wire (``FormStop``: the contract
+text, and the pause payload for a caller with the extension) and which task a paused form belongs to.
+The executor touches no form state itself.
 """
 
 from __future__ import annotations
 
 import uuid
+from dataclasses import dataclass, field
 
 import structlog
 from a2a.server.agent_execution import RequestContext
@@ -42,6 +45,50 @@ from orchestrator_agent.form_fill.hitl import (
 from orchestrator_agent.state import FormFillSession, Reply, SearchState
 
 logger = structlog.get_logger(__name__)
+
+
+@dataclass(frozen=True)
+class FormStop:
+    """What the form-fill skill's reply of this turn becomes on the wire."""
+
+    text: str  # the contract text: the answer, in place of the run's prose and rendered blocks
+    payload: AskUserRequest | ToolApprovalRequest | None  # the pause payload, for a caller with the extension
+
+
+@dataclass
+class FormTurn:
+    """One A2A turn's form-fill side, so the executor edits no form state itself.
+
+    ``begin`` decides which form session (if any) the skill continues and what text it reads; ``finish``
+    turns the skill's reply into a ``FormStop`` and binds a pause to this task. A form paused in another
+    task is kept aside and put back when this turn did not start one of its own.
+    """
+
+    hitl: bool
+    task_id: str
+    session: FormFillSession | None
+    text: str  # what the skill (and the handoff tool) reads: the human's response mapped, or the message itself
+    foreign: FormFillSession | None = field(default=None, repr=False)
+
+    @classmethod
+    def begin(
+        cls, prior_state: SearchState | None, context: RequestContext, *, hitl: bool, task_id: str, user_input: str
+    ) -> FormTurn:
+        session, foreign = prior_session(prior_state, hitl, task_id)
+        response = response_in(context) if hitl else None
+        text = user_input if response is None else resume_text(session, response, user_input)
+        return cls(hitl=hitl, task_id=task_id, session=session, text=text, foreign=foreign)
+
+    def finish(self, state: SearchState) -> FormStop | None:
+        """The reply as a stop, or None when the skill did not reply this turn. Runs before the state is persisted."""
+        reply = state.form_reply
+        if reply is None:
+            if state.form_fill is None:
+                state.form_fill = self.foreign  # another task's paused form stays where it was
+            return None
+        if self.hitl and state.form_fill is not None:
+            state.form_fill.task_id = self.task_id
+        return FormStop(text=reply.text, payload=stop_payload(reply, state) if self.hitl else None)
 
 
 def response_in(context: RequestContext) -> HITLResponse | None:
@@ -101,4 +148,4 @@ def stop_payload(reply: Reply, state: SearchState) -> AskUserRequest | ToolAppro
     return payload
 
 
-__all__ = ["prior_session", "response_in", "resume_text", "stop_payload"]
+__all__ = ["FormStop", "FormTurn", "prior_session", "response_in", "resume_text", "stop_payload"]

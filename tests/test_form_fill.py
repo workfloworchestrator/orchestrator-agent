@@ -271,7 +271,7 @@ class TestParseReply:
                 id="json-types-as-sent",
             ),
             pytest.param('{"speed": "10 Gbit/s"}', {"speed": "10 Gbit/s"}, id="a-label-goes-to-core-as-sent"),
-            pytest.param('```json\n{"speed": "1000"}\n```', {"speed": "1000"}, id="fenced"),
+            pytest.param('```json\n{"speed": "1000"}\n```', {}, id="a-fenced-object-is-not-the-contract"),
             pytest.param(
                 '{"customer_name": "Universiteit Twente", "vlan": 12}',
                 {"customer_name": "Universiteit Twente", "vlan": 12},
@@ -440,7 +440,9 @@ class TestWalk:
     async def test_a_reply_that_is_not_the_contract_on_an_optional_only_page_moves_on_with_defaults(self):
         core, state = FakeCore(), SearchState()
         skill = FormFillSkill()
-        await open_form(skill, core, state, "modify_demo_lightpath", f"change the note on {FakeCore.SUB}")
+        await open_form(
+            skill, core, state, "modify_demo_lightpath", "change the note on it", subscription_id=FakeCore.SUB
+        )
         reply = await turn(skill, core, state, "no thanks, leave it")  # not a JSON object, not a cancel
         assert reply.startswith("All pages of workflow `modify_demo_lightpath`")  # asked once, never again
 
@@ -454,7 +456,9 @@ class TestWalk:
     async def test_a_bare_uuid_does_not_steal_the_subscription_slot(self):
         core, state = FakeCore(), SearchState()
         skill = FormFillSkill()
-        await open_form(skill, core, state, "modify_demo_lightpath", f"change the note on {FakeCore.SUB}")
+        await open_form(
+            skill, core, state, "modify_demo_lightpath", "change the note on it", subscription_id=FakeCore.SUB
+        )
         other = "11111111-2222-4333-8444-555555555555"
         await turn(skill, core, state, f'{{"customer_id": "{other}"}}')  # a uuid claimed by another field
         assert state.form_fill.values["subscription_id"] == FakeCore.SUB  # not overwritten
@@ -590,9 +594,10 @@ async def handoff(state, key, subscription_id=None, core=None):
     return await tool(SimpleNamespace(deps=SimpleNamespace(state=state)), key, subscription_id=subscription_id)
 
 
-async def open_form(skill, core, state, key, text):
-    """What the executor does after the model called ``start_workflow_form(key)`` on ``text``."""
-    state.form_fill = FormFillSession(workflow_key=key, status="opening", request=text)
+async def open_form(skill, core, state, key, text, subscription_id=None):
+    """What the executor does after the model called ``start_workflow_form(key, subscription_id)`` on ``text``."""
+    values = {"subscription_id": subscription_id} if subscription_id else {}
+    state.form_fill = FormFillSession(workflow_key=key, status="opening", request=text, values=values)
     reply = await skill.open(state, core)
     return None if reply is None else reply.text
 
@@ -645,7 +650,12 @@ class TestHandoff:
             return await core(name, args)
 
         reply = await open_form(
-            FormFillSkill(), only_blocked, state, "terminate_demo_lightpath", f"terminate {FakeCore.SUB}"
+            FormFillSkill(),
+            only_blocked,
+            state,
+            "terminate_demo_lightpath",
+            "terminate it",
+            subscription_id=FakeCore.SUB,
         )
         assert reply.startswith("Cannot start a workflow on this subscription now:")
         assert (
@@ -664,10 +674,10 @@ class TestHandoff:
         assert "Filled so far: product:" in reply  # the single-option product page is still taken
         assert state.form_fill.request == "create a lightpath for UT"  # only the caller's words are kept
 
-    async def test_values_and_a_subscription_id_in_the_request_are_taken(self):
+    async def test_values_in_the_request_and_the_subscription_the_model_passed_are_taken(self):
         core, state = FakeCore(), SearchState()
         reply = await open_form(
-            FormFillSkill(), core, state, "modify_demo_lightpath", f"change the note on {FakeCore.SUB}"
+            FormFillSkill(), core, state, "modify_demo_lightpath", "change the note on it", subscription_id=FakeCore.SUB
         )
         assert state.form_fill.page_inputs[0] == {"subscription_id": FakeCore.SUB}
         assert "- note (optional" in reply
@@ -697,7 +707,9 @@ class TestHandoff:
             FakeCore.row("terminate_demo_lightpath", "Terminate a demo lightpath", "TERMINATE")
         ]
         skill = FormFillSkill()
-        reply = await open_form(skill, core, state, "terminate_demo_lightpath", f"terminate {FakeCore.SUB}")
+        reply = await open_form(
+            skill, core, state, "terminate_demo_lightpath", "terminate it", subscription_id=FakeCore.SUB
+        )
         assert reply.startswith("Cannot start a workflow on this subscription now:")
         assert (
             "`terminate_demo_lightpath`: Terminate a demo lightpath — cannot run on this subscription now: subscription.not_in_sync"
@@ -786,7 +798,9 @@ class TestReviewRegressions:
         assert set(pairs) == {"port"}
         core, state = FakeCore(), SearchState()
         skill = FormFillSkill()
-        await open_form(skill, core, state, "modify_demo_lightpath", f"change the note on {FakeCore.SUB}")
+        await open_form(
+            skill, core, state, "modify_demo_lightpath", "change the note on it", subscription_id=FakeCore.SUB
+        )
         await turn(skill, core, state, f'{{"note": {{"subscription_id": "{other}"}}}}')
         assert state.form_fill.page_inputs[0] == {"subscription_id": FakeCore.SUB}  # not clobbered
 

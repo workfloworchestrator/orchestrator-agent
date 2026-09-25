@@ -72,7 +72,6 @@ from orchestrator_agent.form_fill.contract import (
     render_start_unknown,
     render_started,
     render_summary,
-    uuids_in,
 )
 from orchestrator_agent.form_fill.core_bridge import error_detail, page_fields, rejected_fields
 from orchestrator_agent.form_fill.interpret import Interpreter
@@ -130,9 +129,9 @@ class FormFillSkill:
     async def open(self, state: SearchState, call_tool: CallTool) -> Reply | None:
         """Walk the form the model handed off (``start_workflow_form``); None if there is none or the key is unknown.
 
-        The opening message is the caller's request: values it states (a JSON object, a bare subscription
-        id) are taken, and the subscription it names — or the one the model passed on — is checked against
-        core's available workflows: a workflow core cannot run on it closes with the reason.
+        The opening message is the caller's request: values it states (a JSON object) are taken, and the
+        subscription the model passed on is checked against core's available workflows: a workflow core
+        cannot run on it closes with the reason.
         """
         session = state.form_fill
         if session is None or session.status != "opening":
@@ -142,9 +141,7 @@ class FormFillSkill:
             logger.warning("Form-fill handoff to an unknown workflow", workflow=session.workflow_key)
             state.form_fill = None
             return None
-        text = session.request
-        ids = uuids_in(text)  # a bare id in the opening request names the subscription (never mid-form)
-        subscription = session.values.get(SUBSCRIPTION_ID) or (ids[0] if len(ids) == 1 else None)
+        subscription = session.values.get(SUBSCRIPTION_ID)  # the model passes the one it knows with the handoff
         logger.info("Form-fill opened by the model", workflow=session.workflow_key, subscription_id=subscription)
         session.status = "gathering"
         if subscription and session.workflow_key not in self._creates:  # a create is not about a subscription
@@ -154,9 +151,7 @@ class FormFillSkill:
                 session.status = "done"
                 reply = Reply(render_blocked(session.workflow_key, workflows[session.workflow_key], reason, runnable))
                 return self._finish(state, session, reply)
-        if subscription:
-            session.values.setdefault(SUBSCRIPTION_ID, str(subscription))
-        self._record_answers(text, session)
+        self._record_answers(session.request, session)
         return self._finish(state, session, await self._walk(session, call_tool))
 
     # --- one turn ------------------------------------------------------------------------------------
@@ -356,7 +351,7 @@ class FormFillSkill:
         """
         if session.accepted.get(name) == page_index:
             return True
-        if str(session.values.get(name, "")).strip() == ACCEPT_VALUE:
+        if session.values.get(name) == ACCEPT_VALUE:
             session.accepted[name] = page_index
             session.values.pop(name, None)
             return True

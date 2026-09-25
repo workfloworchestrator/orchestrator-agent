@@ -48,11 +48,10 @@ from pydantic_ai.messages import (
 )
 from pydantic_ai.run import AgentRunResultEvent
 
-from orchestrator_agent.adapters.a2a_hitl import prior_session, response_in, resume_text, stop_payload
+from orchestrator_agent.adapters.a2a_hitl import FormTurn
 from orchestrator_agent.agent import new_deps
 from orchestrator_agent.artifacts import QueryArtifact, ToolArtifact
 from orchestrator_agent.capabilities.spec import skills_from_specs
-from orchestrator_agent.form_fill.contract import NO, YES
 from orchestrator_agent.form_fill.hitl import HITL_EXTENSION_DESCRIPTION, HITL_EXTENSION_URI, payload_metadata
 from orchestrator_agent.mcp_client import bind_outbound_token
 from orchestrator_agent.persistence import PostgresStatePersistence, dump_messages, load_messages
@@ -68,11 +67,10 @@ NO_RESULTS = "No results"
 # artifact-bearing replies (a result with a pre-rendered table/chart), not every tool call.
 AGENT_CARD_DESCRIPTION = (
     "Answers questions about orchestration data and starts workflows by walking you through their "
-    "input forms: ask for one (what, and for which subscription or product); it lists the values it "
-    "needs (with the allowed options), expects them back as a JSON object keyed by field name, and asks you to have "
-    f"the user confirm (`{YES}` / `{NO}`) before it starts anything. When a "
-    "reply includes a pre-rendered Markdown table or Mermaid chart, relay that block to the user "
-    "verbatim, without reformatting or summarising it."
+    "input forms: ask for one (what, and for which subscription or product) and it walks the form with "
+    "you, each reply saying which values it still needs and how to answer, and asks for the user's "
+    "confirmation before starting anything. When a reply includes a pre-rendered Markdown table or "
+    "Mermaid chart, relay that block to the user verbatim, without reformatting or summarising it."
 )
 
 
@@ -87,7 +85,7 @@ class WFOAgentExecutor(AgentExecutor):
 
     The workflow form-fill skill runs inside the agent as a capability. The executor's part is the
     transport around it: before the run, a human-in-the-loop response (kagent's extension) becomes the
-    text the skill reads; after the run, the skill's reply (``state.form_reply``) is delivered as an
+    text the skill reads; after the run, the skill's reply (``FormTurn.finish``) is delivered as an
     ``input-required`` pause on the same task for a caller that activated the extension, or as
     completed text for any other caller.
     """
@@ -126,7 +124,6 @@ class WFOAgentExecutor(AgentExecutor):
         user_input = context.get_user_input()
         auth_token = self._parse_auth_token(context.message)
         hitl = HITL_EXTENSION_URI in context.requested_extensions  # the caller asked for native pauses
-        hitl_response = response_in(context) if hitl else None
 
         deps = new_deps(user_input=user_input)
 
@@ -146,31 +143,25 @@ class WFOAgentExecutor(AgentExecutor):
             persistence = PostgresStatePersistence(thread_id=context_id, run_id=deps.state.run_id, session=db.session)
             prior_state = await persistence.load_state()
             message_history = load_messages(prior_state.message_history if prior_state else [])
-            # A form being filled spans turns: carry the session over so the skill continues it.
-            session, foreign = prior_session(prior_state, hitl, task_id)
-            if hitl_response is not None:
-                user_input = resume_text(session, hitl_response, user_input)
-                deps.state.user_input = user_input  # the text the skill (and the handoff tool) reads
-            deps.state.form_fill = session
+            # A form being filled spans turns (and, with the extension, pauses on one task): its side of this turn.
+            turn = FormTurn.begin(prior_state, context, hitl=hitl, task_id=task_id, user_input=user_input)
+            user_input = deps.state.user_input = turn.text
+            deps.state.form_fill = turn.session
 
             with bind_outbound_token(auth_token):
                 async with self.agent:
                     final_output = await self._run_model(user_input, deps, message_history, updater)
 
-            reply = deps.state.form_reply
-            if reply is not None:
-                final_output = reply.text  # the contract text, without the model's blocks
-                if hitl and deps.state.form_fill is not None:
-                    deps.state.form_fill.task_id = task_id
-            elif deps.state.form_fill is None:
-                deps.state.form_fill = foreign  # another task's paused form stays where it was
-            payload = stop_payload(reply, deps.state) if hitl and reply is not None else None  # before the snapshot
+            stop = turn.finish(deps.state)  # before the snapshot: a pause is recorded on the session
+            if stop is not None:
+                final_output = stop.text  # the contract text, without the model's prose and rendered blocks
 
             await persistence.snapshot(deps.state)
             db.session.commit()
 
             # The answer is the agent's prose + any deterministically rendered chart/table blocks, or the
             # form-fill skill's reply.
+            payload = stop.payload if stop is not None else None
             message = updater.new_agent_message(
                 parts=[new_text_part(final_output or NO_RESULTS)],
                 metadata=payload_metadata(payload) if payload else None,

@@ -88,9 +88,10 @@ page — both prompt-adherence failures that a code-owned loop makes impossible.
   human-in-the-loop response mapped to the text the skill reads before the run, and after the run a
   form reply (from `state.form_reply`) delivered as a completed task or — when the caller activated
   the extension — an `input-required` pause carrying the HITL payload on the same task.
-- **`adapters/a2a_hitl.py`** — the extension on the executor's side: activation, keeping a paused form
-  with its task, the human's response as contract text (an approval becomes `yes` / `no` / the
-  corrected lines), the pause payload for a stop.
+- **`adapters/a2a_hitl.py`** — the form-fill side of an A2A turn (`FormTurn.begin` / `finish`): which
+  session the skill continues, the human's response as contract text (an approval becomes `yes` / `no` /
+  a JSON object of corrections), and the reply as a `FormStop` (contract text + the pause payload, bound to
+  its task). The executor edits no form state itself.
 - **a2a-sdk 1.x** — the A2A endpoint speaks protocol v1.0 only (protobuf types, `SendMessage`, the
   `A2A-Version` header, a new task announced before its first status). kagent 1.x's remote tool is a v1
   client, so this is what makes the HITL work reachable at all. The CrewAI A2A demo was removed: CrewAI
@@ -182,9 +183,10 @@ by a script standing in for the calling agent.
 What the production shapes forced into the code (all tested):
 - **Structured fields** (`ListOfTwo[ServicePort]`, `contact_persons`): a `json` kind whose ask spells out the
   shape (count, keys, allowed values with labels) and whose value is JSON.
-- **Subscription pages**: a `uuid` hint pointing at the search skill; a single bare UUID in a message is
-  taken as the subscription id; and the named subscription settles the workflow through core's
-  `get_subscription_available_workflows` — including *why* the intended one cannot run.
+- **Subscription pages**: a `uuid` hint pointing at the search skill; the subscription id the model passes
+  with the handoff fills the page (the earlier scan for a bare UUID in the message is gone: a heuristic),
+  and the named subscription is checked through core's `get_subscription_available_workflows` — including
+  *why* the intended one cannot run.
 - **Routing over ~90 real keys**: its own lower gate (0.6; recoverable), an abstain that offers the
   likeliest candidates from Jev's distribution, a `choosing` state that keeps the question open, and
   candidates persisted as a list (JSONB reorders object keys).
@@ -331,7 +333,7 @@ in question order, no field names) and cannot carry values for pages not yet ask
 transport envelope and is mapped onto the same JSON object (`answers_as_text`), not adopted as the
 universal contract. The JSON stays in the text part because the known callers text-extract (follow-up 4).
 
-- A reply is the object (a Markdown code fence around it is allowed); prose is never mined for values, and
+- A reply is the object and nothing else (no code fence, no prose around it); prose is never mined for values, and
   an object embedded in prose is not the contract — a nested object is its field's value, so a caller can
   no longer swap the subscription id by quoting one inside another value.
 - Values are not judged by the agent: they go to core as sent, and core's pydantic-forms validation is the only
@@ -379,8 +381,8 @@ for Jev"). The Jev branch owns them. What replaced them here:
 ## Six small cuts (2026-09-24, after the review)
 
 One `values` dict on the session instead of `answers` + `pending` (values are applied to a page when its
-field appears; nothing is coerced); a bare UUID is taken only from the opening request, never mid-form
-(under the JSON contract a UUID mid-form is a value); `request: str` instead of the engine's `turns` list;
+field appears; nothing is coerced); no UUID scanning at all — the subscription id is what the model passes
+with the handoff, and the form's own subscription page asks for it otherwise (the last regex is gone); `request: str` instead of the engine's `turns` list;
 one handoff function (the checked tool); `fields` is reset per walk so it *is* the last walk's field set
 and `walked` is gone; the reply dataclasses live in `state.py` next to the session and `form_reply` is typed.
 

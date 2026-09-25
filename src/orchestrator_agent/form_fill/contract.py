@@ -24,7 +24,6 @@ the top: the replies quote them and the parsers accept them.
 from __future__ import annotations
 
 import json
-import re
 from collections.abc import Mapping, Sequence
 from enum import StrEnum
 from typing import Any
@@ -49,9 +48,6 @@ ACCEPT_VALUE = "ACCEPTED"  # the value pydantic-forms' ``Accept`` field takes
 SUBSCRIPTION_ID = "subscription_id"
 NOT_OFFERED = "not offered for this subscription"  # a workflow core's per-subscription listing does not have
 
-_FENCE = "```"
-_UUID = re.compile(r"\b[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}\b")
-
 
 def command(text: str) -> FormCommand | None:
     """The command a reply is, when it is exactly one (surrounding whitespace aside); else None."""
@@ -59,11 +55,6 @@ def command(text: str) -> FormCommand | None:
         return FormCommand(text.strip())
     except ValueError:
         return None
-
-
-def uuids_in(text: str) -> list[str]:
-    """Every UUID mentioned in the text, in order, lower-cased and de-duplicated."""
-    return list(dict.fromkeys(m.group(0).lower() for m in _UUID.finditer(text)))
 
 
 # --- answers <- caller text ---------------------------------------------------------------------
@@ -83,25 +74,12 @@ def raw_pairs(text: str) -> dict[str, Any]:
 
 
 def json_object_in(text: str) -> dict[str, Any] | None:
-    """The JSON object the whole message is (a Markdown code fence around it is allowed), else None."""
-    body = _unfenced(text)
-    if not body.startswith("{"):
-        return None
+    """The JSON object the whole message is, else None (anything around it makes it not the contract)."""
     try:
-        value = json.loads(body)
+        value = json.loads(text)
     except json.JSONDecodeError:
         return None
     return value if isinstance(value, dict) else None
-
-
-def _unfenced(text: str) -> str:
-    """The message without the Markdown code fence a model tends to put around JSON."""
-    body = text.strip()
-    if body.startswith(_FENCE) and body.endswith(_FENCE) and len(body) >= 2 * len(_FENCE):
-        body = body[len(_FENCE) : -len(_FENCE)]
-        head, _, rest = body.partition("\n")  # the opening fence may carry a language tag
-        body = body if head.lstrip().startswith("{") else rest
-    return body.strip()
 
 
 # --- rendering ------------------------------------------------------------------------------------
@@ -301,5 +279,4 @@ __all__ = [
     "render_start_unknown",
     "render_started",
     "render_summary",
-    "uuids_in",
 ]

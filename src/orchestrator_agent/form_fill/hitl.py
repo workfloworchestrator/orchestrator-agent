@@ -161,7 +161,7 @@ def answers_as_text(pending: PendingAsk, response: AskUserResponse) -> str | Non
     values: dict[str, Any] = {}
     free: list[str] = []
     for name, many, labels, answer in zip(pending.fields, multiple, options, response.answers, strict=True):
-        items = [a.strip() for a in answer.answer if a and a.strip()]
+        items = [a for a in answer.answer if a.strip()]
         if labels:
             items = [labels.get(item, item) for item in items]  # a chip is a label; the form wants the value
         if name is None:
