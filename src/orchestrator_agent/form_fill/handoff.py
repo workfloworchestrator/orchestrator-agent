@@ -28,9 +28,8 @@ from pydantic_ai import ModelRetry, RunContext
 from pydantic_ai.toolsets import FunctionToolset
 from pydantic_ai.ui import StateDeps
 
-from orchestrator_agent.form_fill.contract import SUBSCRIPTION_ID
 from orchestrator_agent.form_fill.skill import CallTool, FormFillSkill
-from orchestrator_agent.state import FormFillSession, SearchState
+from orchestrator_agent.state import SUBSCRIPTION_ID, FormFillSession, SearchState
 from orchestrator_agent.tool_names import START_WORKFLOW_FORM_TOOL
 
 FormDeps = StateDeps[SearchState]

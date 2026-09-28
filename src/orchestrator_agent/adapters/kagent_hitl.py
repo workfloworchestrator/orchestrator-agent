@@ -24,20 +24,18 @@ Wire shapes mirror ``go/api/a2a/hitl.go`` in kagent-dev/kagent (json tags), vali
 matching ``id`` and one answer per question.
 
 This module is pure: it turns a skill ``Reply`` into a request payload, remembers what was asked
-(``PendingAsk``), and turns the human's response back into the contract the skill already reads (a
-JSON object keyed by field name, ``yes`` / ``no``) — so the skill logic is identical with or without
-the extension. A picked chip is a label; the value behind it is what travels.
+(``PendingAsk``), and turns the human's answers back into the data the skill reads (a JSON object keyed
+by field name; a picked chip is a label, the value behind it is what travels). An approval is a
+``ToolApproval``: a structured decision, never words.
 """
 
 from __future__ import annotations
 
-import json
 from collections.abc import Mapping, Sequence
-from typing import Annotated, Any, Literal
+from typing import Annotated, Any, Literal, NamedTuple
 
 from pydantic import BaseModel, Field, TypeAdapter, ValidationError
 
-from orchestrator_agent.form_fill.contract import NO, YES, raw_pairs
 from orchestrator_agent.state import Approval, AskField
 
 HITL_EXTENSION_URI = "https://kagent.dev/extensions/hitl/v1"
@@ -98,14 +96,20 @@ HITLResponse = AskUserResponse | ToolApprovalResponse
 _RESPONSE: TypeAdapter[HITLResponse] = TypeAdapter(Annotated[HITLResponse, Field(discriminator="type")])
 
 
+class PendingQuestion(BaseModel):
+    """One question of a pending ask: which field it fills, whether several picks were invited, its chips."""
+
+    field: str | None = None  # None = free text, passed through
+    multiple: bool = False
+    options: dict[str, str] | None = None  # chip label -> form value
+
+
 class PendingAsk(BaseModel):
     """What the last ``input-required`` asked, so the response can be mapped back (stored on the session)."""
 
     id: str
     kind: Literal["ask", "approval"]
-    fields: list[str | None] = Field(default_factory=list)  # per question: the form field, or None = free text
-    multiple: list[bool] = Field(default_factory=list)  # per question: whether several answers were invited
-    options: list[dict[str, str] | None] = Field(default_factory=list)  # per question: chip label -> form value
+    questions: list[PendingQuestion] = Field(default_factory=list)
 
 
 # --- outbound: a skill stop -> the extension payload ------------------------------------------------
@@ -117,9 +121,14 @@ def ask_request(request_id: str, ask: Sequence[AskField]) -> tuple[AskUserReques
     pending = PendingAsk(
         id=request_id,
         kind="ask",
-        fields=[f.name for f in ask],
-        multiple=[f.multiple for f in ask],
-        options=[dict(zip(f.choices, f.values, strict=True)) if f.values else None for f in ask],
+        questions=[
+            PendingQuestion(
+                field=f.name,
+                multiple=f.multiple,
+                options=dict(zip(f.choices, f.values, strict=True)) if f.values else None,
+            )
+            for f in ask
+        ],
     )
     return AskUserRequest(id=request_id, questions=questions), pending
 
@@ -149,50 +158,41 @@ def parse_response(metadata: Mapping[str, Any] | None) -> HITLResponse | None:
         return None
 
 
-def answers_as_text(pending: PendingAsk, response: AskUserResponse) -> str | None:
-    """The answers as the contract reads them; None if they don't match the ask.
+class Answers(NamedTuple):
+    """A human's answers to a pending ask, as the skill uses them."""
 
-    A JSON object keyed by field name, followed by any free-text question's answer verbatim.
-    """
-    if pending.kind != "ask" or response.id != pending.id or len(response.answers) != len(pending.fields):
+    values: dict[
+        str, Any
+    ]  # field -> value: a chip mapped to its value, free text as typed; unanswered questions left out
+    text: str  # what was typed for a free-text question with no field (read by the interpreter), else ""
+
+
+def answers_as_values(pending: PendingAsk, response: AskUserResponse) -> Answers | None:
+    """The human's answers as data; None if they don't match the ask."""
+    if pending.kind != "ask" or response.id != pending.id or len(response.answers) != len(pending.questions):
         return None
-    multiple = pending.multiple or [False] * len(pending.fields)
-    options = pending.options or [None] * len(pending.fields)
     values: dict[str, Any] = {}
     free: list[str] = []
-    for name, many, labels, answer in zip(pending.fields, multiple, options, response.answers, strict=True):
+    for question, answer in zip(pending.questions, response.answers, strict=True):
         items = [a for a in answer.answer if a.strip()]
-        if labels:
-            items = [labels.get(item, item) for item in items]  # a chip is a label; the form wants the value
-        if name is None:
+        if question.options:
+            items = [question.options.get(item, item) for item in items]  # a chip is a label; the form wants the value
+        if question.field is None:
             free.extend(items[:1])
             continue
         # A multi-select question's picks stay a list; a single-answer question takes its first answer. An
-        # empty answer still travels: it tells the skill the reply is about the form (the page's defaults
-        # then apply) instead of being judged as an unrelated message.
-        values[name] = items if many else (items[0] if items else "")
-    return "\n".join(([json.dumps(values)] if values else []) + free)
+        # unanswered question stays out: nothing is sent for the field, so the form's default applies (and a
+        # required one comes back rejected by core).
+        if items:
+            values[question.field] = items if question.multiple else items[0]
+    return Answers(values, "\n".join(free))
 
 
-def approval_decision(pending: PendingAsk, response: ToolApprovalResponse) -> tuple[bool, str] | None:
-    """(approved, rejection reason) for our pending call, or None when the response is not about it."""
+def approval_decision(pending: PendingAsk, response: ToolApprovalResponse) -> ToolApproval | None:
+    """The human's decision on our pending call, or None when the response is not about it."""
     if pending.kind != "approval":
         return None
-    for approval in response.approvals:
-        if approval.id == pending.id:
-            return approval.approved, approval.rejection_reason
-    return None
-
-
-def approval_as_text(pending: PendingAsk, response: ToolApprovalResponse) -> str | None:
-    """The human's decision as the contract reads it: ``yes``, a JSON object of corrected values, or ``no``."""
-    decision = approval_decision(pending, response)
-    if decision is None:
-        return None
-    approved, reason = decision
-    if approved:
-        return YES
-    return reason if raw_pairs(reason) else NO
+    return next((approval for approval in response.approvals if approval.id == pending.id), None)
 
 
 __all__ = [
@@ -205,11 +205,12 @@ __all__ = [
     "HITLResponse",
     "HITLTool",
     "PendingAsk",
+    "PendingQuestion",
     "ToolApproval",
     "ToolApprovalRequest",
     "ToolApprovalResponse",
-    "answers_as_text",
-    "approval_as_text",
+    "Answers",
+    "answers_as_values",
     "approval_decision",
     "approval_request",
     "ask_request",

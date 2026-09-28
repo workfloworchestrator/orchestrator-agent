@@ -1,4 +1,4 @@
-"""Tests for the deterministic form-fill skill: the caller contract and the turn logic, with fakes for core and the asker."""
+"""Tests for the deterministic form-fill skill: every reply is core's data (``FormReply``), with fakes for core and the interpreter."""
 
 from __future__ import annotations
 
@@ -6,22 +6,23 @@ import os
 
 os.environ.setdefault("DATABASE_URI", "postgresql://test:test@localhost:5432/test")
 
-import uuid
-
 import pytest
 from pydantic_ai import ModelRetry
 
-from orchestrator_agent.form_fill.contract import (
-    FormCommand,
-    command,
-    label,
-    need_input,
-    raw_pairs,
-    render_summary,
+from orchestrator_agent.form_fill.core_bridge import (
+    choices,
+    form_errors,
+    is_accept,
+    is_list,
+    is_single_pick,
+    item_bounds,
+    item_type,
+    labels,
+    page_model,
 )
-from orchestrator_agent.form_fill.core_bridge import page_fields
-from orchestrator_agent.form_fill.skill import FormFillSkill
-from orchestrator_agent.state import FormField, FormFillSession, SearchState
+from orchestrator_agent.form_fill.interpret import Interpretation
+from orchestrator_agent.form_fill.skill import FormFillSkill, questions
+from orchestrator_agent.state import Decision, FormFillSession, FormReply, Reply, SearchState, values_in
 
 PRODUCT = "a19904e6-fa9f-4dd3-90c1-08dbd6d0821e"
 SPEED = {
@@ -73,8 +74,19 @@ ACCEPT_PAGE = {
 }
 
 
+def rejection(problems: dict[str, str]) -> str:
+    """The tool error text fastmcp builds from core's 400 body, naming each rejected field."""
+    errors = ", ".join(
+        f"{{'loc': ('{name}',), 'msg': \"{msg}\", 'type': 'value_error'}}" for name, msg in problems.items()
+    )
+    return f"HTTP error 400: Bad Request - {{'type': 'FormValidationError', 'validation_errors': [{errors}], 'status': 400}}"
+
+
 class FakeCore:
-    """Core's three form tools, with the demo lightpath's dynamic generator: 10 Gbit/s+ adds a redundancy page."""
+    """Core's three form tools, with the demo lightpath's dynamic generator: 10 Gbit/s+ adds a redundancy page.
+
+    Like core, it does not accept a submitted page that lacks a required field (``Field required`` per field).
+    """
 
     def __init__(self, reject=None, accept_page=False):
         self.reject = reject  # (page_index, message): raise when that page's inputs are submitted
@@ -107,23 +119,9 @@ class FakeCore:
     ]
     PROCESS_ID = "7c1f0e5a-2b3d-4c6e-8f90-a1b2c3d4e5f6"
 
-    @staticmethod
-    def lists(**groups: list[dict]) -> dict:
-        """A ``get_subscription_available_workflows`` result in core's shape (``SubscriptionWorkflowListsSchema``)."""
-        return {"create": [], "modify": [], "terminate": [], "system": [], "reconcile": [], **groups}
-
-    @staticmethod
-    def row(name: str, description: str, target: str) -> dict:
-        """One more ``list_workflows`` row in core's shape (``WorkflowSchema``)."""
-        return {
-            "name": name,
-            "description": description,
-            "target": target,
-            "workflow_id": str(uuid.uuid5(uuid.NAMESPACE_DNS, name)),
-            "created_at": "2026-01-01T00:00:00Z",
-        }
-
     SUB = "9df1beb7-0183-4fb9-8d66-504dfbe85a25"
+    OUT_OF_SYNC = "00000000-0000-4000-8000-00000000beef"  # a subscription core will not run a modify on
+    NOT_IN_SYNC = "This workflow cannot be started: related subscriptions are not insync"  # core's own message
     SUBSCRIPTION_PAGE = {
         "properties": {
             "subscription_id": {"format": "uuid", "type": "string"},
@@ -138,22 +136,24 @@ class FakeCore:
         "title": "Modify note",
     }
 
+    @staticmethod
+    def require(schema: dict, submitted: dict) -> None:
+        """Reject a submitted page the way pydantic-forms does when a required field is missing."""
+        if missing := [name for name in schema.get("required") or [] if name not in submitted]:
+            raise ModelRetry(rejection(dict.fromkeys(missing, "Field required")))
+
     async def __call__(self, name, args):  # noqa: C901 - a scripted stand-in for four core tools
         if name == "list_workflows":
             return self.WORKFLOWS
-        if name == "get_subscription_available_workflows":
-            if args["subscription_id"] != self.SUB:
-                raise ModelRetry("Subscription not found")
-            return {  # ``SubscriptionWorkflowListsSchema``
-                "create": [],
-                "modify": [{"name": "modify_demo_lightpath"}, {"name": "modify_note", "reason": "blocked"}],
-                "terminate": [{"name": "terminate_demo_lightpath", "reason": "subscription.not_in_sync"}],
-                "system": [],
-                "reconcile": [],
-            }
+        if name == "get_workflow_form" and args["workflow_key"] not in {wf["name"] for wf in self.WORKFLOWS}:
+            raise ModelRetry(f"Workflow {args['workflow_key']!r} not found")
         if name == "get_workflow_form" and args["workflow_key"] == "modify_demo_lightpath":
             inputs = args["page_inputs"]
             pages = [self.SUBSCRIPTION_PAGE, self.NOTE_PAGE]
+            if inputs:
+                self.require(pages[len(inputs) - 1], inputs[-1])
+            if inputs and inputs[0].get("subscription_id") == self.OUT_OF_SYNC:  # core's subscription page validator
+                raise ModelRetry(rejection({"subscription_id": self.NOT_IN_SYNC}))
             if len(inputs) >= len(pages):
                 return {"page": len(inputs), "complete": True, "schema": None}
             return {"page": len(inputs), "complete": False, "schema": pages[len(inputs)]}
@@ -169,29 +169,72 @@ class FakeCore:
             pages.append(REDUNDANCY_PAGE if inputs[1].get("speed") in ("10000", "100000") else TICKET_PAGE)
         if self.accept_page:
             pages.append(ACCEPT_PAGE)
+        if inputs:
+            self.require(pages[len(inputs) - 1], inputs[-1])
         if len(inputs) >= len(pages):
             return {"page": len(inputs), "complete": True, "schema": None}
         return {"page": len(inputs), "complete": False, "schema": pages[len(inputs)]}
 
 
-# --- contract -----------------------------------------------------------------------------------------
+class WordsInterpreter:
+    """Stand-in for the model that reads a message: exactly `yes` / `no` / `cancel` decide, nothing else is read."""
+
+    DECISIONS = {"yes": Decision.START, "no": Decision.CANCEL, "cancel": Decision.CANCEL}
+
+    async def answers(self, form, words):
+        return {}
+
+    async def message(self, form, text, decisions):
+        decision = self.DECISIONS.get(text)
+        return Interpretation(values={}, decision=decision if decision in decisions else None)
 
 
-class TestPageFields:
-    def test_kinds_required_and_display_only(self):
-        by_name = {f.name: f for f in page_fields(LIGHTPATH_PAGE)}
-        assert by_name["header"].display_only and by_name["header"].kind == "text"
-        assert by_name["customer_name"].kind == "text" and by_name["customer_name"].required
-        assert by_name["speed"].kind == "choice" and by_name["speed"].options == SPEED["options"]
-        assert by_name["speed_policer"].kind == "boolean" and not by_name["speed_policer"].required
+def make_skill() -> FormFillSkill:
+    return FormFillSkill(interpret=WordsInterpreter())
+
+
+def data(reply: Reply | None) -> FormReply | None:
+    """The reply as the caller reads it: one JSON object."""
+    return None if reply is None else FormReply.model_validate_json(reply.text)
+
+
+def rejected(reply: FormReply) -> list[str]:
+    """The fields core rejected, in core's order."""
+    return [str(error["loc"][0]) for error in reply.rejected if error["loc"]]
+
+
+async def turn(skill, core, state, text) -> FormReply | None:
+    return data(await skill.handle(text, state, core))
+
+
+async def open_form(skill, core, state, key, text, subscription_id=None) -> FormReply | None:
+    """What the executor does after the model called ``start_workflow_form(key, subscription_id)`` on ``text``."""
+    values = {"subscription_id": subscription_id} if subscription_id else {}
+    state.form_fill = FormFillSession(workflow_key=key, status="opening", request=text, values=values)
+    return data(await skill.open(state, core))
+
+
+# --- the page model ------------------------------------------------------------------------------------
+
+
+class TestPageModel:
+    """Core's browser-oriented page schema becomes one pydantic model per page: the artifact every reply works from."""
+
+    def test_types_required_defaults_and_display_only(self):
+        fields = page_model(LIGHTPATH_PAGE).model_fields
+        assert list(fields) == ["customer_name", "speed", "speed_policer"]  # display-only and read-only fields left out
+        assert fields["customer_name"].annotation is str and fields["customer_name"].is_required()
+        assert choices(fields["speed"]) == ("1000", "10000", "100000") and labels(fields["speed"]) == SPEED["options"]
+        assert fields["speed_policer"].annotation is bool and fields["speed_policer"].default is False
+        assert page_model(LIGHTPATH_PAGE) is page_model(dict(LIGHTPATH_PAGE))  # pure: one model per schema
 
     def test_product_picker_and_accept(self):
-        (product,) = page_fields(PRODUCT_PAGE)
-        assert product.kind == "choice" and product.options == {PRODUCT: "Demo Lightpath"}
-        (confirm,) = page_fields(ACCEPT_PAGE)
-        assert confirm.kind == "accept"
+        (product,) = page_model(PRODUCT_PAGE).model_fields.values()
+        assert choices(product) == (PRODUCT,) and labels(product) == {PRODUCT: "Demo Lightpath"}
+        (confirm,) = page_model(ACCEPT_PAGE).model_fields.values()
+        assert is_accept(confirm) and choices(confirm) == ("ACCEPTED",)
 
-    def test_structured_fields_get_a_shape_and_uuid_fields_a_hint(self):
+    def test_structured_fields_are_nested_models_and_the_schema_carries_them(self):
         schema = {
             "$defs": {
                 "PortChoice": {
@@ -220,43 +263,63 @@ class TestPageFields:
             },
             "required": ["service_ports", "subscription_id"],
         }
-        by_name = {f.name: f for f in page_fields(schema)}
-        ports = by_name["service_ports"]
-        assert ports.kind == "json"
-        assert ports.shape == (
-            "a JSON list of exactly 2 objects, each with keys `subscription_id` (required: one of `p-1` (ACE SP DT010A), "
-            "`p-2` (ACE SP ASD002A)), `vlan` (optional: text, default '0')"
+        model = page_model(schema)
+        ports = model.model_fields["service_ports"]
+        assert is_list(ports) and item_bounds(ports) == (2, 2)
+        port = item_type(ports).model_fields
+        assert choices(port["subscription_id"]) == ("p-1", "p-2") and port["vlan"].default == "0"
+        # An agent reads the page's JSON schema: nested shapes, counts, labels and formats as data.
+        json_schema = model.model_json_schema()
+        assert json_schema["required"] == ["service_ports", "subscription_id"]
+        assert json_schema["properties"]["service_ports"] == {
+            "items": {"$ref": "#/$defs/ServicePort"},
+            "maxItems": 2,
+            "minItems": 2,
+            "title": "service_ports",
+            "type": "array",
+        }
+        assert json_schema["$defs"]["ServicePort"]["properties"]["subscription_id"]["labels"] == {
+            "p-1": "ACE SP DT010A",
+            "p-2": "ACE SP ASD002A",
+        }
+        assert json_schema["properties"]["subscription_id"]["format"] == "uuid"
+        assert (
+            json_schema["properties"]["note"]["format"] == "long"
+            and json_schema["properties"]["note"]["default"] is None
         )
-        text = need_input(
-            FormFillSession(workflow_key="w"),
-            page=0,
-            title="t",
-            fields=list(by_name.values()),
-            values={},
-            missing=[ports, by_name["subscription_id"]],
-        ).text
-        assert "- service_ports (required): a JSON list of exactly 2 objects" in text
-        assert "- subscription_id (required): an id (UUID) of the subscription — find it with the search skill" in text
-        assert "- note (optional): free text (multi-line allowed)" in text
+        # A person gets one question per field: title, whether it is required, core's message when it rejected the answer.
+        errors = form_errors(rejection({"service_ports": "Field required", "subscription_id": "Field required"}))
+        assert [q.question for q in questions(model, {}, errors)] == [
+            "service_ports (`service_ports`, required) — Field required",
+            "subscription_id (`subscription_id`, required) — Field required",
+            "note (`note`, optional — leave empty to keep the default)",
+        ]
 
-    def test_single_select_list_is_a_choice_returned_as_list(self):
+    def test_single_select_list_is_a_list_of_one(self):
         schema = {
             "$defs": {"N": {"enum": ["a", "b"], "type": "string"}},
             "properties": {"n": {"items": {"$ref": "#/$defs/N"}, "maxItems": 1, "type": "array"}},
         }
-        (field,) = page_fields(schema)
-        assert field.kind == "choice" and field.as_list
+        (field,) = page_model(schema).model_fields.values()
+        assert is_list(field) and item_bounds(field) == (None, 1) and choices(field) == ("a", "b")
+        assert is_single_pick(field)
 
 
-SPEED_FIELD = FormField(name="speed", title="Speed", kind="choice", required=True, options=SPEED["options"])
-FIELDS = {
-    "speed": SPEED_FIELD,
-    "speed_policer": FormField(name="speed_policer", title="Speed Policer", kind="boolean"),
-    "customer_name": FormField(name="customer_name", title="Customer Name", kind="text", required=True),
-    "vlan": FormField(name="vlan", title="Vlan", kind="integer"),
-    "nodes": FormField(name="nodes", title="Nodes", kind="multi", options={"a": "Node A", "b": "Node B"}),
-    "confirm": FormField(name="confirm", title="Confirm", kind="accept"),
-    "header": FormField(name="header", title="Header", kind="text", display_only=True),
+FIELDS_PAGE = {
+    "$defs": {"Speed": SPEED},
+    "properties": {
+        "speed": {"$ref": "#/$defs/Speed"},
+        "speed_policer": {"type": "boolean"},
+        "customer_name": {"type": "string"},
+        "vlan": {"type": "integer"},
+        "nodes": {
+            "items": {"enum": ["a", "b"], "options": {"a": "Node A", "b": "Node B"}, "type": "string"},
+            "type": "array",
+        },
+        "confirm": {"enum": ["ACCEPTED", "INCOMPLETE"], "format": "accept", "type": "string"},
+        "header": {"format": "label", "type": "string"},
+    },
+    "required": ["speed", "customer_name"],
 }
 
 
@@ -271,7 +334,7 @@ class TestParseReply:
                 id="json-types-as-sent",
             ),
             pytest.param('{"speed": "10 Gbit/s"}', {"speed": "10 Gbit/s"}, id="a-label-goes-to-core-as-sent"),
-            pytest.param('```json\n{"speed": "1000"}\n```', {}, id="a-fenced-object-is-not-the-contract"),
+            pytest.param('```json\n{"speed": "1000"}\n```', None, id="a-fenced-object-is-not-the-contract"),
             pytest.param(
                 '{"customer_name": "Universiteit Twente", "vlan": 12}',
                 {"customer_name": "Universiteit Twente", "vlan": 12},
@@ -282,15 +345,15 @@ class TestParseReply:
             pytest.param(
                 '{"vlan": "", "colour": "blue"}', {"vlan": "", "colour": "blue"}, id="as-sent-even-when-unknown"
             ),
-            pytest.param("speed: 10000", {}, id="a-line-is-not-the-contract"),
-            pytest.param('Here you go: {"speed": "10000"}', {}, id="json-inside-prose-is-not-the-contract"),
-            pytest.param("Sure, protected please", {}, id="prose-has-no-answers"),
+            pytest.param("speed: 10000", None, id="a-line-is-not-the-contract"),
+            pytest.param('Here you go: {"speed": "10000"}', None, id="json-inside-prose-is-not-the-contract"),
+            pytest.param("Sure, protected please", None, id="prose-has-no-answers"),
         ],
     )
     def test_parse(self, text, expected):
-        assert raw_pairs(text) == expected
+        assert values_in(text) == expected
 
-    def test_a_page_takes_its_own_fields_as_sent_and_leaves_empty_values_to_their_defaults(self):
+    def test_a_page_takes_its_own_fields_exactly_as_sent(self):
         session = FormFillSession(
             workflow_key="w",
             values={
@@ -302,105 +365,63 @@ class TestParseReply:
                 "ticket_id": "T-1",
             },
         )
-        page = FormFillSkill._see_page(session, list(FIELDS.values()), page_index=0)
-        assert page == {"speed": "10 Gbit/s"}  # as sent (core judges it); names exact; empty, display-only, absent: not
+        page = FormFillSkill._see_page(session, page_model(FIELDS_PAGE), page_index=0)
+        assert page == {
+            "speed": "10 Gbit/s",
+            "vlan": "",
+        }  # as sent, core judges it; names exact; display-only, absent: not
         assert session.values["ticket_id"] == "T-1"  # a value for a later page waits
 
 
-class TestRendering:
-    def test_need_input_lists_missing_optional_filled_and_labels(self):
-        session = FormFillSession(workflow_key="create_demo_lightpath", page_inputs=[{"product": PRODUCT}])
-        session.fields = {
-            "product": FormField(name="product", title="Product", kind="choice", options={PRODUCT: "Demo Lightpath"})
-        }
-        fields = page_fields(LIGHTPATH_PAGE)
-        text = need_input(
-            session,
-            page=1,
-            title="Demo Lightpath",
-            fields=fields,
-            values={"speed": "10000"},
-            missing=[f for f in fields if f.name == "customer_name"],
-        ).text
-        assert "- customer_name (required): free text" in text
-        assert "- speed_policer (optional, default False): `true` or `false`" in text
-        assert "header" not in text  # display-only fields are never asked for
-        assert f"product: {PRODUCT} (Demo Lightpath)" in text and "speed: 10000" in text
-        assert 'Reply with a JSON object keyed by field name, e.g. {"customer_name": "..."}' in text
-
-    def test_summary_lists_defaults_the_caller_never_set_and_renders_structured_values_as_json(self):
-        fields = {f.name: f for f in page_fields(LIGHTPATH_PAGE)}
-        fields["ports"] = FormField(name="ports", title="Ports", kind="json")
-        session = FormFillSession(
-            workflow_key="w",
-            page_inputs=[
-                {"customer_name": "UT", "speed": "10000", "ports": [{"subscription_id": "p-1", "vlan": "10"}]}
-            ],
-            fields=fields,
+class TestCoreErrors:
+    def test_cores_errors_are_read_out_of_the_tool_error_text_as_they_are(self):
+        raw = (
+            "Error calling tool 'get_workflow_form': HTTP error 400: Bad Request - {'type': 'FormValidationError', "
+            "'detail': '1 validation error for ModifySubscriptionPage', 'validation_errors': [{'type': 'value_error', "
+            "'loc': ['subscription_id'], 'msg': 'This workflow cannot be started: related subscriptions are not insync'}], 'status': 400}"
         )
-        summary = render_summary(session)
-        assert '- ports: [{"subscription_id": "p-1", "vlan": "10"}]' in summary
-        assert "- speed_policer: False (default)" in summary  # optional, never set: the form default applies
-        assert label(None, []) == "(empty)" and label(None, None) == "(empty)"
-        assert "header" not in summary  # display-only, never listed
+        (error,) = form_errors(raw)
+        assert error["loc"] == ("subscription_id",) and error["type"] == "value_error"
+        assert error["msg"] == "This workflow cannot be started: related subscriptions are not insync"
+        assert form_errors("plain failure") == []
 
-    def test_a_blocked_workflow_says_why_and_what_the_subscription_can_run(self):
-        from orchestrator_agent.form_fill.contract import render_blocked
-
-        text = render_blocked("terminate_x", "Terminate X", "subscription.not_in_sync", {"modify_note": "Modify note"})
-        assert text.startswith("Cannot start a workflow on this subscription now:")
-        assert "- `terminate_x`: Terminate X — cannot run on this subscription now: subscription.not_in_sync" in text
-        assert "Workflows this subscription can run now:\n- `modify_note`: Modify note\n" in text
-        assert "Workflows this subscription can run now" not in render_blocked("terminate_x", "Terminate X", "why", {})
-
-    def test_summary_lists_the_defaults_of_the_last_walks_fields_the_caller_never_set(self):
-        from orchestrator_agent.form_fill.contract import defaults_applying
-
-        ticket = FormField(name="ticket_id", title="Ticket", kind="text", has_default=True, default="")
-        session = FormFillSession(workflow_key="w", fields={"ticket_id": ticket}, page_inputs=[{"note": "n"}])
-        assert defaults_applying(session) == ["ticket_id: (empty) (default)"]
-
-    def test_summary_shows_labels_and_asks_for_yes(self):
-        session = FormFillSession(
-            workflow_key="create_demo_lightpath",
-            page_inputs=[{"product": PRODUCT}, {"speed": "10000"}],
-            fields={"speed": SPEED_FIELD},
-        )
-        summary = render_summary(session)
-        assert "- speed: 10000 (10 Gbit/s)" in summary and "`yes`" in summary
+    def test_a_rejection_core_pins_on_no_field_is_one_free_question(self):
+        error = "HTTP error 400: Bad Request - {'validation_errors': [{'loc': (), 'msg': 'ports must differ', 'type': 'value_error'}]}"
+        model = page_model(LIGHTPATH_PAGE)
+        (free, policer) = questions(model, {"customer_name": "UT", "speed": "1000"}, form_errors(error))
+        assert free.name is None and "ports must differ" in free.question
+        assert policer.name == "speed_policer"  # still untouched: asked along
 
 
 # --- the skill --------------------------------------------------------------------------------------------
 
 
-async def turn(skill, core, state, text):
-    reply = await skill.handle(text, state, core)
-    return None if reply is None else reply.text
-
-
 class TestWalk:
-    """The walk after a handoff: values in, pages regenerated by core, the summary, the start."""
+    """The walk after a handoff: values in, pages submitted to core as known, core's verdict out; the summary; the start."""
 
     VALUES = '{"speed": "10000", "speed_policer": true}'
 
     async def test_full_flow_ask_answer_confirm_start(self):
         core, state = FakeCore(), SearchState()
-        skill = FormFillSkill()
-        # 1. product is the only option and taken; customer_name is free text -> asked.
+        skill = make_skill()
+        # 1. product is the only option and taken; page 1 goes to core without a customer name: core says so.
         reply = await open_form(skill, core, state, "create_demo_lightpath", self.VALUES)
-        assert "page 1" in reply and "- customer_name (required): free text" in reply
-        assert "speed: 10000 (10 Gbit/s)" in reply and "speed_policer: True" in reply
+        assert reply.status == "gathering" and reply.page == 1 and reply.title == "Demo Lightpath"
+        assert rejected(reply) == ["customer_name"] and reply.rejected[0]["msg"] == "Field required"
+        assert reply.values == {"product": PRODUCT, "speed": "10000", "speed_policer": True}
+        assert reply.schema_["required"] == ["customer_name", "speed"]
         assert state.form_fill.status == "gathering"
         # 2. The caller answers; page 2 (10 Gbit/s -> redundancy) needs a value nobody gave; the ticket waits.
         reply = await turn(skill, core, state, '{"customer_name": "Universiteit Twente", "ticket_id": "JIRA-4821"}')
-        assert "page 2" in reply and "- redundancy (required): one of `protected` (Protected)" in reply
-        assert "customer_name: Universiteit Twente" in reply
-        # 3. The summary lists every page, including the ticket sent early; yes starts with exactly that.
+        assert reply.page == 2 and rejected(reply) == ["redundancy"]
+        assert reply.schema_["properties"]["redundancy"]["labels"] == REDUNDANCY["options"]
+        assert reply.values["customer_name"] == "Universiteit Twente"
+        # 3. The summary lists every page, including the ticket sent early; a start decision starts with exactly that.
         reply = await turn(skill, core, state, '{"redundancy": "protected"}')
-        assert reply.startswith("All pages of workflow `create_demo_lightpath`") and "ticket_id: JIRA-4821" in reply
+        assert reply.status == "confirming" and reply.values["ticket_id"] == "JIRA-4821"
         assert state.form_fill.status == "confirming"
         reply = await turn(skill, core, state, "yes")
-        assert reply.startswith("Started workflow") and state.form_fill is None
+        assert reply.status == "started" and reply.process_id == FakeCore.PROCESS_ID and state.form_fill is None
         (created,) = core.created
         assert created["json_data"] == [
             {"product": PRODUCT},
@@ -408,9 +429,25 @@ class TestWalk:
             {"redundancy": "protected", "ticket_id": "JIRA-4821"},
         ]
 
+    async def test_the_summary_carries_the_values_and_the_defaults_that_apply(self):
+        core, state = FakeCore(), SearchState()
+        reply = await open_form(
+            make_skill(),
+            core,
+            state,
+            "create_demo_lightpath",
+            '{"customer_name": "UT", "speed": "10000", "redundancy": "protected"}',
+        )
+        assert reply.status == "confirming"
+        assert reply.values == {"product": PRODUCT, "customer_name": "UT", "speed": "10000", "redundancy": "protected"}
+        assert reply.defaults == {
+            "speed_policer": False,
+            "ticket_id": "",
+        }  # optional, never set: the form default applies
+
     async def test_correction_while_confirming_rewalks_and_regenerates_later_pages(self):
         core, state = FakeCore(), SearchState()
-        skill = FormFillSkill()
+        skill = make_skill()
         await open_form(
             skill,
             core,
@@ -423,7 +460,7 @@ class TestWalk:
         # 1 Gbit/s has no redundancy page: the earlier answer is simply no longer part of the form, and the
         # ticket-only page was already offered, so it is not asked again: straight to the summary.
         reply = await turn(skill, core, state, '{"speed": "1000"}')
-        assert "- speed: 1000 (1 Gbit/s)" in reply and "redundancy" not in reply
+        assert reply.status == "confirming" and reply.values["speed"] == "1000" and "redundancy" not in reply.values
         assert state.form_fill.page_inputs == [
             {"product": PRODUCT},
             {"customer_name": "UT", "speed": "1000", "speed_policer": True},
@@ -432,30 +469,30 @@ class TestWalk:
 
     async def test_cancel_while_gathering(self):
         core, state = FakeCore(), SearchState()
-        skill = FormFillSkill()
+        skill = make_skill()
         await open_form(skill, core, state, "create_demo_lightpath", self.VALUES)
         reply = await turn(skill, core, state, "cancel")
-        assert reply.startswith("Cancelled") and state.form_fill is None
+        assert reply.status == "cancelled" and state.form_fill is None
 
     async def test_a_reply_that_is_not_the_contract_on_an_optional_only_page_moves_on_with_defaults(self):
         core, state = FakeCore(), SearchState()
-        skill = FormFillSkill()
+        skill = make_skill()
         await open_form(
             skill, core, state, "modify_demo_lightpath", "change the note on it", subscription_id=FakeCore.SUB
         )
         reply = await turn(skill, core, state, "no thanks, leave it")  # not a JSON object, not a cancel
-        assert reply.startswith("All pages of workflow `modify_demo_lightpath`")  # asked once, never again
+        assert reply.status == "confirming"  # asked once, never again
 
     async def test_read_only_single_option_field_is_never_submitted(self):
         core, state = FakeCore(), SearchState()
-        skill = FormFillSkill()
+        skill = make_skill()
         await open_form(skill, core, state, "create_demo_lightpath", self.VALUES)
         await turn(skill, core, state, '{"customer_name": "UT"}')
         assert "locked" not in state.form_fill.page_inputs[1] and "locked" not in state.form_fill.values
 
     async def test_a_bare_uuid_does_not_steal_the_subscription_slot(self):
         core, state = FakeCore(), SearchState()
-        skill = FormFillSkill()
+        skill = make_skill()
         await open_form(
             skill, core, state, "modify_demo_lightpath", "change the note on it", subscription_id=FakeCore.SUB
         )
@@ -465,19 +502,17 @@ class TestWalk:
         assert state.form_fill.page_inputs[0] == {"subscription_id": FakeCore.SUB}
 
     async def test_the_workflow_catalogue_is_fetched_once(self):
-        core, state = FakeCore(), SearchState()
-        calls = []
+        core, calls = FakeCore(), []
 
         async def counting(name, args):
             calls.append(name)
             return await core(name, args)
 
-        skill = FormFillSkill()
-        await open_form(skill, counting, state, "create_demo_lightpath", self.VALUES)
-        await turn(skill, counting, state, '{"customer_name": "UT"}')
+        skill = make_skill()
+        assert await skill.workflows(counting) == await skill.workflows(counting)
         assert calls.count("list_workflows") == 1
 
-    async def test_a_form_that_never_completes_is_rejected_not_looped(self):
+    async def test_a_form_that_never_completes_fails_and_closes_instead_of_looping(self):
         class EndlessCore(FakeCore):
             async def __call__(self, name, args):
                 if name == "get_workflow_form":
@@ -489,59 +524,67 @@ class TestWalk:
                 return await super().__call__(name, args)
 
         state = SearchState()
-        reply = await open_form(FormFillSkill(), EndlessCore(), state, "create_demo_lightpath", self.VALUES)
-        assert reply.startswith("The orchestrator rejected") and "did not complete" in reply
+        reply = await open_form(make_skill(), EndlessCore(), state, "create_demo_lightpath", self.VALUES)
+        assert reply.status == "failed" and "did not complete" in reply.reason and state.form_fill is None
 
-    async def test_core_rejecting_a_page_is_relayed_and_the_session_stays_open(self):
-        core, state = FakeCore(reject=(2, "speed: Input should be '1000', '10000' or '100000'")), SearchState()
-        skill = FormFillSkill()
+    async def test_core_rejecting_a_page_is_relayed_as_its_errors_and_the_session_stays_open(self):
+        message = "Input should be '1000', '10000' or '100000'"
+        core, state = FakeCore(reject=(2, rejection({"speed": message}))), SearchState()
+        skill = make_skill()
         await open_form(skill, core, state, "create_demo_lightpath", self.VALUES)
         reply = await turn(skill, core, state, '{"customer_name": "UT"}')
-        assert reply.startswith("The orchestrator rejected") and "speed" in reply
-        assert state.form_fill.status == "gathering"
+        assert reply.status == "gathering" and reply.title == "Demo Lightpath" and reply.page == 1
+        assert reply.rejected == [{"loc": ("speed",), "msg": message, "type": "value_error"}] and reply.reason is None
+        assert reply.values == {
+            "product": PRODUCT,
+            "customer_name": "UT",
+            "speed_policer": True,
+        }  # the rejected value is not
+        assert state.form_fill.status == "gathering" and state.form_fill.page_inputs == [{"product": PRODUCT}]
+
+    async def test_a_refusal_that_is_no_form_error_travels_as_the_reason(self):
+        core, state = FakeCore(reject=(2, "Error calling tool: something else entirely")), SearchState()
+        skill = make_skill()
+        await open_form(skill, core, state, "create_demo_lightpath", self.VALUES)
+        reply = await turn(skill, core, state, '{"customer_name": "UT"}')
+        assert reply.status == "gathering" and reply.rejected == []
+        assert reply.reason == "Error calling tool: something else entirely"
 
     async def test_accept_field_is_asked_and_only_an_explicit_accept_fills_it(self):
         core, state = FakeCore(accept_page=True), SearchState()
-        skill = FormFillSkill()
+        skill = make_skill()
         await open_form(skill, core, state, "create_demo_lightpath", '{"customer_name": "UT", "speed": "10000"}')
         reply = await turn(skill, core, state, '{"redundancy": "protected"}')
-        assert "- confirm (required): `ACCEPTED` once the user has approved this step" in reply
+        assert rejected(reply) == ["confirm"]
+        assert reply.schema_["properties"]["confirm"] == {
+            "const": "ACCEPTED",
+            "format": "accept",
+            "title": "confirm",
+            "type": "string",
+        }
         reply = await turn(skill, core, state, '{"confirm": "ACCEPTED"}')
-        assert reply.startswith("All pages of workflow") and state.form_fill.page_inputs[-1] == {"confirm": "ACCEPTED"}
+        assert reply.status == "confirming" and state.form_fill.page_inputs[-1] == {"confirm": "ACCEPTED"}
 
     async def test_session_survives_a_json_round_trip(self):
         core, state = FakeCore(), SearchState()
-        await open_form(FormFillSkill(), core, state, "create_demo_lightpath", self.VALUES)
+        await open_form(make_skill(), core, state, "create_demo_lightpath", self.VALUES)
         restored = SearchState.model_validate(state.model_dump(mode="json"))
         assert restored.form_fill == state.form_fill
 
-    def test_rejection_text_is_the_validation_messages(self):
-        from orchestrator_agent.form_fill.core_bridge import error_detail
-
-        raw = (
-            "Error calling tool 'get_workflow_form': HTTP error 400: Bad Request - {'type': 'FormValidationError', "
-            "'detail': '1 validation error for ModifySubscriptionPage', 'validation_errors': [{'type': 'value_error', "
-            "'loc': ['subscription_id'], 'msg': 'This workflow cannot be started: related subscriptions are not insync'}], 'status': 400}"
-        )
-        assert (
-            error_detail(raw)
-            == "subscription_id: This workflow cannot be started: related subscriptions are not insync"
-        )
-        assert error_detail("plain failure") == "plain failure"
-
 
 class TestStructuredReplies:
-    """The same stops as data, for adapters that render natively (a human-in-the-loop transport)."""
+    """The same stops as questions and approvals, for adapters that render natively (a human-in-the-loop transport)."""
 
     VALUES = '{"speed": "10000", "speed_policer": true}'
 
-    async def test_need_input_carries_ask_fields_with_choices(self):
+    async def test_a_stop_carries_ask_fields_with_choices(self):
         core, state = FakeCore(), SearchState()
         state.form_fill = FormFillSession(workflow_key="create_demo_lightpath", status="opening", request=self.VALUES)
-        reply = await FormFillSkill().open(state, core)
+        reply = await make_skill().open(state, core)
         assert [f.name for f in reply.ask] == ["customer_name"]  # page 1: the only thing left
-        assert reply.ask[0].choices == () and "free text" in reply.ask[0].question
-        reply = await FormFillSkill().handle('{"customer_name": "UT"}', state, core)
+        assert reply.ask[0].choices == ()
+        assert reply.ask[0].question == "Customer Name (`customer_name`, required) — Field required"
+        reply = await make_skill().handle('{"customer_name": "UT"}', state, core)
         (redundancy, ticket) = reply.ask
         assert redundancy.name == "redundancy" and redundancy.choices == ("Protected", "Unprotected")  # labels
         assert redundancy.values == ("protected", "unprotected")  # ...the values behind the chips
@@ -550,7 +593,7 @@ class TestStructuredReplies:
 
     async def test_summary_carries_the_create_call_to_approve(self):
         core, state = FakeCore(), SearchState()
-        skill = FormFillSkill()
+        skill = make_skill()
         await open_form(skill, core, state, "create_demo_lightpath", '{"customer_name": "UT", "speed": "10000"}')
         reply = await skill.handle('{"redundancy": "protected"}', state, core)
         assert reply.ask is None
@@ -559,28 +602,28 @@ class TestStructuredReplies:
             "workflow_key": "create_demo_lightpath",
             "json_data": state.form_fill.page_inputs,
         }
-        assert reply.approval.hint == reply.text
+        assert reply.approval.hint == "Start workflow `create_demo_lightpath` with the values shown?"
 
-    async def test_an_approval_arrives_as_the_contract_words(self):
-        # A kagent Approve/Reject is mapped to `yes`, a JSON object of corrections or `no` by the adapter; the skill sees text.
+    async def test_an_approval_arrives_as_a_decision(self):
+        # Words reach the skill only through the interpreter (a stand-in here); kagent's approval arrives as a decision.
         for text, expect_created, expect_status in (
             ("yes", 1, None),
             ('{"speed": "1000"}', 0, "confirming"),
             ("no", 0, None),
         ):
             core, state = FakeCore(), SearchState()
-            skill = FormFillSkill()
+            skill = make_skill()
             await open_form(skill, core, state, "create_demo_lightpath", '{"customer_name": "UT", "speed": "10000"}')
             await skill.handle('{"redundancy": "protected"}', state, core)  # the ticket was offered on this page
             reply = await skill.handle(text, state, core)
             assert len(core.created) == expect_created
             assert (state.form_fill.status if state.form_fill else None) == expect_status
             if text == "yes":
-                assert reply.text.startswith("Started workflow")
+                assert data(reply).status == "started"
             elif expect_status == "confirming":
-                assert "- speed: 1000 (1 Gbit/s)" in reply.text and reply.approval is not None
+                assert data(reply).values["speed"] == "1000" and reply.approval is not None
             else:
-                assert reply.text.startswith("Cancelled")
+                assert data(reply).status == "cancelled"
 
 
 async def handoff(state, key, subscription_id=None, core=None):
@@ -590,110 +633,69 @@ async def handoff(state, key, subscription_id=None, core=None):
     from orchestrator_agent.form_fill.handoff import build_handoff_toolset
     from orchestrator_agent.tool_names import START_WORKFLOW_FORM_TOOL
 
-    tool = build_handoff_toolset(FormFillSkill(), core or FakeCore()).tools[START_WORKFLOW_FORM_TOOL].function
+    tool = build_handoff_toolset(make_skill(), core or FakeCore()).tools[START_WORKFLOW_FORM_TOOL].function
     return await tool(SimpleNamespace(deps=SimpleNamespace(state=state)), key, subscription_id=subscription_id)
-
-
-async def open_form(skill, core, state, key, text, subscription_id=None):
-    """What the executor does after the model called ``start_workflow_form(key, subscription_id)`` on ``text``."""
-    values = {"subscription_id": subscription_id} if subscription_id else {}
-    state.form_fill = FormFillSession(workflow_key=key, status="opening", request=text, values=values)
-    reply = await skill.open(state, core)
-    return None if reply is None else reply.text
 
 
 class TestHandoff:
     """The model routes: ``start_workflow_form`` marks the session, ``open`` walks it in the same turn."""
 
     async def test_the_tool_marks_the_session_and_keeps_the_request(self):
-
         state = SearchState(user_input="create a lightpath for UT")
         out = await handoff(state, "create_demo_lightpath")
         assert state.form_fill.status == "opening" and state.form_fill.workflow_key == "create_demo_lightpath"
         assert state.form_fill.request == "create a lightpath for UT"
         assert "create_demo_lightpath" in out
 
-    async def test_a_subscription_passed_by_the_model_is_checked_and_filled(self):
-
+    async def test_a_subscription_passed_by_the_model_fills_the_first_page_and_core_judges_it(self):
         core = FakeCore()
-        core.WORKFLOWS = core.WORKFLOWS + [
-            FakeCore.row("terminate_demo_lightpath", "Terminate a demo lightpath", "TERMINATE")
-        ]
-        state = SearchState(user_input="start the terminate workflow for it anyway")  # the id was said earlier
-        await handoff(state, "terminate_demo_lightpath", subscription_id=FakeCore.SUB, core=core)
-        reply = await FormFillSkill().open(state, core)
-        assert reply.text.startswith("Cannot start a workflow") and "subscription.not_in_sync" in reply.text
-        assert state.form_fill is None
-        state = SearchState(user_input="change its note")
+        state = SearchState(user_input="change its note")  # the id was said earlier
         await handoff(state, "modify_demo_lightpath", subscription_id=FakeCore.SUB, core=core)
-        reply = await FormFillSkill().open(state, core)
-        assert state.form_fill.page_inputs[0] == {"subscription_id": FakeCore.SUB} and "- note (optional" in reply.text
+        reply = data(await make_skill().open(state, core))
+        assert state.form_fill.page_inputs[0] == {"subscription_id": FakeCore.SUB}
+        assert reply.status == "gathering" and reply.rejected == [] and list(reply.schema_["properties"]) == ["note"]
+        # A subscription core will not run the workflow on: core's own subscription page says so, nothing here pre-checks.
+        state = SearchState(user_input="change its note anyway")
+        await handoff(state, "modify_demo_lightpath", subscription_id=FakeCore.OUT_OF_SYNC, core=core)
+        reply = data(await make_skill().open(state, core))
+        assert reply.status == "gathering" and reply.page == 0 and rejected(reply) == ["subscription_id"]
+        assert reply.rejected[0]["msg"] == FakeCore.NOT_IN_SYNC and reply.values == {}
+        assert state.form_fill.status == "gathering"  # the caller may correct the id, or cancel
 
     async def test_a_create_workflow_ignores_a_subscription_passed_along(self):
-
         state = SearchState(user_input="create a new lightpath for ACE")
         await handoff(state, "create_demo_lightpath", subscription_id=FakeCore.SUB)
-        reply = await FormFillSkill().open(state, FakeCore())
-        assert state.form_fill.status == "gathering" and "- customer_name (required)" in reply.text
-
-    async def test_nothing_runnable_closes_with_the_reason_instead_of_asking(self):
-        core, state = FakeCore(), SearchState()
-        core.WORKFLOWS = core.WORKFLOWS + [
-            FakeCore.row("terminate_demo_lightpath", "Terminate a demo lightpath", "TERMINATE")
-        ]
-
-        async def only_blocked(name, args):
-            if name == "get_subscription_available_workflows":
-                return FakeCore.lists(
-                    terminate=[{"name": "terminate_demo_lightpath", "reason": "subscription.not_in_sync"}]
-                )
-            return await core(name, args)
-
-        reply = await open_form(
-            FormFillSkill(),
-            only_blocked,
-            state,
-            "terminate_demo_lightpath",
-            "terminate it",
-            subscription_id=FakeCore.SUB,
-        )
-        assert reply.startswith("Cannot start a workflow on this subscription now:")
-        assert (
-            "`terminate_demo_lightpath`: Terminate a demo lightpath — cannot run on this subscription now: subscription.not_in_sync"
-            in reply
-        )
-        assert state.form_fill is None  # not left in a choosing loop
+        reply = data(await make_skill().open(state, FakeCore()))
+        assert state.form_fill.status == "gathering" and rejected(reply) == ["customer_name", "speed"]
 
     async def test_open_walks_the_first_pages_with_nothing_prefilled(self):
         state = SearchState()
-        reply = await open_form(
-            FormFillSkill(), FakeCore(), state, "create_demo_lightpath", "create a lightpath for UT"
-        )
+        reply = await open_form(make_skill(), FakeCore(), state, "create_demo_lightpath", "create a lightpath for UT")
         assert state.form_fill.status == "gathering"
-        assert "- customer_name (required)" in reply and "- speed (required)" in reply  # nothing read from prose
-        assert "Filled so far: product:" in reply  # the single-option product page is still taken
+        assert rejected(reply) == ["customer_name", "speed"]  # nothing read from prose
+        assert reply.values == {"product": PRODUCT}  # the single-option product page is still taken
         assert state.form_fill.request == "create a lightpath for UT"  # only the caller's words are kept
 
     async def test_values_in_the_request_and_the_subscription_the_model_passed_are_taken(self):
         core, state = FakeCore(), SearchState()
         reply = await open_form(
-            FormFillSkill(), core, state, "modify_demo_lightpath", "change the note on it", subscription_id=FakeCore.SUB
+            make_skill(), core, state, "modify_demo_lightpath", "change the note on it", subscription_id=FakeCore.SUB
         )
         assert state.form_fill.page_inputs[0] == {"subscription_id": FakeCore.SUB}
-        assert "- note (optional" in reply
+        assert reply.page == 1 and reply.rejected == [] and "note" in reply.schema_["properties"]
         state = SearchState()
         reply = await open_form(
-            FormFillSkill(), core, state, "create_demo_lightpath", '{"customer_name": "UT", "speed": "10000"}'
+            make_skill(), core, state, "create_demo_lightpath", '{"customer_name": "UT", "speed": "10000"}'
         )
-        assert "page 2" in reply and "- redundancy (required)" in reply
+        assert reply.page == 2 and rejected(reply) == ["redundancy"]
 
-    async def test_an_unknown_key_is_dropped_and_the_model_answers(self):
-        state = SearchState()
-        assert await open_form(FormFillSkill(), FakeCore(), state, "create_unicorn", "make me a unicorn") is None
+    async def test_a_key_core_does_not_know_is_cores_refusal_and_the_form_closes(self):
+        state = SearchState()  # the handoff tool checks the key; a stale session may still reach core with one
+        reply = await open_form(make_skill(), FakeCore(), state, "create_unicorn", "make me a unicorn")
+        assert reply.status == "failed" and reply.reason == "Workflow 'create_unicorn' not found"
         assert state.form_fill is None
 
     async def test_the_tool_rejects_a_key_core_does_not_know_so_the_model_corrects_itself(self):
-
         state = SearchState(user_input="create a lightpath for UT")
         with pytest.raises(ModelRetry, match="Unknown workflow key 'create_demo_lightpth'"):
             await handoff(state, "create_demo_lightpth")
@@ -701,62 +703,42 @@ class TestHandoff:
         await handoff(state, "create_demo_lightpath")
         assert state.form_fill.status == "opening" and state.form_fill.workflow_key == "create_demo_lightpath"
 
-    async def test_a_workflow_core_will_not_run_on_the_subscription_is_reported(self):
-        core, state = FakeCore(), SearchState()
-        core.WORKFLOWS = core.WORKFLOWS + [
-            FakeCore.row("terminate_demo_lightpath", "Terminate a demo lightpath", "TERMINATE")
-        ]
-        skill = FormFillSkill()
-        reply = await open_form(
-            skill, core, state, "terminate_demo_lightpath", "terminate it", subscription_id=FakeCore.SUB
-        )
-        assert reply.startswith("Cannot start a workflow on this subscription now:")
-        assert (
-            "`terminate_demo_lightpath`: Terminate a demo lightpath — cannot run on this subscription now: subscription.not_in_sync"
-            in reply
-        )
-        assert (
-            "Workflows this subscription can run now:" in reply
-            and "- `modify_demo_lightpath`: Modify a demo lightpath" in reply
-        )
-        assert state.form_fill is None  # nothing to choose here: the caller restates its request
-
     async def test_a_handoff_never_walked_is_discarded_on_the_next_message(self):
         state = SearchState(form_fill=FormFillSession(workflow_key="create_demo_lightpath", status="opening"))
-        assert await turn(FormFillSkill(), FakeCore(), state, "hello") is None
+        assert await turn(make_skill(), FakeCore(), state, "hello") is None
         assert state.form_fill is None
 
 
 class TestLiteralContract:
-    """After the handoff, without a decision engine, the contract is literal: a JSON object, yes / no / cancel."""
+    """After the handoff the reply is data (a JSON object) or the interpreter's reading of it; no word is matched."""
 
     REQUEST = "create a lightpath for Universiteit Twente"
 
     async def test_without_an_asker_no_message_is_routed_by_the_skill(self):
         state = SearchState()
-        assert await turn(FormFillSkill(), FakeCore(), state, "please create a lightpath for UT") is None
+        assert await turn(make_skill(), FakeCore(), state, "please create a lightpath for UT") is None
         assert (
-            await turn(FormFillSkill(), FakeCore(), state, "create_demo_lightpath for UT") is None
+            await turn(make_skill(), FakeCore(), state, "create_demo_lightpath for UT") is None
         )  # keys are not routing
         assert state.form_fill is None
 
     async def test_yes_starts_no_cancels_and_anything_else_reshows_the_summary(self):
         core, state = FakeCore(), SearchState()
-        skill = FormFillSkill()
+        skill = make_skill()
         await open_form(skill, core, state, "create_demo_lightpath", self.REQUEST)
         await turn(skill, core, state, '{"customer_name": "UT", "speed": "10000"}')
         reply = await turn(skill, core, state, '{"redundancy": "protected"}')
-        assert reply.startswith("All pages of workflow `create_demo_lightpath`")
+        assert reply.status == "confirming"
         reply = await turn(skill, core, state, "looks right to me")  # not literal: no judgement without an asker
-        assert reply.startswith("All pages of workflow `create_demo_lightpath`") and not core.created
+        assert reply.status == "confirming" and not core.created
         reply = await turn(skill, core, state, "Yes.")  # not the exact token: the summary again
-        assert reply.startswith("All pages of workflow `create_demo_lightpath`") and not core.created
+        assert reply.status == "confirming" and not core.created
         reply = await turn(skill, core, state, "yes")
-        assert reply.startswith("Started workflow `create_demo_lightpath`") and len(core.created) == 1
+        assert reply.status == "started" and len(core.created) == 1
 
     async def test_no_at_confirmation_cancels(self):
         core, state = FakeCore(), SearchState()
-        skill = FormFillSkill()
+        skill = make_skill()
         await open_form(
             skill,
             core,
@@ -766,16 +748,16 @@ class TestLiteralContract:
         )
         assert state.form_fill.status == "confirming"
         reply = await turn(skill, core, state, "no")
-        assert reply.startswith("Cancelled") and state.form_fill is None and not core.created
+        assert reply.status == "cancelled" and state.form_fill is None and not core.created
 
     async def test_cancel_mid_form_and_other_prose_is_re_asked(self):
         core, state = FakeCore(), SearchState()
-        skill = FormFillSkill()
+        skill = make_skill()
         await open_form(skill, core, state, "create_demo_lightpath", self.REQUEST)
         reply = await turn(skill, core, state, "what do you need again?")
-        assert "- customer_name (required)" in reply  # no asker: the same question, not a guess
+        assert rejected(reply) == ["customer_name", "speed"]  # no asker: the same stop, not a guess
         reply = await turn(skill, core, state, "cancel")
-        assert reply.startswith("Cancelled") and state.form_fill is None
+        assert reply.status == "cancelled" and state.form_fill is None
 
 
 class TestReviewRegressions:
@@ -788,16 +770,16 @@ class TestReviewRegressions:
             calls.append(name)
             return await FakeCore()(name, args)
 
-        assert await FormFillSkill().handle("hello", SearchState(), counting) is None and calls == []
-        assert not FormFillSkill().wants(SearchState())
-        assert FormFillSkill().wants(SearchState(form_fill=FormFillSession(workflow_key="w")))
+        assert await make_skill().handle("hello", SearchState(), counting) is None and calls == []
+        assert not make_skill().wants(SearchState())
+        assert make_skill().wants(SearchState(form_fill=FormFillSession(workflow_key="w")))
 
     async def test_a_nested_object_is_that_fields_value_not_top_level_answers(self):
         other = "11111111-2222-4333-8444-555555555555"
-        pairs = raw_pairs(f'{{"port": {{"subscription_id": "{other}", "vlan": "10"}}}}')
+        pairs = values_in(f'{{"port": {{"subscription_id": "{other}", "vlan": "10"}}}}')
         assert set(pairs) == {"port"}
         core, state = FakeCore(), SearchState()
-        skill = FormFillSkill()
+        skill = make_skill()
         await open_form(
             skill, core, state, "modify_demo_lightpath", "change the note on it", subscription_id=FakeCore.SUB
         )
@@ -806,7 +788,7 @@ class TestReviewRegressions:
 
     async def test_a_failure_mid_walk_leaves_the_last_good_pages(self):
         core, state = FakeCore(), SearchState()
-        skill = FormFillSkill()
+        skill = make_skill()
         await open_form(
             skill,
             core,
@@ -830,11 +812,10 @@ class TestReviewRegressions:
         assert state.form_fill.page_inputs == pages_before and state.form_fill.status == "confirming"
 
     async def test_the_models_subscription_beats_another_id_in_the_text(self):
-
         other = "11111111-2222-4333-8444-555555555555"
         state = SearchState(user_input=f"change its note; it replaces port {other}")
         await handoff(state, "modify_demo_lightpath", subscription_id=FakeCore.SUB)
-        await FormFillSkill().open(state, FakeCore())
+        await make_skill().open(state, FakeCore())
         assert state.form_fill.page_inputs[0] == {"subscription_id": FakeCore.SUB}
 
     async def test_a_stale_choice_is_reported_by_core_when_the_page_regenerates(self):
@@ -858,14 +839,13 @@ class TestReviewRegressions:
                 return await super().__call__(name, args)
 
         core, state = DependentCore(), SearchState()
-        skill = FormFillSkill()
+        skill = make_skill()
         await open_form(skill, core, state, "create_demo_lightpath", '{"node": "A", "port": "A1"}')
         assert state.form_fill.status == "confirming"
         reply = await turn(skill, core, state, '{"node": "B"}')
         # The stale port goes to core as sent; core's own message names the new options, and the form stays open.
-        assert (
-            reply.startswith("The orchestrator rejected the values") and "port: Input should be 'B1' or 'B2'" in reply
-        )
+        assert reply.rejected == [{"loc": ("port",), "msg": "Input should be 'B1' or 'B2'", "type": "literal_error"}]
+        assert reply.schema_["properties"]["port"]["enum"] == ["B1", "B2"]
         assert state.form_fill is not None and state.form_fill.status == "gathering"
 
     async def test_consent_is_given_per_page(self):
@@ -878,21 +858,23 @@ class TestReviewRegressions:
             async def __call__(self, name, args):
                 if name == "get_workflow_form" and args["workflow_key"] == "create_demo_lightpath":
                     n = len(args["page_inputs"])
+                    if n:
+                        self.require(accept, args["page_inputs"][-1])
                     return {"page": n, "complete": n == 2, "schema": {**accept, "title": f"Step {n}"}}
                 return await super().__call__(name, args)
 
         core, state = TwoConsents(), SearchState()
-        skill = FormFillSkill()
+        skill = make_skill()
         reply = await open_form(skill, core, state, "create_demo_lightpath", "go")
-        assert 'Form "Step 0"' in reply
+        assert reply.title == "Step 0" and rejected(reply) == ["confirm"]
         reply = await turn(skill, core, state, '{"confirm": "ACCEPTED"}')
-        assert 'Form "Step 1"' in reply and "- confirm (required)" in reply  # the second consent is asked, not assumed
+        assert reply.title == "Step 1" and rejected(reply) == ["confirm"]  # the second consent is asked, not assumed
         reply = await turn(skill, core, state, '{"confirm": "ACCEPTED"}')
-        assert reply.startswith("All pages of workflow")
+        assert reply.status == "confirming"
 
     async def test_a_rejection_with_an_unparseable_correction_re_walks_instead_of_cancelling(self):
         core, state = FakeCore(), SearchState()
-        skill = FormFillSkill()
+        skill = make_skill()
         await open_form(
             skill,
             core,
@@ -900,27 +882,30 @@ class TestReviewRegressions:
             "create_demo_lightpath",
             '{"customer_name": "UT", "speed": "10000", "redundancy": "protected"}',
         )
-        from orchestrator_agent.form_fill.hitl import PendingAsk, ToolApproval, ToolApprovalResponse, approval_as_text
+        from orchestrator_agent.adapters.a2a_hitl import resume
+        from orchestrator_agent.adapters.kagent_hitl import ToolApproval, ToolApprovalResponse
 
-        pending = PendingAsk(id="r", kind="approval")
+        state.form_fill.hitl_request = {"id": "r", "kind": "approval"}
 
-        def rejection(reason):
-            return ToolApprovalResponse(approvals=[ToolApproval(id="r", approved=False, rejection_reason=reason)])
+        async def rejected_with(
+            reason,
+        ):  # what the executor does with a kagent rejection: data and decision on the state
+            response = ToolApprovalResponse(approvals=[ToolApproval(id="r", approved=False, rejection_reason=reason)])
+            resumed = resume(state.form_fill, response, "Human input supplied")
+            state.form_decision, state.form_values = resumed.decision, resumed.values
+            return data(await skill.handle(resumed.text, state, core))
 
-        reply = await skill.handle(approval_as_text(pending, rejection('{"speed": "1G"}')), state, core)
-        assert not reply.text.startswith("Cancelled") and state.form_fill is not None  # a correction is walked with
+        reply = await rejected_with('{"speed": "1G"}')
+        assert reply.status != "cancelled" and state.form_fill is not None  # a correction is walked with
+        state.form_decision = state.form_values = None
         await skill.handle('{"speed": "10000"}', state, core)  # a good correction: the summary again
         assert state.form_fill.status == "confirming"
-        reply = await skill.handle(approval_as_text(pending, rejection("not now")), state, core)
-        assert reply.text.startswith("Cancelled") and state.form_fill is None
-
-    def test_commands_are_exact_tokens(self):
-        assert command(" cancel\n") is FormCommand.CANCEL and command("yes") is FormCommand.YES
-        assert command("Yes.") is None and command("`no`") is None and command("go ahead") is None
+        reply = await rejected_with("not now")
+        assert reply.status == "cancelled" and state.form_fill is None
 
     async def test_a_start_that_fails_without_an_answer_closes_the_form(self):
         core, state = FakeCore(), SearchState()
-        skill = FormFillSkill()
+        skill = make_skill()
         await open_form(
             skill,
             core,
@@ -935,4 +920,25 @@ class TestReviewRegressions:
             return await core(name, args)
 
         reply = await turn(skill, timing_out, state, "yes")
-        assert "whether a process was started is unknown" in reply and state.form_fill is None  # never retried blindly
+        assert reply.status == "failed" and reply.reason == "no answer" and state.form_fill is None  # never retried
+
+    async def test_a_start_core_refuses_reopens_the_form_with_its_errors(self):
+        core, state = FakeCore(), SearchState()
+        skill = make_skill()
+        await open_form(
+            skill,
+            core,
+            state,
+            "create_demo_lightpath",
+            '{"customer_name": "UT", "speed": "10000", "redundancy": "protected"}',
+        )
+
+        async def refusing(name, args):
+            if name == "create_workflow":
+                raise ModelRetry(rejection({"customer_name": "Customer no longer exists"}))
+            return await core(name, args)
+
+        reply = await turn(skill, refusing, state, "yes")
+        assert reply.status == "gathering" and reply.page is None and rejected(reply) == ["customer_name"]
+        assert "redundancy" in reply.schema_["properties"] and reply.values["speed"] == "10000"
+        assert state.form_fill.status == "gathering"

@@ -23,7 +23,8 @@ tool; the skill walks the first pages right after the model's run and its reply 
 From then on the skill claims every message of the conversation until the form is started or cancelled.
 Routing is never a literal match on workflow keys — callers do not speak in keys. The remaining judgment
 calls (which option a sentence names, does a free-form reply approve) sit behind the `SystemOne` protocol;
-without an engine the contract is literal (a JSON object keyed by field name, `yes` / `no` / `cancel`), with Jev they are
+the reply is data (a JSON object keyed by field name) or the interpreter's reading of the message (values and,
+only when stated outright, a decision), with Jev they are
 decided with a calibrated confidence and gated by a threshold. The model never sees core's write tools.
 
 This replaces v1 of this plan (an LLM-driven loop guarded by a form-completion hook): the live e2e of v1
@@ -60,14 +61,15 @@ page — both prompt-adherence failures that a code-owned loop makes impossible.
 ## File structure (as on `feat/workflow-form-fill`)
 
 - **`src/orchestrator_agent/form_fill/`** (new package)
-  - `contract.py` — the caller contract, and the only place the contract words live: `raw_pairs` (the
-    JSON object the reply is, keys exact, values as sent), the `FormCommand` tokens, the renderers
-    (`need_input` → text + questions, summary, started, cancelled, rejected, blocked).
-  - `core_bridge.py` — `page_fields` (core's browser schema → `FormField`s) and core's rejection out of the
-    tool error text; exists to be deleted with core follow-up 5.
+  - (no renderer) — every reply is a `FormReply` (`state.py`) serialised as JSON: core's data, nothing
+    phrased here; the kagent questions and chips are built in `skill.py` from the page model.
+  - `core_bridge.py` — `page_model` (core's browser schema → one pydantic model per page, cached; the
+    artifact every stop works from) / `form_model` (the walked pages as one), what a built model says
+    about its fields (`choices`, `labels`, `is_accept`, `is_list`, `item_bounds`, ...), and core's
+    rejection out of the tool error text; the schema-reading half goes with core follow-up 5.
   - `skill.py` — `FormFillSkill`: `handle` (one caller message), `open` (walk a form the model handed off),
-    `resolve_approval` (a HITL decision); routing (only with an engine), subscription narrowing with core's
-    reasons and runnable alternatives, the walk from page 0, confirmation, start.
+    the walk from page 0 with core as the only judge of a page, confirmation, start; every reply a
+    `FormReply`; the kagent questions and chips from the page model.
   - `handoff.py` — the model's `start_workflow_form(workflow_key, subscription_id?)` tool: marks the session
     as opening; the capability walks it on the model request that follows.
   - `capability.py` — `FormFillCapability`, the skill as a pydantic-ai capability: `before_model_request`
@@ -80,10 +82,12 @@ page — both prompt-adherence failures that a code-owned loop makes impossible.
   - `hitl.py` — kagent's HITL wire models; a `Reply` → `ask_user_request` / `tool_approval_request`, the
     human's response → the text contract or an approval decision.
   - `__init__.py` — `build_form_fill_skill()`.
-- **`state.py`** — the form-fill data model: `FormField` (typed `FieldKind`), `Reply(text, ask | approval)`
-  (every stop as text plus data), `FormFillSession{workflow_key, status, request, values, fields (the last
-  walk's), page_inputs, accepted, hitl_request, task_id, asked, interpreted}` on `SearchState.form_fill`,
-  persisted per A2A context.
+- **`state.py`** — the form-fill data model: `FormReply` (every answer as one JSON object: status, page,
+  schema, core's rejected errors, values, defaults, process id, reason), `values_in` (the JSON
+  object a reply is), `Reply(text, ask | approval)` (the `FormReply` as text plus the kagent stop),
+  `FormFillSession{workflow_key, status, request, values, pages (the last walk's page schemas, from which
+  the page models are rebuilt), page_inputs, accepted, hitl_request, task_id, asked, interpreted}` on
+  `SearchState.form_fill`, persisted per A2A context.
 - **`adapters/a2a.py`** — the executor is a driver of the model: one turn at a time per context, a
   human-in-the-loop response mapped to the text the skill reads before the run, and after the run a
   form reply (from `state.form_reply`) delivered as a completed task or — when the caller activated
@@ -106,7 +110,7 @@ page — both prompt-adherence failures that a code-owned loop makes impossible.
   to create/modify/terminate is a workflow start, not a search, and to hand off (owns `list_workflows` and
   the handoff tool).
 - **Tests** — `tests/test_form_fill.py` (contract, skill, handoff, literal contract, structured replies,
-  the review regressions), `tests/test_form_prefill.py` (engine), `tests/test_form_fill_hitl.py` (wire
+  the review regressions), `tests/test_form_prefill.py` (engine), `tests/test_kagent_hitl.py` (wire
   shapes), `tests/test_form_capability.py` (the capability on a real pydantic-ai run: claim, handoff,
   unknown key, failure), `tests/test_adapters.py` (executor: form replies, HITL pauses and resumes),
   `tests/test_capabilities.py` (`WriteToolGate`), `tests/test_plugin_loader.py`, `tests/test_state.py`.
@@ -210,7 +214,7 @@ variant and did not activate the extension outbound — this targets ≥ 1.0.0-a
 
 Implemented:
 - `state.py` — the skill returns `Reply(text, ask | approval)`: the same stop as data.
-- `form_fill/hitl.py` — wire models mirroring kagent's json tags; `ask_request` / `approval_request` out,
+- `adapters/kagent_hitl.py` — wire models mirroring kagent's json tags; `ask_request` / `approval_request` out,
   `parse_response` / `answers_as_text` / `approval_decision` in (answers become the JSON-object contract,
   so the skill logic is shared); `PendingAsk` remembered on the session.
 - `adapters/a2a.py` — card declares the extension; activation is echoed; a stop → `requires_input(final)`
@@ -294,7 +298,7 @@ reason reported, with what the subscription can run instead). What that run chan
 - The plugin tells the model to hand off as soon as the target and the kind of thing are clear; product
   variants, speeds and ports are the form's questions, not the model's.
 - Every contract word (`yes` / `no` / `cancel`, `true` / `false`, `ACCEPTED`), core's `subscription_id`
-  name and the target enum are defined once (`contract.py`, core's `Target`) and used everywhere.
+  name and the target enum are defined once (`render.py`, core's `Target`) and used everywhere.
 
 ## Final review of the two branches (2026-09-24, three independent reviewers)
 
@@ -351,10 +355,12 @@ universal contract. The JSON stays in the text part because the known callers te
   contact-person object, after core rejected the strings; labels sent by an agent → the UUIDs.
 - Keys are the field names exactly; values may be JSON-typed (numbers, booleans,
   lists for multi-selects) or the strings the stop showed (labels, `value (label)`).
-- `yes` / `no` / `cancel` are exact tokens (a `FormCommand` enum: no synonyms, no markup, no punctuation); a correction at the
+- No token parsing at all (2026-09-27): a decision (start, cancel) is kagent's structured approval or the
+  interpreter's reading of the message, never a word matched by this code — "yes, but change the speed" must not
+  start anything; a correction at the
   summary is a JSON object; a kagent rejection whose reason is a JSON object is a correction.
 - Choosing a workflow: the key alone, or a JSON object naming it and carrying values.
-- `contract.py` keeps one regex, the UUID finder for a bare subscription id in the opening request.
+- `render.py` keeps one regex, the UUID finder for a bare subscription id in the opening request.
 - Core's tool results are validated with core's own response models (`WorkflowFormPage`, `WorkflowSchema`,
   `SubscriptionWorkflowListsSchema`, `ProcessIdSchema`) and its tool arguments are built from core's request
   models (`GetWorkflowFormRequest`, `ListWorkflowsRequest`, `SubscriptionIdRequest`); the validation-error
@@ -386,6 +392,84 @@ with the handoff, and the form's own subscription page asks for it otherwise (th
 one handoff function (the checked tool); `fields` is reset per walk so it *is* the last walk's field set
 and `walked` is gone; the reply dataclasses live in `state.py` next to the session and `form_reply` is typed.
 
+## No word is parsed (2026-09-27)
+
+The last literal contract went: no `yes` / `no` / `cancel` tokens, no `FormCommand`. A message on an open form
+is either the data model (a JSON object of values, one pydantic parse) or it is read by the `Interpreter`
+against the current stop — `Interpreter.message(fields, text, decisions)` returns values and a decision, the
+decision only when the message states it outright and on its own (a start next to changed values is not a
+start: the values are walked and the new summary asks again). kagent's approval arrives as a structured
+`Decision` on the state (`FormTurn.install`), a JSON rejection reason as data, any other rejection as cancel.
+The human's answers travel the same way (`form_values` on the state, 2026-09-28): a chip is mapped to its
+value by lookup, free text stays as typed, nothing is serialised to JSON text and parsed back. Structure is
+mapped, words are interpreted.
+The stops now say what a reply may do in words or as data instead of quoting tokens. What remains in
+`form_fill/` is data models (`Reply`, `Interpretation`, `FormFillSession`), the walk, the interpreter, the
+stop renderers, and the schema bridge whose schema-reading half goes with core follow-up 5.
+
+## One pydantic model per form page (2026-09-28)
+
+The hand-written `FormField` records (a `FieldKind` per field, a `shape` string for structured fields, a
+`value_type` mapping for the interpreter, prose describers for the stops) are gone. `core_bridge.page_model`
+builds **one pydantic model per page** from core's page schema with `create_model` — display-only fields
+left out; an enum as a `Literal` of its values with the labels kept as field metadata
+(`json_schema_extra["labels"]`); `Accept` as `Literal["ACCEPTED"]`; an array of an enum as `list[Literal]`
+with its item bounds (a `maxItems: 1` single-select stays a one-element list, as the form wants it); an
+object or a list of objects as nested models built from `$defs`; required, default, description and the
+form's `format` carried — pure and cached per schema. That one artifact drives everything:
+
+- the interpreter's output type is its partial variant (every field optional, plus the decision literal;
+  `interpret.reading_type`), with the fields' schema in the prompt, so a person's words become typed nested
+  values without a per-kind mapping;
+- the stop for an agent caller is core's verdict on the page plus the page model's JSON schema (`Rejected by
+  the orchestrator: …` in core's words, `Page schema: {…}`, `Filled so far`, how to answer) instead of prose
+  descriptions;
+- the kagent questions are one per model field, chips from its allowed values shown by label (a list field's
+  answer is a list, so `multiple` is set for it); nothing spells out what a field expects — a person answers
+  in words, the interpreter has the schema, and core's validation message comes back on the re-asked question;
+- the summary shows values with the labels the model carries.
+
+`FormFillSession.fields` became `pages`: each walked page's schema as core sent it, from which the models
+are rebuilt each turn (a dynamic model cannot be persisted); readings that span the form (a correction at
+the summary, a rejected field's lookup) use `form_model(session.pages)`. Nothing about the contract changed
+for the caller except the shape of the need-input stop; kagent's wire and the executor are untouched.
+
+**Core is the only judge of a page (same day).** The walk no longer decides locally which required fields
+are missing: every page is submitted to core as it is known, and core's 400 — `Field required` per missing
+field, its message per wrong value — is the stop. `need_input` and `render_rejected` merged into one
+`render_stop` (core's verdict, the page schema, filled so far, how to answer; as questions: the rejected
+fields with core's reason, then the untouched ones), and the skill lost its missing-fields branch and
+`_rejected`. A caller sees every problem of a page in one turn (a label sent as a value used to surface
+only after the missing field was supplied). One local rule stays: a page of optional fields nobody has
+touched is asked once, because core would accept it as it is. Cost: one extra `get_workflow_form` call per
+stop. The hand-written "what this field expects" wording of a person's question went with it: a question
+is the field's title, whether it is required and its default, chips for its options, and core's message
+when it did not accept what it got.
+
+**Every reply is data (same day; user: "feed everything directly back to the model from core").** `render.py`
+is gone. Every answer of the skill is one `FormReply` (`state.py`), serialised as the JSON text of the
+reply: `status` gathering (`page`, `title`, the page model's `schema`, core's `rejected` errors as
+pydantic-forms reports them — `form_errors` validates the relayed 400 body as `ErrorDict`s, no message
+flattening — or a `reason` when core gave no field errors, the `values` known so far), confirming (`values`
+to be submitted, `defaults` that apply), started (`process_id`), cancelled, failed (`reason`). The agent card states that shape once, in place of the how-to-answer paragraph every
+stop used to repeat. What is not core's data and still has to be built here: the kagent questions and chips
+(`skill.questions` / `question`, from the page model) and the approval envelope for `create_workflow` (its
+hint is one line; the values are the call's `args`). A start core refuses reopens the form (`gathering`
+with the form's schema and core's errors); a form that never completes fails and closes.
+
+**No pre-check either (same day; user: "can the same be said for `_blocked`?").** The per-subscription
+availability check at the handoff (`get_subscription_available_workflows`, `Target` tracking of create
+workflows, the `blocked` reply with runnable alternatives) is gone: the subscription the model passes
+fills the form's first page, and core's own subscription-page validator rejects one the workflow cannot
+run on, with its reason — that rejection is the reply like any other, and the caller may correct the id
+or cancel. A start that fails without core's answer closes the form with the error text as its `reason`.
+By the same argument (user: "find any other similar functions that can be removed"): `open` no longer
+re-checks the handed-off key against the catalogue — core's refusal on the first fetch closes the form as
+`failed` with core's text; `_see_page` no longer treats an empty string as "not given" — a value goes to
+core exactly as sent, and the kagent adapter leaves an unanswered question out of the values instead of
+sending `""` (an all-empty answer still reaches the skill as `{}`, so the page's defaults apply; words for a
+free question go to the interpreter).
+
 ## Out of scope / follow-ups
 
 0. **Persist A2A tasks** (own PR, before HITL is relied on in production or the deployment goes
@@ -407,6 +491,6 @@ and `walked` is gone; the reply dataclasses live in `state.py` next to the sessi
    has the lossless source (the form model) and could return a flat per-page field list — name, title,
    kind, required, display-only, default, options as value/label pairs, shape of structured fields — and
    errors as a list of field and message. Everything that undoes the browser schema and the error text on
-   the agent side is isolated in **`form_fill/core_bridge.py`** (its docstring says "delete with core
-   follow-up 5"): that module is deleted, `FormField` becomes core's model, and nothing needs a replacement.
-   The conversation side (asking, pending values, confirmation, the JSON contract, the kagent rendering) stays.
+   the agent side is isolated in **`form_fill/core_bridge.py`**: its schema-reading half is deleted and
+   `page_model` is built from core's field spec instead; the built model, and everything that works from it
+   (the interpreter's output type, the stops, the questions, the summary), stays as it is.

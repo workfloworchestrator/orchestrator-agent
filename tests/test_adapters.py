@@ -34,10 +34,10 @@ from pydantic_ai.messages import ToolReturnPart
 
 from orchestrator_agent.adapters.a2a import A2A_SKILLS, NO_RESULTS, A2AAdapter, WFOAgentExecutor
 from orchestrator_agent.adapters.ag_ui import AGUIEventStream, AGUIWorker, _AGUIAdapter
+from orchestrator_agent.adapters.kagent_hitl import HITL_EXTENSION_URI
 from orchestrator_agent.adapters.mcp import MCPApp, MCPWorker
 from orchestrator_agent.adapters.stream import collect_stream_output
 from orchestrator_agent.artifacts import QueryArtifact
-from orchestrator_agent.form_fill.hitl import HITL_EXTENSION_URI
 from orchestrator_agent.state import FormFillSession, Reply, SearchState
 
 from .conftest import (
@@ -391,9 +391,7 @@ class TestWFOAgentExecutorHITL:
             assert snapshot_state.form_fill.hitl_request == {
                 "id": payload["id"],
                 "kind": "ask",
-                "fields": ["redundancy"],
-                "multiple": [False],
-                "options": [None],
+                "questions": [{"field": "redundancy", "multiple": False, "options": None}],
             }
             assert mock_cls.call_args.kwargs["thread_id"] == "ctx-1"  # memory stays keyed on the context
             assert snapshot_state.form_fill.task_id == "task-1"  # ...the form session knows its task
@@ -409,7 +407,11 @@ class TestWFOAgentExecutorHITL:
             form_fill=FormFillSession(
                 workflow_key="w",
                 status="gathering",
-                hitl_request={"id": "req-9", "kind": "ask", "fields": ["redundancy", "ticket_id"]},
+                hitl_request={
+                    "id": "req-9",
+                    "kind": "ask",
+                    "questions": [{"field": "redundancy"}, {"field": "ticket_id"}],
+                },
             )
         )
         metadata = {
@@ -426,27 +428,29 @@ class TestWFOAgentExecutorHITL:
                 self._context("Human input supplied", metadata=metadata), EventQueue()
             )
             args, kwargs = agent._last_call
-            assert args[0] == '{"redundancy": "protected", "ticket_id": ""}'  # empty = keep the default
-            assert kwargs["deps"].state.user_input == args[0]
+            assert args[0] == "Human input supplied" and kwargs["deps"].state.user_input == args[0]
+            assert kwargs["deps"].state.form_values == {"redundancy": "protected"}  # an empty answer sends nothing
         finally:
             patcher.stop()
 
     @pytest.mark.asyncio
     @patch("orchestrator.core.db.db")
     @pytest.mark.parametrize(
-        "approval, expected",
+        "approval, expected_text, expected_decision",
         [
-            ({"id": "req-5", "approved": True}, "yes"),
-            ({"id": "req-5", "approved": False, "rejection_reason": "not now"}, "no"),
-            ({"id": "req-5", "approved": False, "rejection_reason": '{"speed": "1000"}'}, '{"speed": "1000"}'),
+            ({"id": "req-5", "approved": True}, "Human input supplied", "start"),
+            ({"id": "req-5", "approved": False, "rejection_reason": "not now"}, "Human input supplied", "cancel"),
+            ({"id": "req-5", "approved": False, "rejection_reason": '{"speed": "1000"}'}, "Human input supplied", None),
         ],
     )
-    async def test_a_tool_approval_response_becomes_the_contract_words(self, _mock_db, approval, expected):
+    async def test_a_tool_approval_response_is_a_decision_or_a_correction(
+        self, _mock_db, approval, expected_text, expected_decision
+    ):
         from orchestrator_agent.state import FormFillSession, SearchState
 
         prior = SearchState(
             form_fill=FormFillSession(
-                workflow_key="w", status="confirming", hitl_request={"id": "req-5", "kind": "approval", "fields": []}
+                workflow_key="w", status="confirming", hitl_request={"id": "req-5", "kind": "approval"}
             )
         )
         metadata = {self.URI: {"type": "tool_approval_response", "approvals": [approval]}}
@@ -456,7 +460,8 @@ class TestWFOAgentExecutorHITL:
             await WFOAgentExecutor(agent).execute(
                 self._context("Human input supplied", metadata=metadata), EventQueue()
             )
-            assert agent._last_call[0][0] == expected
+            args, kwargs = agent._last_call
+            assert args[0] == expected_text and kwargs["deps"].state.form_decision == expected_decision
         finally:
             patcher.stop()
 

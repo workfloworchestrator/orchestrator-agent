@@ -11,14 +11,14 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""Workflow form-fill over A2A: a deterministic skill with a literal JSON-object contract."""
+"""Workflow form-fill over A2A: a deterministic walk over core's pages, with a model reading what the caller says."""
 
 from pydantic_ai.models import Model
 
 from orchestrator_agent.form_fill.capability import FormFillCapability
-from orchestrator_agent.form_fill.interpret import Interpreter, ModelInterpreter
+from orchestrator_agent.form_fill.interpret import Interpretation, Interpreter, ModelInterpreter
 from orchestrator_agent.form_fill.skill import CallTool, FormFillSkill
-from orchestrator_agent.state import Approval, AskField, Reply
+from orchestrator_agent.state import Approval, AskField, FormReply, Reply
 
 
 def build_form_fill_skill(model: Model | str | None = None) -> FormFillSkill:
@@ -35,6 +35,8 @@ __all__ = [
     "CallTool",
     "FormFillCapability",
     "FormFillSkill",
+    "FormReply",
+    "Interpretation",
     "Interpreter",
     "ModelInterpreter",
     "Reply",

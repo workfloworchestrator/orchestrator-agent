@@ -25,24 +25,25 @@ from __future__ import annotations
 
 import uuid
 from dataclasses import dataclass, field
+from typing import Any, NamedTuple
 
 import structlog
 from a2a.server.agent_execution import RequestContext
 from google.protobuf import json_format
 
-from orchestrator_agent.form_fill.hitl import (
+from orchestrator_agent.adapters.kagent_hitl import (
     AskUserRequest,
     HITLResponse,
     PendingAsk,
     ToolApprovalRequest,
     ToolApprovalResponse,
-    answers_as_text,
-    approval_as_text,
+    answers_as_values,
+    approval_decision,
     approval_request,
     ask_request,
     parse_response,
 )
-from orchestrator_agent.state import FormFillSession, Reply, SearchState
+from orchestrator_agent.state import Decision, FormFillSession, Reply, SearchState, values_in
 
 logger = structlog.get_logger(__name__)
 
@@ -67,7 +68,9 @@ class FormTurn:
     hitl: bool
     task_id: str
     session: FormFillSession | None
-    text: str  # what the skill (and the handoff tool) reads: the human's response mapped, or the message itself
+    text: str  # what the skill (and the handoff tool) reads when the turn carries no data
+    decision: Decision | None = None  # the human's approval, as a decision the skill acts on
+    values: dict[str, Any] | None = None  # the human's answers (or a JSON correction), as data
     foreign: FormFillSession | None = field(default=None, repr=False)
 
     @classmethod
@@ -76,8 +79,22 @@ class FormTurn:
     ) -> FormTurn:
         session, foreign = prior_session(prior_state, hitl, task_id)
         response = response_in(context) if hitl else None
-        text = user_input if response is None else resume_text(session, response, user_input)
-        return cls(hitl=hitl, task_id=task_id, session=session, text=text, foreign=foreign)
+        resumed = Resumed(user_input, None, None) if response is None else resume(session, response, user_input)
+        return cls(
+            hitl=hitl,
+            task_id=task_id,
+            session=session,
+            text=resumed.text,
+            decision=resumed.decision,
+            values=resumed.values,
+            foreign=foreign,
+        )
+
+    def install(self, state: SearchState) -> str:
+        """Put this turn's session, decision and values on the run state; returns the text the skill reads."""
+        state.form_fill, state.user_input = self.session, self.text
+        state.form_decision, state.form_values = self.decision, self.values
+        return self.text
 
     def finish(self, state: SearchState) -> FormStop | None:
         """The reply as a stop, or None when the skill did not reply this turn. Runs before the state is persisted."""
@@ -112,19 +129,42 @@ def prior_session(
     return session, None
 
 
-def resume_text(session: FormFillSession | None, response: HITLResponse, user_input: str) -> str:
-    """The text the skill reads for the human's response to the pending stop; the message itself if none is pending."""
+class Resumed(NamedTuple):
+    """What the skill reads for the human's response to the pending stop."""
+
+    text: str  # the message, or what was typed for a free question
+    decision: Decision | None  # an approval, or a plain rejection
+    values: dict[str, Any] | None  # the answers as data, or a JSON rejection reason (a correction)
+
+
+def resume(session: FormFillSession | None, response: HITLResponse, user_input: str) -> Resumed:
+    """The human's response mapped for the skill.
+
+    Answers become data (a chip is its value; an empty answer sends nothing, so the form's default applies); an
+    approval is a start decision; a rejection whose reason is a JSON object is a correction (data), any other
+    rejection a cancel decision. A response that does not match the pending request leaves the message as it
+    is (the stop is re-asked).
+    """
     if session is None or not session.hitl_request:
-        return user_input
+        return Resumed(user_input, None, None)
     pending = PendingAsk.model_validate(session.hitl_request)
     if isinstance(response, ToolApprovalResponse):
-        mapped = approval_as_text(pending, response)
-    else:
-        mapped = answers_as_text(pending, response)
-    if mapped is None:
+        approval = approval_decision(pending, response)
+        if approval is None:
+            logger.warning("HITL response does not match the pending request; re-asking", pending_id=pending.id)
+            return Resumed(user_input, None, None)
+        if approval.approved:
+            return Resumed(user_input, Decision.START, None)
+        if (correction := values_in(approval.rejection_reason)) is not None:
+            return Resumed(user_input, None, correction)
+        return Resumed(user_input, Decision.CANCEL, None)
+    answers = answers_as_values(pending, response)
+    if answers is None:
         logger.warning("HITL response does not match the pending request; re-asking", pending_id=pending.id)
-        return user_input
-    return mapped
+        return Resumed(user_input, None, None)
+    if answers.text and not answers.values:  # only words for a free question: the interpreter reads them
+        return Resumed(answers.text, None, None)
+    return Resumed(user_input, None, answers.values)  # the answers as data, {} when every question was left empty
 
 
 def stop_payload(reply: Reply, state: SearchState) -> AskUserRequest | ToolApprovalRequest | None:
@@ -148,4 +188,4 @@ def stop_payload(reply: Reply, state: SearchState) -> AskUserRequest | ToolAppro
     return payload
 
 
-__all__ = ["FormStop", "FormTurn", "prior_session", "response_in", "resume_text", "stop_payload"]
+__all__ = ["FormStop", "FormTurn", "Resumed", "prior_session", "response_in", "resume", "stop_payload"]

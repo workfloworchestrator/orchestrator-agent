@@ -208,44 +208,63 @@ and writes structured text more reliably than prose, and it does the talking to 
 1. **Routes** — deciding *that* a request starts a workflow and *which* one is a judgment call, so the
    model makes it: it reads `list_workflows` and hands off with the `start_workflow_form(workflow_key)`
    tool. That is all the model does — on the request that follows, the skill walks the first pages and
-   its contract reply ends the run in place of the model's text. A subscription id in the request is
-   checked against core's `get_subscription_available_workflows`; if the workflow cannot run on it, the
-   reason is the reply (with the workflows that can), not a walk into a 400.
+   its reply ends the run in place of the model's text. The subscription id the model passes fills the
+   form's first page; a subscription core will not run the workflow on is rejected by core's own
+   subscription page, and that rejection is the reply like any other.
 2. **Walks the form from page 0** with core's `get_workflow_form`, using the values the caller gave (a JSON
    object keyed by field name); a choice with a single option (a single-product workflow's product page) is taken. Pages
    are dynamic (later pages depend on earlier answers), so the walk re-runs from page 0 every turn: a
    correction just changes what core generates next.
-3. **Stops** at the first page with a required field nobody supplied, replying in the caller contract:
+3. **Stops** at the first page core does not accept. Each page is submitted as it is known, and core's
+   verdict is the reply. Every reply of the skill is one JSON object (`FormReply`) carrying core's own
+   data, nothing phrased by this code:
 
+   ```json
+   {"workflow_key": "create_demo_lightpath", "status": "gathering", "page": 1, "title": "Demo Lightpath",
+    "schema": {"properties": {"customer_name": {"title": "Customer Name", "type": "string"},
+               "speed": {"enum": ["1000", "10000", "100000"], "labels": {"1000": "1 Gbit/s", "10000": "10 Gbit/s", "100000": "100 Gbit/s"}, "title": "Speed", "type": "string"},
+               "speed_policer": {"default": false, "title": "Speed Policer", "type": "boolean"}},
+               "required": ["customer_name", "speed"], "title": "Demo Lightpath", "type": "object"},
+    "rejected": [{"loc": ["customer_name"], "msg": "Field required", "type": "missing"},
+                 {"loc": ["speed"], "msg": "Field required", "type": "missing"}],
+    "values": {"product": "…"}}
    ```
-   Form "Demo Lightpath" (workflow `create_demo_lightpath`), page 1 — values needed:
-   - customer_name (required): free text
-   - speed (required): one of `1000` (1 Gbit/s), `10000` (10 Gbit/s), `100000` (100 Gbit/s)
-   - speed_policer (optional, default False): `true` or `false`
-   Filled so far: product: … (Demo Lightpath)
-   Reply with a JSON object keyed by field name, e.g. {"customer_name": "...", "speed": "..."}, or `cancel` to abandon the form. Ask the user for anything you don't know.
-   ```
-   Free text, `Accept` fields, JSON-shaped fields (their keys spelled out) and validation errors from core
-   are all handled this way: the caller extracts the value from the human and sends it back structured.
-4. **Confirms** — at `complete: true` it lists every value and asks the caller to have the user confirm:
-   `yes` starts, `no` cancels, a JSON object with corrected values re-walks.
-5. **Starts** — `create_workflow` from code with exactly the last walk's validated pages, and returns the
-   process id. The session (`SearchState.form_fill`) is persisted per `contextId`, so the whole exchange
+   `schema` is the page model's JSON schema (allowed values with the labels behind them, nested shapes,
+   item counts, defaults, formats); `rejected` is pydantic-forms' own error list as core returned it (a
+   refusal that names no field travels as `reason`); `values` is what is known so far. The caller
+   extracts the values from the human and sends them back as one JSON object keyed by field name.
+   A page of optional fields nobody has touched is asked once (core would accept it as it is).
+4. **Confirms** — at `complete: true` the reply is `{"status": "confirming", "values": {…}, "defaults": {…}}`:
+   every value to be submitted and the form defaults that apply to what was never set; the caller has the
+   user confirm. A start decision starts, a cancel decision cancels, corrected values re-walk. Decisions are never read
+   from words by this code: they arrive structured (kagent's approval) or are read from the message by the
+   interpreter, which only returns a decision the message states outright.
+5. **Starts** — `create_workflow` from code with exactly the last walk's validated pages; the reply is
+   `{"status": "started", "process_id": "…"}`. The other outcomes are `cancelled` and `failed` (the
+   `reason`, as the error came). The agent card states this reply shape once, so a caller knows how to
+   read and answer it. The session (`SearchState.form_fill`) is persisted per `contextId`, so the whole exchange
    spans as many A2A turns as it needs. That is the one thing asked of any caller: continue a
    conversation by reusing the `contextId`, as the A2A protocol intends (kagent's remote tool does; a
    caller that omits it gets a fresh context, and no memory, per message).
 
 Values are never judged by the agent: they go to core as sent and core's form validation is the only
-validation, with its per-field messages relayed. An agent caller sends the format the stop asks for; a
+validation. Nothing on the agent side decides that a field is missing or a value wrong; core says so, and
+its per-field messages are the stop. An agent caller sends the format the stop asks for; a
 person answering through kagent picks chips, which the adapter maps back to values, or types free text,
 which, when core rejects it, is interpreted once, a page at a time, into the fields' values: one run of the
-agent's model with an output typed per field (`form_fill/interpret.py`). The interpreter is one protocol
-attribute of the skill, so another engine drops in behind the same protocol.
+agent's model whose output type is the page model with every field optional (`form_fill/interpret.py`). The
+interpreter is one protocol attribute of the skill, so another engine drops in behind the same protocol.
 
-Core's tool results are validated with core's own response models and its tool arguments are built from
-core's request models (the agent depends on orchestrator-core), so the skill never picks keys out of a
-dict; only the page schema itself, written for a browser form, is interpreted here, in
-`form_fill/core_bridge.py`, a module that exists to be deleted once core's form tool returns fields.
+**One pydantic model per page.** `form_fill/core_bridge.py` builds a pydantic model from each page core
+returns (`page_model`: display-only fields left out, an enum as a `Literal` carrying its labels, a
+structured field as a nested model, required / default / description / format kept), and that one artifact
+is what every reply works from: the interpreter's output type, the schema an agent caller reads, the
+question and chips a person gets. The session persists each walked page's
+schema and the models are rebuilt from it (a dynamic model cannot be persisted). Core's tool results are
+validated with core's own response models and its tool arguments are built from core's request models (the
+agent depends on orchestrator-core), so the skill never picks keys out of a dict; only the page schema
+itself, written for a browser form, is read here, and that half of the bridge goes once core's form tool
+returns a field spec.
 
 No LLM runs anywhere in that path: sub-second per page, and the two failure modes an LLM-driven loop
 showed in testing — confirming before the form was complete, and starting without re-confirming after the
@@ -266,13 +285,14 @@ message's metadata, the kagent parent pauses and shows the human *our* questions
 Approve/Reject for *our* call — no LLM relays anything — and resumes the **same task** with the answer.
 The agent card declares the extension; when a caller requests it (the `A2A-Extensions` header, as the
 v1 protocol names it), every stop of the form-fill skill becomes such a pause: the values still
-needed become one question per field (enum options as choices, JSON fields with their shape spelled out,
-optional fields marked with their default), and the final confirmation becomes a `tool_approval_request`
+needed become one question per model field (its allowed values as choices, shown by label; nothing spells
+out a shape — a person answers in words, and core's own message is on the question when it rejected the
+answer), and the final confirmation becomes a `tool_approval_request`
 for `create_workflow` with the full values as `args`. The human's `ask_user_response` is mapped back onto
 the same JSON-object contract, a `tool_approval_response` resolves the pending start (a rejection whose
 reason is a JSON object of values is a correction; any other rejection cancels). The whole form is then
 one task that pauses N times, so the session is keyed on the task id. Our payloads are validated against
-kagent 1.0's own wire module (`tests/test_form_fill_hitl.py` for the shapes; a conformance script runs
+kagent 1.0's own wire module (`tests/test_kagent_hitl.py` for the shapes; a conformance script runs
 kagent's parser on our JSON). Callers without the extension get the plain text contract as before.
 
 The **A2A adapter** uses [a2a-sdk](https://github.com/google/a2a-sdk) server primitives (`AgentExecutor`, `DefaultRequestHandler`, `A2AFastAPIApplication`). The SDK handles JSON-RPC routing, SSE streaming, task lifecycle, and agent card serving. The adapter implements a single `WFOAgentExecutor.execute()` method that drives the pydantic-ai event stream and publishes A2A events via `TaskUpdater`. The `AgentCard.skills` list is projected from the advertised capability specs (`skills_from_specs`), keeping the advertised skills in sync with the configured capabilities.

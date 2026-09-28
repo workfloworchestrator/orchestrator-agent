@@ -15,10 +15,10 @@ from pydantic_ai.models.function import AgentInfo, FunctionModel
 from pydantic_ai.ui import StateDeps
 
 from orchestrator_agent.form_fill import FormFillCapability, FormFillSkill
-from orchestrator_agent.state import FormFillSession, Reply, SearchState
+from orchestrator_agent.state import FormFillSession, FormReply, Reply, SearchState
 from orchestrator_agent.tool_names import START_WORKFLOW_FORM_TOOL
 
-from .test_form_fill import FakeCore
+from .test_form_fill import FakeCore, WordsInterpreter
 
 
 def _agent(skill: FormFillSkill, core, *responses):
@@ -56,7 +56,7 @@ class TestFormFillCapability:
         agent, calls = _agent(FormFillSkill(), FakeCore(), _text("model should not run"))
         state = SearchState(form_fill=FormFillSession(workflow_key="create_demo_lightpath"))
         result = await _run(agent, '{"customer_name": "UT", "speed": "10000"}', state)
-        assert result.output.startswith('Form "Redundancy and ticket"') and calls == []
+        assert FormReply.model_validate_json(result.output).title == "Redundancy and ticket" and calls == []
         assert isinstance(state.form_reply, Reply) and state.form_reply.text == result.output
         # The exchange is in the run's own message history, like any model answer.
         assert [type(m).__name__ for m in result.all_messages()] == ["ModelRequest", "ModelResponse"]
@@ -72,7 +72,13 @@ class TestFormFillCapability:
         agent, calls = _agent(FormFillSkill(), FakeCore(), _handoff("create_demo_lightpath"), _text("Opening."))
         state = SearchState()
         result = await _run(agent, "create a lightpath for UT", state)
-        assert result.output.startswith('Form "Demo Lightpath" (workflow `create_demo_lightpath`), page 1')
+        reply = FormReply.model_validate_json(result.output)
+        assert (reply.workflow_key, reply.status, reply.page, reply.title) == (
+            "create_demo_lightpath",
+            "gathering",
+            1,
+            "Demo Lightpath",
+        )
         assert len(calls) == 1  # the model chose the workflow; it never got to say "Opening."
         assert state.form_fill.status == "gathering" and state.form_reply.text == result.output
         assert result.all_messages()[-1].parts[0].content == result.output
@@ -102,10 +108,10 @@ class TestFormFillCapability:
 @pytest.mark.parametrize("text", ["yes", "no"])
 async def test_confirmation_words_go_through_the_skill_not_the_model(text):
     core = FakeCore()
-    agent, calls = _agent(FormFillSkill(), core, _text("model should not run"))
+    agent, calls = _agent(FormFillSkill(interpret=WordsInterpreter()), core, _text("model should not run"))
     state = SearchState(form_fill=FormFillSession(workflow_key="create_demo_lightpath"))
     await _run(agent, '{"customer_name": "UT", "speed": "10000", "redundancy": "protected"}', state)
     assert state.form_fill.status == "confirming"
     result = await _run(agent, text, state)
     assert calls == []
-    assert result.output.startswith("Started workflow" if text == "yes" else "Cancelled")
+    assert FormReply.model_validate_json(result.output).status == ("started" if text == "yes" else "cancelled")

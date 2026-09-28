@@ -49,10 +49,10 @@ from pydantic_ai.messages import (
 from pydantic_ai.run import AgentRunResultEvent
 
 from orchestrator_agent.adapters.a2a_hitl import FormTurn
+from orchestrator_agent.adapters.kagent_hitl import HITL_EXTENSION_DESCRIPTION, HITL_EXTENSION_URI, payload_metadata
 from orchestrator_agent.agent import new_deps
 from orchestrator_agent.artifacts import QueryArtifact, ToolArtifact
 from orchestrator_agent.capabilities.spec import skills_from_specs
-from orchestrator_agent.form_fill.hitl import HITL_EXTENSION_DESCRIPTION, HITL_EXTENSION_URI, payload_metadata
 from orchestrator_agent.mcp_client import bind_outbound_token
 from orchestrator_agent.persistence import PostgresStatePersistence, dump_messages, load_messages
 
@@ -68,8 +68,11 @@ NO_RESULTS = "No results"
 AGENT_CARD_DESCRIPTION = (
     "Answers questions about orchestration data and starts workflows by walking you through their "
     "input forms: ask for one (what, and for which subscription or product) and it walks the form with "
-    "you, each reply saying which values it still needs and how to answer, and asks for the user's "
-    "confirmation before starting anything. When a reply includes a pre-rendered Markdown table or "
+    "you, asking for the user's confirmation before starting anything. Every form reply is one JSON "
+    "object with a status: gathering (the page's schema, what the orchestrator rejected in its own words, "
+    "the values so far), confirming (the values to be submitted and the defaults that apply), started "
+    "(the process id), cancelled, failed (why). Answer a form reply with one JSON object keyed by field name (values, not labels) or in "
+    "words; to start or cancel, say so outright. When a reply includes a pre-rendered Markdown table or "
     "Mermaid chart, relay that block to the user verbatim, without reformatting or summarising it."
 )
 
@@ -145,8 +148,7 @@ class WFOAgentExecutor(AgentExecutor):
             message_history = load_messages(prior_state.message_history if prior_state else [])
             # A form being filled spans turns (and, with the extension, pauses on one task): its side of this turn.
             turn = FormTurn.begin(prior_state, context, hitl=hitl, task_id=task_id, user_input=user_input)
-            user_input = deps.state.user_input = turn.text
-            deps.state.form_fill = turn.session
+            user_input = turn.install(deps.state)
 
             with bind_outbound_token(auth_token):
                 async with self.agent:

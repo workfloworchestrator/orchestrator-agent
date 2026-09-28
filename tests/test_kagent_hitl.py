@@ -8,15 +8,16 @@ os.environ.setdefault("DATABASE_URI", "postgresql://test:test@localhost:5432/tes
 
 import pytest
 
-from orchestrator_agent.form_fill.hitl import (
+from orchestrator_agent.adapters.kagent_hitl import (
     HITL_EXTENSION_URI,
+    Answers,
     AskUserAnswer,
     AskUserResponse,
     PendingAsk,
+    PendingQuestion,
     ToolApproval,
     ToolApprovalResponse,
-    answers_as_text,
-    approval_as_text,
+    answers_as_values,
     approval_decision,
     approval_request,
     ask_request,
@@ -53,7 +54,9 @@ def test_ask_request_matches_kagent_wire_shape():
         ],
     }
     assert pending == PendingAsk(
-        id="req-1", kind="ask", fields=["redundancy", "ticket_id", None], multiple=[False] * 3, options=[None] * 3
+        id="req-1",
+        kind="ask",
+        questions=[PendingQuestion(field="redundancy"), PendingQuestion(field="ticket_id"), PendingQuestion()],
     )
 
 
@@ -75,7 +78,7 @@ def test_approval_request_matches_kagent_wire_shape():
             }
         ],
     }
-    assert pending == PendingAsk(id="req-2", kind="approval", fields=[])
+    assert pending == PendingAsk(id="req-2", kind="approval")
 
 
 @pytest.mark.parametrize(
@@ -120,8 +123,11 @@ def test_answers_become_the_text_contract():
     pending = PendingAsk(
         id="r",
         kind="ask",
-        fields=["redundancy", "ticket_id", None],
-        options=[{"Protected": "protected", "Unprotected": "unprotected"}, None, None],
+        questions=[
+            PendingQuestion(field="redundancy", options={"Protected": "protected", "Unprotected": "unprotected"}),
+            PendingQuestion(field="ticket_id"),
+            PendingQuestion(),
+        ],
     )
     response = AskUserResponse(
         id="r",
@@ -131,26 +137,23 @@ def test_answers_become_the_text_contract():
             AskUserAnswer(answer=["create_x — Create X"]),
         ],
     )
-    # A picked chip is a label and travels as its value; an empty answer keeps the default; free text follows verbatim.
-    assert answers_as_text(pending, response) == '{"redundancy": "protected", "ticket_id": ""}\ncreate_x — Create X'
+    # A picked chip is a label and travels as its value; an empty answer sends nothing; free text follows verbatim.
+    assert answers_as_values(pending, response) == Answers({"redundancy": "protected"}, "create_x — Create X")
 
 
 def test_multiple_answers_travel_as_a_json_list_and_survive_commas_in_labels():
-    from orchestrator_agent.form_fill.contract import raw_pairs
-
     pending = PendingAsk(
         id="r",
         kind="ask",
-        fields=["nodes"],
-        multiple=[True],
-        options=[{"Amsterdam, Science Park": "ams", "Utrecht": "utr"}],
+        questions=[
+            PendingQuestion(field="nodes", multiple=True, options={"Amsterdam, Science Park": "ams", "Utrecht": "utr"})
+        ],
     )
     response = AskUserResponse(id="r", answers=[AskUserAnswer(answer=["Amsterdam, Science Park", "Utrecht"])])
-    text = answers_as_text(pending, response)
-    assert text == '{"nodes": ["ams", "utr"]}'
-    assert raw_pairs(text)["nodes"] == ["ams", "utr"]
-    assert answers_as_text(pending, AskUserResponse(id="other", answers=[AskUserAnswer(answer=["a"])])) is None
-    assert answers_as_text(pending, AskUserResponse(id="r", answers=[])) is None
+    answers = answers_as_values(pending, response)
+    assert answers == Answers({"nodes": ["ams", "utr"]}, "")
+    assert answers_as_values(pending, AskUserResponse(id="other", answers=[AskUserAnswer(answer=["a"])])) is None
+    assert answers_as_values(pending, AskUserResponse(id="r", answers=[])) is None
 
 
 def test_approval_decision_is_matched_by_id():
@@ -161,25 +164,37 @@ def test_approval_decision_is_matched_by_id():
             ToolApproval(id="r", approved=False, rejection_reason='{"speed": "1000"}'),
         ]
     )
-    assert approval_decision(pending, response) == (False, '{"speed": "1000"}')
+    assert approval_decision(pending, response) == ToolApproval(
+        id="r", approved=False, rejection_reason='{"speed": "1000"}'
+    )
     assert approval_decision(PendingAsk(id="none", kind="approval"), response) is None
 
 
 def test_a_single_answer_question_takes_the_first_answer_and_kinds_do_not_cross():
-    pending = PendingAsk(id="r", kind="ask", fields=["ticket_id", "note"], multiple=[False, False])
+    pending = PendingAsk(
+        id="r", kind="ask", questions=[PendingQuestion(field="ticket_id"), PendingQuestion(field="note")]
+    )
     response = AskUserResponse(id="r", answers=[AskUserAnswer(answer=["A", "B"]), AskUserAnswer(answer=[])])
-    assert answers_as_text(pending, response) == '{"ticket_id": "A", "note": ""}'  # first answer; none is empty
+    assert answers_as_values(pending, response) == Answers({"ticket_id": "A"}, "")  # first answer; none: nothing
     approvals = ToolApprovalResponse(approvals=[ToolApproval(id="r", approved=True)])
     assert approval_decision(pending, approvals) is None  # an ask is not answered by an approval
-    assert answers_as_text(PendingAsk(id="r", kind="approval"), response) is None
+    assert answers_as_values(PendingAsk(id="r", kind="approval"), response) is None
 
 
-def test_an_approval_becomes_the_contract_words():
-    pending = PendingAsk(id="r", kind="approval")
+def test_an_approval_resumes_as_a_decision_and_a_json_rejection_as_a_correction():
+    from orchestrator_agent.adapters.a2a_hitl import resume
+    from orchestrator_agent.state import Decision, FormFillSession
+
+    session = FormFillSession(workflow_key="w", status="confirming", hitl_request={"id": "r", "kind": "approval"})
     yes = ToolApprovalResponse(approvals=[ToolApproval(id="r", approved=True)])
     no = ToolApprovalResponse(approvals=[ToolApproval(id="r", approved=False, rejection_reason="not now")])
     fix = ToolApprovalResponse(approvals=[ToolApproval(id="r", approved=False, rejection_reason='{"speed": "1000"}')])
-    assert approval_as_text(pending, yes) == "yes"
-    assert approval_as_text(pending, no) == "no"
-    assert approval_as_text(pending, fix) == '{"speed": "1000"}'  # a rejection carrying a JSON object is a correction
-    assert approval_as_text(PendingAsk(id="other", kind="approval"), yes) is None
+    assert resume(session, yes, "Human input supplied") == ("Human input supplied", Decision.START, None)
+    assert resume(session, no, "Human input supplied") == ("Human input supplied", Decision.CANCEL, None)
+    assert resume(session, fix, "Human input supplied") == (
+        "Human input supplied",
+        None,
+        {"speed": "1000"},
+    )  # a correction
+    other = ToolApprovalResponse(approvals=[ToolApproval(id="other", approved=True)])
+    assert resume(session, other, "Human input supplied") == ("Human input supplied", None, None)  # not ours: re-asked
