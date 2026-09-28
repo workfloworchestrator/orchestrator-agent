@@ -18,7 +18,7 @@ import httpx
 import pytest
 from a2a.server.agent_execution import RequestContext
 from a2a.server.context import ServerCallContext
-from a2a.server.events import EventQueue
+from a2a.server.events import EventQueueLegacy
 from a2a.types import (
     Message,
     Part,
@@ -138,7 +138,7 @@ def _make_request_context(user_text: str = "show subscriptions") -> RequestConte
     return RequestContext(call_context=ServerCallContext(), request=SendMessageRequest(message=msg))
 
 
-async def _collect_events(queue: EventQueue) -> list[Any]:
+async def _collect_events(queue: EventQueueLegacy) -> list[Any]:
     """Drain all events from an EventQueue after execute() completes."""
     events = []
     while True:
@@ -177,7 +177,7 @@ class TestWFOAgentExecutor:
         ex = WFOAgentExecutor(agent)
 
         ctx = _make_request_context()
-        queue = EventQueue()
+        queue = EventQueueLegacy()
         await ex.execute(ctx, queue)
         events = await _collect_events(queue)
 
@@ -201,7 +201,7 @@ class TestWFOAgentExecutor:
         ex = WFOAgentExecutor(agent)
 
         ctx = _make_request_context("show subscriptions")
-        queue = EventQueue()
+        queue = EventQueueLegacy()
         await ex.execute(ctx, queue)
 
         args, _kwargs = agent._last_call
@@ -221,7 +221,7 @@ class TestWFOAgentExecutor:
         with patch("orchestrator_agent.adapters.a2a.PostgresStatePersistence") as mock_cls:
             mock_cls.return_value.load_state = AsyncMock(return_value=prior)
             mock_cls.return_value.snapshot = AsyncMock()
-            await WFOAgentExecutor(agent).execute(_make_request_context("yes, go ahead"), EventQueue())
+            await WFOAgentExecutor(agent).execute(_make_request_context("yes, go ahead"), EventQueueLegacy())
 
             _args, kwargs = agent._last_call
             assert kwargs["deps"].state.form_fill == session
@@ -241,7 +241,7 @@ class TestWFOAgentExecutor:
         with patch("orchestrator_agent.adapters.a2a.PostgresStatePersistence") as mock_cls:
             mock_cls.return_value.load_state = AsyncMock(return_value=None)
             mock_cls.return_value.snapshot = AsyncMock()
-            queue = EventQueue()
+            queue = EventQueueLegacy()
             await WFOAgentExecutor(agent).execute(_make_request_context("create a lightpath"), queue)
             events = await _collect_events(queue)
             last = [e for e in events if isinstance(e, TaskStatusUpdateEvent)][-1]
@@ -255,7 +255,7 @@ class TestWFOAgentExecutor:
     @patch("orchestrator.core.db.db")
     async def test_without_a_form_reply_the_models_text_is_the_answer(self, _mock_db):
         agent = _agent_mock(lambda: mock_event_stream(make_text_result_event("model answer")))
-        queue = EventQueue()
+        queue = EventQueueLegacy()
         await WFOAgentExecutor(agent).execute(_make_request_context("how many subscriptions"), queue)
         events = await _collect_events(queue)
         status_events = [e for e in events if isinstance(e, TaskStatusUpdateEvent)]
@@ -270,7 +270,7 @@ class TestWFOAgentExecutor:
         ex = WFOAgentExecutor(agent)
 
         ctx = _make_request_context()
-        queue = EventQueue()
+        queue = EventQueueLegacy()
         await ex.execute(ctx, queue)
         events = await _collect_events(queue)
 
@@ -285,7 +285,7 @@ class TestWFOAgentExecutor:
         ex = WFOAgentExecutor(agent)
 
         ctx = _make_request_context()
-        queue = EventQueue()
+        queue = EventQueueLegacy()
         await ex.execute(ctx, queue)
         events = await _collect_events(queue)
 
@@ -309,7 +309,7 @@ class TestWFOAgentExecutor:
         ex = WFOAgentExecutor(agent)
 
         ctx = _make_request_context()
-        queue = EventQueue()
+        queue = EventQueueLegacy()
         await ex.execute(ctx, queue)
         events = await _collect_events(queue)
 
@@ -321,7 +321,7 @@ class TestWFOAgentExecutor:
     async def test_cancel(self, _mock_db):
         ex = WFOAgentExecutor(_agent_mock(lambda: mock_event_stream()))
         ctx = _make_request_context()
-        queue = EventQueue()
+        queue = EventQueueLegacy()
         await ex.cancel(ctx, queue)
         events = await _collect_events(queue)
 
@@ -374,7 +374,7 @@ class TestWFOAgentExecutorHITL:
 
         patcher, mock_cls = self._persistence()
         try:
-            queue = EventQueue()
+            queue = EventQueueLegacy()
             ctx = self._context("create a lightpath")
             await WFOAgentExecutor(_agent_doing(stopped, text=reply.text)).execute(ctx, queue)
             events = await _collect_events(queue)
@@ -425,7 +425,7 @@ class TestWFOAgentExecutorHITL:
         patcher, _ = self._persistence(prior)
         try:
             await WFOAgentExecutor(agent).execute(
-                self._context("Human input supplied", metadata=metadata), EventQueue()
+                self._context("Human input supplied", metadata=metadata), EventQueueLegacy()
             )
             args, kwargs = agent._last_call
             assert args[0] == "Human input supplied" and kwargs["deps"].state.user_input == args[0]
@@ -458,7 +458,7 @@ class TestWFOAgentExecutorHITL:
         patcher, _ = self._persistence(prior)
         try:
             await WFOAgentExecutor(agent).execute(
-                self._context("Human input supplied", metadata=metadata), EventQueue()
+                self._context("Human input supplied", metadata=metadata), EventQueueLegacy()
             )
             args, kwargs = agent._last_call
             assert args[0] == expected_text and kwargs["deps"].state.form_decision == expected_decision
@@ -478,7 +478,9 @@ class TestWFOAgentExecutorHITL:
         agent = _agent_doing(lambda state: seen.append(state.form_fill), text="ok")
         patcher, mock_cls = self._persistence(prior)
         try:
-            await WFOAgentExecutor(agent).execute(self._context("list subscriptions", task_id="task-NEW"), EventQueue())
+            await WFOAgentExecutor(agent).execute(
+                self._context("list subscriptions", task_id="task-NEW"), EventQueueLegacy()
+            )
             assert seen == [None]  # the old task's form does not leak into the new task's run...
             (snapshot_state,), _ = mock_cls.return_value.snapshot.await_args
             assert snapshot_state.form_fill == paused  # ...and is still there for the human's answer on the old task
@@ -496,7 +498,7 @@ class TestWFOAgentExecutorHITL:
 
         patcher, mock_cls = self._persistence()
         try:
-            queue = EventQueue()
+            queue = EventQueueLegacy()
             await WFOAgentExecutor(_agent_doing(stopped, text="values needed: ...")).execute(
                 self._context("create", extension=False), queue
             )

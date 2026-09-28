@@ -323,7 +323,7 @@ class FormFillSkill:
             status="gathering",
             page=page,
             title=title,
-            schema=model.model_json_schema(),
+            schema_=model.model_json_schema(),
             rejected=errors,
             reason=reason,
             values=values,
