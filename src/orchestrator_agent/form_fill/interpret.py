@@ -14,13 +14,12 @@
 """A person's answers that core rejected, interpreted into the values the fields expect — one call per page.
 
 Over A2A the caller is an agent: it reads the stop, which carries the page model's JSON schema, and sends
-exactly that. Nothing here runs for it. Through kagent's human-in-the-loop extension the caller is a
-person and the answers are forwarded verbatim: a chip is a label the adapter maps back to its value, but
-free text is not a form value. Core rejects it; the skill then asks the ``Interpreter`` once, for all
-rejected fields of the page at once, and core decides again. Any message that is not the data model —
-prose from an agent, a person's words — is read the same way against the current stop, and a decision
-(start, cancel) is only ever read by the interpreter or received as kagent's structured approval: no word
-is ever matched by this code.
+exactly that. Nothing here runs for it. Through a chat client (a parent agent relaying the person's
+messages) the answers are a person's words, and words are not form values. Core rejects them; the skill
+then asks the ``Interpreter`` once, for all rejected fields of the page at once, and core decides again.
+Any message that is not the data model — prose from an agent, a person's words — is read the same way
+against the current stop, and a decision (start, cancel) is only ever read by the interpreter: no word is
+ever matched by this code.
 
 The seam is one protocol call — the form's model plus the person's words, in; the values, out — so any
 engine that answers a page of typed questions in one call can sit behind it. Here it is pydantic-ai with
@@ -53,9 +52,11 @@ INSTRUCTIONS = (
     "the words do not support."
 )
 DECISION_INSTRUCTIONS = (
-    " The message may instead decide about the form itself. Set the decision only when the message states that "
-    "decision outright and on its own; a message that also gives or changes values decides nothing, and a "
-    "remark or a question decides nothing."
+    " The message answers what the form just asked (given). It may instead decide about the form itself: `start` "
+    "means the person agrees that the workflow be run as summarised, `cancel` that the person abandons the form "
+    "and the workflow is not run; read it in the light of what was asked. Set the decision only when the message "
+    "states that decision outright and on its own; a message that also gives or changes values decides nothing, "
+    "and a remark or a question decides nothing."
 )
 
 
@@ -72,13 +73,17 @@ class Interpreter(Protocol):
     ``form`` is the pydantic model of the fields in play (a page's, or every walked page's — see
     ``core_bridge.page_model`` / ``form_model``).
 
-    ``answers``: the person's words per rejected field (a kagent pause) -> the values they meant.
-    ``message``: the caller's whole message -> values and, only when stated outright, a decision.
+    ``answers``: the person's words per rejected field -> the values they meant.
+    ``message``: the caller's whole message -> values and, only when stated outright, a decision; ``asked`` says
+    what the form just asked (the workflow, and whether it was a page's values or the confirmation of the start),
+    the context the message is read in.
     """
 
     async def answers(self, form: type[BaseModel], words: Mapping[str, str]) -> Mapping[str, Any]: ...
 
-    async def message(self, form: type[BaseModel], text: str, decisions: Sequence[Decision]) -> Interpretation: ...
+    async def message(
+        self, form: type[BaseModel], text: str, decisions: Sequence[Decision], asked: str
+    ) -> Interpretation: ...
 
 
 def fields_model(form: type[BaseModel], names: Iterable[str]) -> type[BaseModel]:
@@ -141,12 +146,15 @@ class ModelInterpreter:
         logger.info("Form-fill answers interpreted", asked=list(asked.model_fields), values=values)
         return values
 
-    async def message(self, form: type[BaseModel], text: str, decisions: Sequence[Decision]) -> Interpretation:
+    async def message(
+        self, form: type[BaseModel], text: str, decisions: Sequence[Decision], asked: str
+    ) -> Interpretation:
         agent: Agent[None, Any] = Agent(
             self.model, output_type=reading_type(form, decisions), instructions=INSTRUCTIONS + DECISION_INSTRUCTIONS
         )
         prompt = "\n".join(
             [
+                f"Asked: {asked}",
                 f"Fields (JSON schema): {_schema(form)}",
                 "Decisions the message may state: " + ", ".join(d.value for d in decisions),
                 f"Message: {text}",

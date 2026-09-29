@@ -21,8 +21,8 @@ The skill runs *inside* the agent run, through the framework's own seams:
   the run's output, recorded in message history like any model answer. On the request that follows a
   handoff, the skill walks the first pages the same way.
 
-The reply is also left on the state (``SearchState.form_reply``, transient) so a transport that can
-render a stop natively (kagent's human-in-the-loop extension) finds the questions or the approval there.
+The reply is also left on the state (``SearchState.form_reply``, transient) so the transport delivers
+exactly it, in place of the model's prose.
 The skill calls core through the agent's own MCP session, so a turn costs no second session.
 """
 

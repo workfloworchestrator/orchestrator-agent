@@ -237,8 +237,8 @@ and writes structured text more reliably than prose, and it does the talking to 
 4. **Confirms** — at `complete: true` the reply is `{"status": "confirming", "values": {…}, "defaults": {…}}`:
    every value to be submitted and the form defaults that apply to what was never set; the caller has the
    user confirm. A start decision starts, a cancel decision cancels, corrected values re-walk. Decisions are never read
-   from words by this code: they arrive structured (kagent's approval) or are read from the message by the
-   interpreter, which only returns a decision the message states outright.
+   from words by this code: the interpreter reads them from the message, and only returns a decision the
+   message states outright.
 5. **Starts** — `create_workflow` from code with exactly the last walk's validated pages; the reply is
    `{"status": "started", "process_id": "…"}`. The other outcomes are `cancelled` and `failed` (the
    `reason`, as the error came). The agent card states this reply shape once, so a caller knows how to
@@ -250,8 +250,8 @@ and writes structured text more reliably than prose, and it does the talking to 
 Values are never judged by the agent: they go to core as sent and core's form validation is the only
 validation. Nothing on the agent side decides that a field is missing or a value wrong; core says so, and
 its per-field messages are the stop. An agent caller sends the format the stop asks for; a
-person answering through kagent picks chips, which the adapter maps back to values, or types free text,
-which, when core rejects it, is interpreted once, a page at a time, into the fields' values: one run of the
+person answers in words, which, when core rejects them, are interpreted once, a page at a time, into the
+fields' values: one run of the
 agent's model whose output type is the page model with every field optional (`form_fill/interpret.py`). The
 interpreter is one protocol attribute of the skill, so another engine drops in behind the same protocol.
 
@@ -274,25 +274,17 @@ this skill. Routing in front of the model and prefilling pages from the conversa
 engine (Jev) live on a separate branch; here the contract after the handoff is literal as described, and a
 handed-off key core does not know is a tool retry, so the model corrects itself.
 
-**A2A protocol version.** The A2A endpoint speaks protocol v1.0 only (a2a-sdk 1.x, protobuf types; the
-agent card is at `/.well-known/agent-card.json`). A v1 client sends `A2A-Version: 1.0`; kagent 1.x's
-remote tool is one. v0.3 callers (`message/send`) are not served.
+**A2A protocol version.** The A2A endpoint speaks A2A 0.3 (a2a-sdk 0.3.x: `message/send` and
+`message/stream`; the agent card at `/.well-known/agent.json` and `/.well-known/agent-card.json`), the
+version kagent's runtime and LiteLLM's built-in `a2a/` provider speak.
 
-**kagent human-in-the-loop (native prompts).** kagent ≥ 1.0.0-alpha1 uses another agent as a tool through
-its `remote_a2a_tool`, which understands the A2A extension `https://kagent.dev/extensions/hitl/v1`: when a
-remote task ends in `input-required` with an `ask_user_request` or `tool_approval_request` in the status
-message's metadata, the kagent parent pauses and shows the human *our* questions (with choices) or an
-Approve/Reject for *our* call — no LLM relays anything — and resumes the **same task** with the answer.
-The agent card declares the extension; when a caller requests it (the `A2A-Extensions` header, as the
-v1 protocol names it), every stop of the form-fill skill becomes such a pause: the values still
-needed become one question per model field (its allowed values as choices, shown by label; nothing spells
-out a shape — a person answers in words, and core's own message is on the question when it rejected the
-answer), and the final confirmation becomes a `tool_approval_request`
-for `create_workflow` with the full values as `args`. The human's `ask_user_response` is mapped back onto
-the same JSON-object contract, a `tool_approval_response` resolves the pending start (a rejection whose
-reason is a JSON object of values is a correction; any other rejection cancels). The whole form is then
-one task that pauses N times, so the session is keyed on the task id. Our payloads are validated against
-kagent 1.0's own wire module (`tests/test_kagent_hitl.py` for the shapes; a conformance script runs
-kagent's parser on our JSON). Callers without the extension get the plain text contract as before.
+**Through a chat client.** The whole form runs on text: no A2A extension, no structured pause. Behind
+kagent (the WFO agent as a remote agent of a parent) and LiteLLM (the parent as an OpenAI-compatible
+model for a chat client such as LibreChat), every stop is a completed reply, the JSON object above,
+which the parent's model relays to the person; their next message comes back the same way and the
+skill's interpreter reads it, the confirmation included. Two things are asked of the parent, and
+kagent's remote agent tool does both: keep one `contextId` for the WFO agent across turns (the open
+form lives on the context), and pass the person's latest message on verbatim, never a restatement of
+earlier values, which the interpreter would read as new ones.
 
 The **A2A adapter** uses [a2a-sdk](https://github.com/google/a2a-sdk) server primitives (`AgentExecutor`, `DefaultRequestHandler`, `A2AFastAPIApplication`). The SDK handles JSON-RPC routing, SSE streaming, task lifecycle, and agent card serving. The adapter implements a single `WFOAgentExecutor.execute()` method that drives the pydantic-ai event stream and publishes A2A events via `TaskUpdater`. The `AgentCard.skills` list is projected from the advertised capability specs (`skills_from_specs`), keeping the advertised skills in sync with the configured capabilities.

@@ -11,7 +11,6 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-from collections.abc import Sequence
 from dataclasses import dataclass
 from enum import StrEnum
 from typing import Any, Literal
@@ -43,36 +42,14 @@ def values_in(text: str) -> dict[str, Any] | None:
 class Decision(StrEnum):
     """What a message decides about an open form, when it decides anything.
 
-    Never read from words by this code: it is kagent's structured approval, or what the interpreter
-    (a model) made of the caller's message.
+    Never read from words by this code: it is what the interpreter (a model) made of the caller's message.
     """
 
     START = "start"  # start the workflow as summarised
     CANCEL = "cancel"  # abandon the form
 
 
-# --- what the form-fill skill hands back per turn: text for any caller, plus structure for callers that can
-# use it (kagent's human-in-the-loop extension shows questions with choices, and Approve/Reject for a call) ---
-
-
-@dataclass(frozen=True)
-class AskField:
-    """One question for the caller: the form field it fills (None = free text passed through), wording, options."""
-
-    name: str | None
-    question: str
-    choices: Sequence[str] = ()  # what a person is shown to pick from (labels)
-    values: Sequence[str] = ()  # the form value behind each choice, same order; empty when choices are free
-    multiple: bool = False
-
-
-@dataclass(frozen=True)
-class Approval:
-    """The write the skill wants confirmed before it runs: shown to the human as a call to approve."""
-
-    hint: str
-    tool_name: str
-    args: dict[str, Any]
+# --- what the form-fill skill hands back per turn: one JSON object, as text, for any caller ---
 
 
 class FormReply(BaseModel):
@@ -104,11 +81,9 @@ class FormReply(BaseModel):
 
 @dataclass(frozen=True)
 class Reply:
-    """One turn's answer: the ``FormReply`` as text, and the stop it represents (questions or an approval), if any."""
+    """One turn's answer: the ``FormReply`` as text, exactly what the caller reads."""
 
     text: str
-    ask: Sequence[AskField] | None = None
-    approval: Approval | None = None
 
 
 class FormFillSession(BaseModel):
@@ -127,8 +102,6 @@ class FormFillSession(BaseModel):
     pages: list[dict[str, Any]] = Field(default_factory=list)  # the schemas of the last walk's pages, in order
     page_inputs: list[dict[str, Any]] = Field(default_factory=list)
     accepted: dict[str, int] = Field(default_factory=dict)  # accept fields: name -> the page its consent was given for
-    hitl_request: dict[str, Any] | None = None  # the pending ask/approval sent through kagent's HITL extension
-    task_id: str | None = None  # HITL: the A2A task this form lives in (a session never crosses tasks)
     asked: list[str] = Field(default_factory=list)  # fields of optional-only pages already asked once
     interpreted: dict[str, str] = Field(default_factory=dict)  # field -> the person's words already interpreted
 
@@ -146,5 +119,3 @@ class SearchState(BaseModel):
     message_history: list[dict[str, Any]] = Field(default_factory=list)
     form_fill: FormFillSession | None = None
     form_reply: Reply | None = Field(default=None, exclude=True)  # the form-fill reply of this turn; never persisted
-    form_decision: Decision | None = Field(default=None, exclude=True)  # this turn's structured decision (kagent)
-    form_values: dict[str, Any] | None = Field(default=None, exclude=True)  # this turn's answers as data (kagent)

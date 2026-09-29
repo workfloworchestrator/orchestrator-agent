@@ -14,8 +14,8 @@
 """One pydantic model per form page, built from what core's form tool returns.
 
 The page model is the one artifact everything else works from: the interpreter's output type is its
-partial variant, an agent caller gets its JSON schema, a kagent human gets one question per field with
-chips from its allowed values, and the summary shows values with the labels it carries.
+partial variant, an agent caller gets its JSON schema, and the summary shows values with the labels it
+carries.
 
 Half of this module exists only until core's form tool speaks agent (the plan doc's follow-up 5).
 ``get_workflow_form`` returns the raw pydantic-forms JSON schema, written for a browser form: ``$ref`` /

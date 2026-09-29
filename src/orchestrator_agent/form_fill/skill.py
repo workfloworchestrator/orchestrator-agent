@@ -20,8 +20,8 @@ started. *Which* workflow a request asks for is the model's call: it hands off w
 ``start_workflow_form`` tool (``handoff``, which checks the key against core's catalogue) and ``open``
 walks the first pages in the same turn. Everything after that is data or the interpreter's reading of it:
 a message that is a JSON object of values is taken as sent, any other message is read by the
-``Interpreter`` (a model) against the current stop for values and, when stated outright, a decision;
-kagent's approval arrives as a structured decision. No word is matched by this code. Core's own
+``Interpreter`` (a model) against the current stop for values and, when stated outright, a decision.
+No word is matched by this code. Core's own
 validation is the only validation. One skill turn is one caller message:
 
 - opening (just handed off): the values the request states are taken, with the subscription the model
@@ -29,8 +29,8 @@ validation is the only validation. One skill turn is one caller message:
   rejected by core's own subscription page, like any other value.
 - gathering: the values the message states are recorded, then the form is walked again from page 0,
   each page submitted to core as it is known; the walk stops at the first page core does not accept —
-  its verdict is the reply — or at the summary. Where core rejects a person's words (a kagent human), an
-  ``Interpreter`` turns them into values once, then core decides again.
+  its verdict is the reply — or at the summary. Where core rejects a person's words, an ``Interpreter``
+  turns them into values once, then core decides again.
 - confirming: corrections re-walk; a start decision starts (``create_workflow`` with exactly the last walk's
   validated pages), a cancel decision cancels — never a start next to changed values.
 
@@ -42,7 +42,7 @@ engine in front of the model, and prefilling pages from the conversation, live o
 from __future__ import annotations
 
 import time
-from collections.abc import Mapping, Sequence
+from collections.abc import Mapping
 from dataclasses import dataclass
 from dataclasses import field as dc_field
 from typing import Any, Literal, Protocol
@@ -52,9 +52,7 @@ from orchestrator.core.schemas.mcp_tools import GetWorkflowFormRequest, ListWork
 from orchestrator.core.schemas.process import ProcessIdSchema
 from orchestrator.core.schemas.workflow import WorkflowSchema
 from pydantic import BaseModel, TypeAdapter
-from pydantic.fields import FieldInfo
 from pydantic_ai import ModelRetry
-from pydantic_forms.exceptions import ErrorDict
 
 from orchestrator_agent.form_fill.core_bridge import (
     choices,
@@ -63,16 +61,12 @@ from orchestrator_agent.form_fill.core_bridge import (
     is_accept,
     is_list,
     is_single_pick,
-    labels,
     page_model,
-    value_type,
 )
 from orchestrator_agent.form_fill.interpret import Interpreter
 from orchestrator_agent.state import (
     ACCEPT_VALUE,
     SUBSCRIPTION_ID,
-    Approval,
-    AskField,
     Decision,
     FormFillSession,
     FormReply,
@@ -107,51 +101,8 @@ _MAX_PAGES = 50  # a form that keeps producing pages is broken, not long
 _WORKFLOWS_TTL = 300.0  # seconds the workflow catalogue is cached per skill instance
 
 
-def as_reply(data: FormReply, *, ask: Sequence[AskField] | None = None, approval: Approval | None = None) -> Reply:
-    return Reply(data.as_text(), ask=ask, approval=approval)
-
-
-def questions(
-    model: type[BaseModel], values: Mapping[str, Any], errors: Sequence[ErrorDict], reason: str | None = None
-) -> list[AskField]:
-    """The stop as questions for a person: the fields core rejected, with its message, then the untouched ones.
-
-    When core pinned its rejection on no field the form knows, one free question carries the whole reason.
-    """
-    fields = model.model_fields
-    problems: dict[str, str] = {}
-    for error in errors:
-        if error["loc"] and str(error["loc"][0]) in fields:
-            problems.setdefault(str(error["loc"][0]), str(error["msg"]))
-    asked = [question(name, fields[name], problem) for name, problem in problems.items()]
-    if not asked and (errors or reason):
-        text = "; ".join(str(error["msg"]) for error in errors) or reason
-        asked = [
-            AskField(name=None, question=f"The orchestrator rejected the values: {text}. Enter the corrected values.")
-        ]
-    asked += [question(name, info) for name, info in fields.items() if name not in problems and name not in values]
-    return asked
-
-
-def question(name: str, info: FieldInfo, problem: str | None = None) -> AskField:
-    """One field as a question: its title, whether it is required, its options as chips, core's message if it rejected the answer.
-
-    Nothing spells out what the field expects: a person answers in words, the interpreter has the schema.
-    """
-    note = "required" if info.is_required() else "optional — leave empty to keep the default"
-    text = f"{info.title or name} (`{name}`, {note})" + (f" — {problem}" if problem else "")
-    options = choices(info)
-    shown: tuple[str, ...]
-    values: tuple[str, ...]
-    if is_accept(info):
-        shown = values = (ACCEPT_VALUE,)
-    elif options is not None:
-        shown, values = tuple(labels(info).get(v, v) for v in options), options  # the human sees labels
-    elif value_type(info) is bool:
-        shown = values = (TRUE, FALSE)
-    else:
-        shown = values = ()
-    return AskField(name=name, question=text, choices=shown, values=values, multiple=is_list(info))
+def as_reply(data: FormReply) -> Reply:
+    return Reply(data.as_text())
 
 
 @dataclass
@@ -173,11 +124,21 @@ class FormFillSkill:
         if session.status == "opening":
             state.form_fill = None  # a handoff that was never walked (the turn failed): start over
             return None
-        values = state.form_values if state.form_values is not None else values_in(text)
-        decision = state.form_decision
-        if values is None and decision is None and self.interpret is not None:  # not the data model: read it
-            allowed = [Decision.CANCEL, Decision.START] if session.status == "confirming" else [Decision.CANCEL]
-            read = await self.interpret.message(form_model(session.pages), text, allowed)
+        values, decision = values_in(text), None
+        if values is None and self.interpret is not None:  # not the data model: read it against the current stop
+            confirming = session.status == "confirming"
+            allowed = [Decision.CANCEL, Decision.START] if confirming else [Decision.CANCEL]
+            # At the summary anything may be corrected; at a page the words answer that page, so fields of other
+            # pages are not offered (a number inside a note is not a version).
+            stop = form_model(session.pages) if confirming or not session.pages else page_model(session.pages[-1])
+            asked = (
+                f"workflow `{session.workflow_key}`: every value to be submitted was shown and the person was asked "
+                "to confirm the start"
+                if confirming
+                else f"workflow `{session.workflow_key}`: the person was asked for the values of the current page "
+                "(the fields given)"
+            )
+            read = await self.interpret.message(stop, text, allowed, asked)
             values, decision = read.values or None, read.decision
         return self._finish(state, session, await self._turn(session, values, decision, call_tool))
 
@@ -328,13 +289,13 @@ class FormFillSkill:
             reason=reason,
             values=values,
         )
-        return as_reply(data, ask=questions(model, values, errors, reason))
+        return as_reply(data)
 
     async def _reinterpret(self, session: FormFillSession, error: str, done: set[str]) -> bool:
         """Where core rejected a person's answers, ask the interpreter for the values — one call per page, once per answer.
 
         A caller that is an agent sends the format the stop asked for, so this mostly never runs; through
-        kagent the answers are a person's words. True when any value changed (the walk starts over).
+        a chat client the answers are a person's words. True when any value changed (the walk starts over).
         """
         if self.interpret is None:
             return False
@@ -406,17 +367,15 @@ class FormFillSkill:
         return {WORKFLOW_KEY_PARAM: session.workflow_key, JSON_DATA_PARAM: session.page_inputs}
 
     def _summary(self, session: FormFillSession) -> Reply:
-        """Every value to be submitted and the defaults that apply, with the create call for the human to approve."""
+        """Every value to be submitted and the defaults that apply, for the caller to confirm."""
         given = {name: value for page in session.page_inputs for name, value in page.items()}
         defaults = {
             name: info.default
             for name, info in form_model(session.pages).model_fields.items()
             if name not in given and not info.is_required()
         }
-        data = FormReply(workflow_key=session.workflow_key, status="confirming", values=given, defaults=defaults)
-        hint = f"Start workflow `{session.workflow_key}` with the values shown?"
         return as_reply(
-            data, approval=Approval(hint=hint, tool_name=CREATE_WORKFLOW_TOOL, args=self._create_args(session))
+            FormReply(workflow_key=session.workflow_key, status="confirming", values=given, defaults=defaults)
         )
 
     async def _start(self, session: FormFillSession, call_tool: CallTool) -> Reply:
@@ -435,4 +394,4 @@ class FormFillSkill:
         return self._reply(session, "started", process_id=str(ProcessIdSchema.model_validate(result).id))
 
 
-__all__ = ["CallTool", "FormFillSkill", "as_reply", "question", "questions"]
+__all__ = ["CallTool", "FormFillSkill", "as_reply"]

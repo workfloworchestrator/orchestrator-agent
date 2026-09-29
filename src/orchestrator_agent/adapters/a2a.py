@@ -11,11 +11,16 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""A2A adapter — exposes the orchestrator agent via the A2A protocol (v1.0).
+"""A2A adapter — exposes the orchestrator agent via the A2A protocol.
 
-Uses the ``a2a-sdk`` 1.x server primitives (``AgentExecutor``, ``DefaultRequestHandler`` and the route
-factories). The executor drives the plain capabilities-based agent inside ``async with agent:`` (MCP
-session) and collects artifact results + final text.
+Uses the ``a2a-sdk`` server primitives (``AgentExecutor``, ``DefaultRequestHandler``,
+``A2AFastAPIApplication``). The executor drives the plain capabilities-based agent
+inside ``async with agent:`` (MCP session) and collects artifact results + final text.
+
+The workflow form-fill skill runs inside the agent as a capability. The executor's part is the transport
+around it: the open form of a context is carried from one turn to the next, and the skill's reply (one
+JSON object, as text) is delivered in place of the model's prose. Nothing here reads the caller's words:
+a form reply is answered with a JSON object keyed by field name, or in words the skill's interpreter reads.
 
 ``A2A_SKILLS`` is static A2A protocol metadata (the agent's advertised skills) and is
 unrelated to pydantic-ai capabilities — it just describes what the agent can do.
@@ -30,16 +35,20 @@ from collections import Counter, defaultdict
 from typing import TYPE_CHECKING, Any
 
 import structlog
-from a2a.helpers import new_data_part, new_task, new_text_part
 from a2a.server.agent_execution import AgentExecutor, RequestContext
+from a2a.server.apps.jsonrpc.fastapi_app import A2AFastAPIApplication
 from a2a.server.events import EventQueue
-from a2a.server.request_handlers import DefaultRequestHandler
-from a2a.server.routes import add_a2a_routes_to_fastapi, create_agent_card_routes, create_jsonrpc_routes
-from a2a.server.tasks import InMemoryTaskStore, TaskUpdater
-from a2a.types import AgentCapabilities, AgentCard, AgentExtension, AgentInterface, Message, TaskState
-from a2a.utils.constants import PROTOCOL_VERSION_1_0, TransportProtocol
+from a2a.server.request_handlers.default_request_handler import DefaultRequestHandler
+from a2a.server.tasks import InMemoryTaskStore
+from a2a.server.tasks.task_updater import TaskUpdater
+from a2a.types import (
+    AgentCapabilities,
+    AgentCard,
+    DataPart,
+    Part,
+    TextPart,
+)
 from fastapi import FastAPI
-from google.protobuf import json_format
 from pydantic_ai.messages import (
     FunctionToolResultEvent,
     ModelMessage,
@@ -48,8 +57,6 @@ from pydantic_ai.messages import (
 )
 from pydantic_ai.run import AgentRunResultEvent
 
-from orchestrator_agent.adapters.a2a_hitl import FormTurn
-from orchestrator_agent.adapters.kagent_hitl import HITL_EXTENSION_DESCRIPTION, HITL_EXTENSION_URI, payload_metadata
 from orchestrator_agent.agent import new_deps
 from orchestrator_agent.artifacts import QueryArtifact, ToolArtifact
 from orchestrator_agent.capabilities.spec import skills_from_specs
@@ -86,11 +93,10 @@ class WFOAgentExecutor(AgentExecutor):
     Consumes the pydantic-ai event stream and publishes A2A events (status updates, artifacts) via the
     ``TaskUpdater`` helper, one turn at a time per context.
 
-    The workflow form-fill skill runs inside the agent as a capability. The executor's part is the
-    transport around it: before the run, a human-in-the-loop response (kagent's extension) becomes the
-    text the skill reads; after the run, the skill's reply (``FormTurn.finish``) is delivered as an
-    ``input-required`` pause on the same task for a caller that activated the extension, or as
-    completed text for any other caller.
+    The workflow form-fill skill runs inside the agent as a capability. Before the run, the context's open
+    form (persisted with the thread) is put on the run state, so the skill continues it whatever task the
+    message arrives on: a parent agent calls this agent as a new task per turn. After the run, the skill's
+    reply, when it made one, is the completed text in place of the model's prose.
     """
 
     def __init__(self, agent: "WFOAgent") -> None:
@@ -117,16 +123,10 @@ class WFOAgentExecutor(AgentExecutor):
         context_id = context.context_id or ""
         updater = TaskUpdater(event_queue, task_id, context_id)
 
-        if context.current_task is None:  # a new task: the SDK expects it announced before its first status
-            history = [context.message] if context.message is not None else None
-            await event_queue.enqueue_event(
-                new_task(task_id, context_id, TaskState.TASK_STATE_SUBMITTED, history=history)
-            )
         await updater.start_work()
 
         user_input = context.get_user_input()
-        auth_token = self._parse_auth_token(context.message)
-        hitl = HITL_EXTENSION_URI in context.requested_extensions  # the caller asked for native pauses
+        auth_token = self._parse_auth_token(context.message) if context.message else None
 
         deps = new_deps(user_input=user_input)
 
@@ -146,38 +146,36 @@ class WFOAgentExecutor(AgentExecutor):
             persistence = PostgresStatePersistence(thread_id=context_id, run_id=deps.state.run_id, session=db.session)
             prior_state = await persistence.load_state()
             message_history = load_messages(prior_state.message_history if prior_state else [])
-            # A form being filled spans turns (and, with the extension, pauses on one task): its side of this turn.
-            turn = FormTurn.begin(prior_state, context, hitl=hitl, task_id=task_id, user_input=user_input)
-            user_input = turn.install(deps.state)
+            # A form being filled spans turns: the context's open form is what the skill continues.
+            deps.state.form_fill = prior_state.form_fill if prior_state is not None else None
 
             with bind_outbound_token(auth_token):
                 async with self.agent:
                     final_output = await self._run_model(user_input, deps, message_history, updater)
 
-            stop = turn.finish(deps.state)  # before the snapshot: a pause is recorded on the session
-            if stop is not None:
-                final_output = stop.text  # the contract text, without the model's prose and rendered blocks
+            reply = deps.state.form_reply
+            if reply is not None:
+                final_output = reply.text  # the form contract, in place of the model's prose and rendered blocks
 
             await persistence.snapshot(deps.state)
             db.session.commit()
 
             # The answer is the agent's prose + any deterministically rendered chart/table blocks, or the
             # form-fill skill's reply.
-            payload = stop.payload if stop is not None else None
-            message = updater.new_agent_message(
-                parts=[new_text_part(final_output or NO_RESULTS)],
-                metadata=payload_metadata(payload) if payload else None,
+            await updater.complete(
+                message=updater.new_agent_message(
+                    parts=[Part(root=TextPart(text=final_output or NO_RESULTS))],
+                )
             )
-            if payload is None:
-                await updater.complete(message=message)
-                return
-            message.extensions.append(HITL_EXTENSION_URI)
-            await updater.requires_input(message)
 
         except Exception:
             db.session.rollback()
             logger.exception("A2A execute: Task failed", task_id=context.task_id)
-            await updater.failed(message=updater.new_agent_message(parts=[new_text_part("Task execution failed")]))
+            await updater.failed(
+                message=updater.new_agent_message(
+                    parts=[Part(root=TextPart(text="Task execution failed"))],
+                )
+            )
 
     async def _run_model(
         self, user_input: str, deps: Any, message_history: list[ModelMessage] | None, updater: TaskUpdater
@@ -191,7 +189,7 @@ class WFOAgentExecutor(AgentExecutor):
                     result = event.part
                     if isinstance(result, ToolReturnPart) and isinstance(result.metadata, ToolArtifact):
                         data = json.loads(result.model_response_str())
-                        await updater.add_artifact(parts=[new_data_part(data)])
+                        await updater.add_artifact(parts=[Part(root=DataPart(data=data))])
                         # Collect chart/table blocks to append after the agent's prose. The agent only sees
                         # raw data (no ToolReturn.content relay), so it just summarises — the adapter
                         # guarantees the block appears.
@@ -211,9 +209,9 @@ class WFOAgentExecutor(AgentExecutor):
         await updater.cancel()
 
     @staticmethod
-    def _parse_auth_token(message: Message | None) -> str | None:
+    def _parse_auth_token(message: Any) -> str | None:
         """Extract a bearer token from message metadata, if any (for MCP forwarding)."""
-        metadata = json_format.MessageToDict(message.metadata) if message is not None else {}
+        metadata = getattr(message, "metadata", None) or {}
         token = metadata.get("auth_token") or metadata.get("authToken")
         return str(token) if token else None
 
@@ -230,33 +228,29 @@ class A2AAdapter:
     def __init__(self, agent: "WFOAgent", url: str = "") -> None:
         self.agent = agent
         self.executor = WFOAgentExecutor(agent)
+
         self.agent_card = AgentCard(
             name="WFO Agent",
             description=AGENT_CARD_DESCRIPTION,
+            url=url,
             version="1.0.0",
-            supported_interfaces=[
-                AgentInterface(
-                    url=url, protocol_binding=TransportProtocol.JSONRPC.value, protocol_version=PROTOCOL_VERSION_1_0
-                )
-            ],
-            capabilities=AgentCapabilities(
-                streaming=True,
-                extensions=[
-                    AgentExtension(uri=HITL_EXTENSION_URI, description=HITL_EXTENSION_DESCRIPTION, required=False)
-                ],
-            ),
+            capabilities=AgentCapabilities(streaming=True),
             skills=A2A_SKILLS,
             default_input_modes=["application/json"],
             default_output_modes=["text/markdown", "application/json"],
         )
-        self.request_handler = DefaultRequestHandler(
-            agent_executor=self.executor, task_store=InMemoryTaskStore(), agent_card=self.agent_card
+
+        task_store = InMemoryTaskStore()
+        request_handler = DefaultRequestHandler(
+            agent_executor=self.executor,
+            task_store=task_store,
+        )
+
+        self._a2a_app = A2AFastAPIApplication(
+            agent_card=self.agent_card,
+            http_handler=request_handler,
         )
 
     def add_routes(self, app: FastAPI) -> None:
-        """Add the agent card and the JSON-RPC endpoint to a FastAPI app."""
-        add_a2a_routes_to_fastapi(
-            app,
-            agent_card_routes=create_agent_card_routes(self.agent_card),
-            jsonrpc_routes=create_jsonrpc_routes(self.request_handler, rpc_url="/"),
-        )
+        """Add A2A protocol routes to an existing FastAPI application."""
+        self._a2a_app.add_routes_to_app(app)

@@ -18,7 +18,7 @@ from pydantic_ai.models import Model
 from orchestrator_agent.form_fill.capability import FormFillCapability
 from orchestrator_agent.form_fill.interpret import Interpretation, Interpreter, ModelInterpreter
 from orchestrator_agent.form_fill.skill import CallTool, FormFillSkill
-from orchestrator_agent.state import Approval, AskField, FormReply, Reply
+from orchestrator_agent.state import FormReply, Reply
 
 
 def build_form_fill_skill(model: Model | str | None = None) -> FormFillSkill:
@@ -30,8 +30,6 @@ def build_form_fill_skill(model: Model | str | None = None) -> FormFillSkill:
 
 
 __all__ = [
-    "Approval",
-    "AskField",
     "CallTool",
     "FormFillCapability",
     "FormFillSkill",

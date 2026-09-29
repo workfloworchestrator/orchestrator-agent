@@ -15,7 +15,7 @@ from pydantic_ai.models.function import AgentInfo, FunctionModel
 from orchestrator_agent.form_fill import FormFillSkill, ModelInterpreter
 from orchestrator_agent.form_fill.core_bridge import page_model
 from orchestrator_agent.form_fill.interpret import Interpretation, fields_model, reading_type
-from orchestrator_agent.state import Decision, FormFillSession, SearchState
+from orchestrator_agent.state import Decision, SearchState
 
 from .test_form_fill import LIGHTPATH_PAGE, SPEED, FakeCore, open_form, rejected, rejection, turn
 
@@ -46,7 +46,7 @@ class FakeInterpreter:
         self.calls.append(([name for name in form.model_fields if name in words], dict(words)))
         return {name: value for name, value in self.values.items() if name in words}
 
-    async def message(self, form, text, decisions):
+    async def message(self, form, text, decisions, asked):
         return Interpretation()
 
 
@@ -79,15 +79,6 @@ class TestSkillReinterpretsRejectedAnswers:
         assert len(interpreter.calls) == 1
         await turn(skill, core, state, '{"speed": "ten gigabit"}')
         assert interpreter.calls[-1][1] == {"speed": "ten gigabit"}
-
-    async def test_the_rejected_fields_are_asked_again_as_questions_with_their_options(self):
-        core, state = PickyCore(), SearchState()
-        state.form_fill = FormFillSession(workflow_key="create_demo_lightpath", status="opening", request=REQUEST)
-        reply = await FormFillSkill().open(state, core)
-        speed, policer = reply.ask
-        assert speed.name == "speed" and speed.choices == ("1 Gbit/s", "10 Gbit/s", "100 Gbit/s")
-        assert speed.values == ("1000", "10000", "100000") and "— Input should be" in speed.question
-        assert policer.name == "speed_policer" and policer.choices == ("true", "false")
 
 
 class TestReadingType:
@@ -161,11 +152,15 @@ class TestModelInterpreter:
 
     async def test_a_message_is_read_for_values_and_only_an_outright_decision(self):
         model, seen = _scripted({"speed": "10000", "decision": None})
-        read = await ModelInterpreter(model).message(LIGHTPATH, "make it ten gig", [Decision.CANCEL, Decision.START])
-        assert read == Interpretation(values={"speed": "10000"}, decision=None)
-        assert (
-            "Decisions the message may state: cancel, start" in seen["prompt"] and "make it ten gig" in seen["prompt"]
+        asked = "workflow `create_demo_lightpath`: the person was asked to confirm the start"
+        read = await ModelInterpreter(model).message(
+            LIGHTPATH, "make it ten gig", [Decision.CANCEL, Decision.START], asked
         )
+        assert read == Interpretation(values={"speed": "10000"}, decision=None)
+        assert "Decisions the message may state: cancel, start" in seen["prompt"]
+        assert "make it ten gig" in seen["prompt"] and f"Asked: {asked}" in seen["prompt"]  # read in context
         model, _ = _scripted({"speed": None, "decision": "start"})
-        read = await ModelInterpreter(model).message(LIGHTPATH, "yes, go ahead", [Decision.CANCEL, Decision.START])
+        read = await ModelInterpreter(model).message(
+            LIGHTPATH, "yes, go ahead", [Decision.CANCEL, Decision.START], asked
+        )
         assert read == Interpretation(values={}, decision=Decision.START)

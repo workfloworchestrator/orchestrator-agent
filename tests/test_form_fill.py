@@ -16,12 +16,11 @@ from orchestrator_agent.form_fill.core_bridge import (
     is_list,
     is_single_pick,
     item_bounds,
-    item_type,
     labels,
     page_model,
 )
 from orchestrator_agent.form_fill.interpret import Interpretation
-from orchestrator_agent.form_fill.skill import FormFillSkill, questions
+from orchestrator_agent.form_fill.skill import FormFillSkill
 from orchestrator_agent.state import Decision, FormFillSession, FormReply, Reply, SearchState, values_in
 
 PRODUCT = "a19904e6-fa9f-4dd3-90c1-08dbd6d0821e"
@@ -184,7 +183,7 @@ class WordsInterpreter:
     async def answers(self, form, words):
         return {}
 
-    async def message(self, form, text, decisions):
+    async def message(self, form, text, decisions, asked):
         decision = self.DECISIONS.get(text)
         return Interpretation(values={}, decision=decision if decision in decisions else None)
 
@@ -233,67 +232,6 @@ class TestPageModel:
         assert choices(product) == (PRODUCT,) and labels(product) == {PRODUCT: "Demo Lightpath"}
         (confirm,) = page_model(ACCEPT_PAGE).model_fields.values()
         assert is_accept(confirm) and choices(confirm) == ("ACCEPTED",)
-
-    def test_structured_fields_are_nested_models_and_the_schema_carries_them(self):
-        schema = {
-            "$defs": {
-                "PortChoice": {
-                    "enum": ["p-1", "p-2"],
-                    "options": {"p-1": "ACE SP DT010A", "p-2": "ACE SP ASD002A"},
-                    "type": "string",
-                },
-                "ServicePort": {
-                    "properties": {
-                        "subscription_id": {"$ref": "#/$defs/PortChoice"},
-                        "vlan": {"default": "0", "type": "string"},
-                    },
-                    "required": ["subscription_id"],
-                    "type": "object",
-                },
-            },
-            "properties": {
-                "service_ports": {
-                    "items": {"$ref": "#/$defs/ServicePort"},
-                    "minItems": 2,
-                    "maxItems": 2,
-                    "type": "array",
-                },
-                "subscription_id": {"format": "uuid", "type": "string"},
-                "note": {"format": "long", "type": "string"},
-            },
-            "required": ["service_ports", "subscription_id"],
-        }
-        model = page_model(schema)
-        ports = model.model_fields["service_ports"]
-        assert is_list(ports) and item_bounds(ports) == (2, 2)
-        port = item_type(ports).model_fields
-        assert choices(port["subscription_id"]) == ("p-1", "p-2") and port["vlan"].default == "0"
-        # An agent reads the page's JSON schema: nested shapes, counts, labels and formats as data.
-        json_schema = model.model_json_schema()
-        assert json_schema["required"] == ["service_ports", "subscription_id"]
-        assert json_schema["properties"]["service_ports"] == {
-            "items": {"$ref": "#/$defs/ServicePort"},
-            "maxItems": 2,
-            "minItems": 2,
-            "title": "service_ports",
-            "type": "array",
-        }
-        assert json_schema["$defs"]["ServicePort"]["properties"]["subscription_id"]["labels"] == {
-            "p-1": "ACE SP DT010A",
-            "p-2": "ACE SP ASD002A",
-        }
-        assert json_schema["properties"]["subscription_id"]["format"] == "uuid"
-        assert (
-            json_schema["properties"]["note"]["format"] == "long"
-            and json_schema["properties"]["note"]["default"] is None
-        )
-        # A person gets one question per field: title, whether it is required, core's message when it rejected the answer.
-        errors = form_errors(rejection({"service_ports": "Field required", "subscription_id": "Field required"}))
-        assert [q.question for q in questions(model, {}, errors)] == [
-            "service_ports (`service_ports`, required) — Field required",
-            "subscription_id (`subscription_id`, required) — Field required",
-            "note (`note`, optional — leave empty to keep the default)",
-        ]
 
     def test_single_select_list_is_a_list_of_one(self):
         schema = {
@@ -384,16 +322,6 @@ class TestCoreErrors:
         assert error["loc"] == ("subscription_id",) and error["type"] == "value_error"
         assert error["msg"] == "This workflow cannot be started: related subscriptions are not insync"
         assert form_errors("plain failure") == []
-
-    def test_a_rejection_core_pins_on_no_field_is_one_free_question(self):
-        error = "HTTP error 400: Bad Request - {'validation_errors': [{'loc': (), 'msg': 'ports must differ', 'type': 'value_error'}]}"
-        model = page_model(LIGHTPATH_PAGE)
-        (free, policer) = questions(model, {"customer_name": "UT", "speed": "1000"}, form_errors(error))
-        assert free.name is None and "ports must differ" in free.question
-        assert policer.name == "speed_policer"  # still untouched: asked along
-
-
-# --- the skill --------------------------------------------------------------------------------------------
 
 
 class TestWalk:
@@ -572,40 +500,10 @@ class TestWalk:
         assert restored.form_fill == state.form_fill
 
 
-class TestStructuredReplies:
-    """The same stops as questions and approvals, for adapters that render natively (a human-in-the-loop transport)."""
+class TestDecisions:
+    """Words reach the skill only through the interpreter (a stand-in here); data is read as sent."""
 
-    VALUES = '{"speed": "10000", "speed_policer": true}'
-
-    async def test_a_stop_carries_ask_fields_with_choices(self):
-        core, state = FakeCore(), SearchState()
-        state.form_fill = FormFillSession(workflow_key="create_demo_lightpath", status="opening", request=self.VALUES)
-        reply = await make_skill().open(state, core)
-        assert [f.name for f in reply.ask] == ["customer_name"]  # page 1: the only thing left
-        assert reply.ask[0].choices == ()
-        assert reply.ask[0].question == "Customer Name (`customer_name`, required) — Field required"
-        reply = await make_skill().handle('{"customer_name": "UT"}', state, core)
-        (redundancy, ticket) = reply.ask
-        assert redundancy.name == "redundancy" and redundancy.choices == ("Protected", "Unprotected")  # labels
-        assert redundancy.values == ("protected", "unprotected")  # ...the values behind the chips
-        assert ticket.name == "ticket_id" and "optional" in ticket.question and ticket.choices == ()
-        assert reply.approval is None
-
-    async def test_summary_carries_the_create_call_to_approve(self):
-        core, state = FakeCore(), SearchState()
-        skill = make_skill()
-        await open_form(skill, core, state, "create_demo_lightpath", '{"customer_name": "UT", "speed": "10000"}')
-        reply = await skill.handle('{"redundancy": "protected"}', state, core)
-        assert reply.ask is None
-        assert reply.approval.tool_name == "create_workflow"
-        assert reply.approval.args == {
-            "workflow_key": "create_demo_lightpath",
-            "json_data": state.form_fill.page_inputs,
-        }
-        assert reply.approval.hint == "Start workflow `create_demo_lightpath` with the values shown?"
-
-    async def test_an_approval_arrives_as_a_decision(self):
-        # Words reach the skill only through the interpreter (a stand-in here); kagent's approval arrives as a decision.
+    async def test_a_confirmation_a_correction_and_a_cancel(self):
         for text, expect_created, expect_status in (
             ("yes", 1, None),
             ('{"speed": "1000"}', 0, "confirming"),
@@ -621,7 +519,7 @@ class TestStructuredReplies:
             if text == "yes":
                 assert data(reply).status == "started"
             elif expect_status == "confirming":
-                assert data(reply).values["speed"] == "1000" and reply.approval is not None
+                assert data(reply).values["speed"] == "1000" and data(reply).status == "confirming"
             else:
                 assert data(reply).status == "cancelled"
 
@@ -871,37 +769,6 @@ class TestReviewRegressions:
         assert reply.title == "Step 1" and rejected(reply) == ["confirm"]  # the second consent is asked, not assumed
         reply = await turn(skill, core, state, '{"confirm": "ACCEPTED"}')
         assert reply.status == "confirming"
-
-    async def test_a_rejection_with_an_unparseable_correction_re_walks_instead_of_cancelling(self):
-        core, state = FakeCore(), SearchState()
-        skill = make_skill()
-        await open_form(
-            skill,
-            core,
-            state,
-            "create_demo_lightpath",
-            '{"customer_name": "UT", "speed": "10000", "redundancy": "protected"}',
-        )
-        from orchestrator_agent.adapters.a2a_hitl import resume
-        from orchestrator_agent.adapters.kagent_hitl import ToolApproval, ToolApprovalResponse
-
-        state.form_fill.hitl_request = {"id": "r", "kind": "approval"}
-
-        async def rejected_with(
-            reason,
-        ):  # what the executor does with a kagent rejection: data and decision on the state
-            response = ToolApprovalResponse(approvals=[ToolApproval(id="r", approved=False, rejection_reason=reason)])
-            resumed = resume(state.form_fill, response, "Human input supplied")
-            state.form_decision, state.form_values = resumed.decision, resumed.values
-            return data(await skill.handle(resumed.text, state, core))
-
-        reply = await rejected_with('{"speed": "1G"}')
-        assert reply.status != "cancelled" and state.form_fill is not None  # a correction is walked with
-        state.form_decision = state.form_values = None
-        await skill.handle('{"speed": "10000"}', state, core)  # a good correction: the summary again
-        assert state.form_fill.status == "confirming"
-        reply = await rejected_with("not now")
-        assert reply.status == "cancelled" and state.form_fill is None
 
     async def test_a_start_that_fails_without_an_answer_closes_the_form(self):
         core, state = FakeCore(), SearchState()
