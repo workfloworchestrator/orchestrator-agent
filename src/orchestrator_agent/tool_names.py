@@ -29,6 +29,21 @@ DISCOVER_FILTER_PATHS_TOOL = "discover_filter_paths"
 GET_VALID_OPERATORS_TOOL = "get_valid_operators"
 RESOLVE_ENTITY_TOOL = "resolve_entity"
 EXPORT_QUERY_TOOL = "export_query"
+# Workflow form-fill: walk a workflow's multi-page input form, then start it.
+LIST_WORKFLOWS_TOOL = "list_workflows"
+GET_WORKFLOW_FORM_TOOL = "get_workflow_form"
+CREATE_WORKFLOW_TOOL = "create_workflow"
+RESUME_WORKFLOW_PROCESS_TOOL = "resume_workflow_process"
+ABORT_WORKFLOW_PROCESS_TOOL = "abort_workflow_process"
+SUBSCRIPTION_WORKFLOWS_TOOL = "get_subscription_available_workflows"
+# Local (non-MCP) tool: the model hands a workflow start to the form-fill skill; not in ALL_TOOL_NAMES.
+START_WORKFLOW_FORM_TOOL = "start_workflow_form"
+
+# Parameters of the workflow tools above, as their MCP schemas name them.
+# ``create_workflow`` is a path-plus-body endpoint in core with no request model to build its arguments from;
+# every other tool's arguments come from core's request models (``orchestrator.core.schemas.mcp_tools``).
+WORKFLOW_KEY_PARAM = "workflow_key"
+JSON_DATA_PARAM = "json_data"
 
 # Every tool name the agent code depends on (artifact mapping, the filter-path guard).
 # Verified against the live MCP server at startup
@@ -41,7 +56,18 @@ ALL_TOOL_NAMES = (
     GET_VALID_OPERATORS_TOOL,
     RESOLVE_ENTITY_TOOL,
     EXPORT_QUERY_TOOL,
+    LIST_WORKFLOWS_TOOL,
+    GET_WORKFLOW_FORM_TOOL,
+    CREATE_WORKFLOW_TOOL,
+    RESUME_WORKFLOW_PROCESS_TOOL,
+    ABORT_WORKFLOW_PROCESS_TOOL,
+    SUBSCRIPTION_WORKFLOWS_TOOL,
 )
+
+# Tools that change the orchestrator. Hidden from the model by ``WriteToolGate``; the deterministic form-fill
+# skill calls ``create_workflow`` from code after the caller confirmed. Resume/abort are hidden too and not
+# offered through the agent yet.
+WRITE_TOOL_NAMES = (CREATE_WORKFLOW_TOOL, RESUME_WORKFLOW_PROCESS_TOOL, ABORT_WORKFLOW_PROCESS_TOOL)
 
 # Map of ``CONSTANT_NAME -> live tool name``. A plugin declares the tools it owns in frontmatter by
 # *constant* (``tools: [SEARCH_TOOL]``); ``behavior.owned_tool_names`` resolves them to live names
@@ -63,11 +89,21 @@ PATH_CONSUMING_PARAMS = ("filters", "group_by")
 __all__ = [
     "ALL_TOOL_NAMES",
     "TOOL_NAME_PLACEHOLDERS",
+    "ABORT_WORKFLOW_PROCESS_TOOL",
+    "JSON_DATA_PARAM",
+    "WORKFLOW_KEY_PARAM",
     "AGGREGATE_TOOL",
+    "CREATE_WORKFLOW_TOOL",
     "DISCOVER_FILTER_PATHS_TOOL",
     "EXPORT_QUERY_TOOL",
     "GET_VALID_OPERATORS_TOOL",
+    "GET_WORKFLOW_FORM_TOOL",
+    "LIST_WORKFLOWS_TOOL",
     "PATH_CONSUMING_PARAMS",
     "RESOLVE_ENTITY_TOOL",
+    "RESUME_WORKFLOW_PROCESS_TOOL",
     "SEARCH_TOOL",
+    "START_WORKFLOW_FORM_TOOL",
+    "SUBSCRIPTION_WORKFLOWS_TOOL",
+    "WRITE_TOOL_NAMES",
 ]

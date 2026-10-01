@@ -21,6 +21,8 @@ across all tools:
 - ``FilterPathGuard`` — a filtered/grouped call must follow ``discover_filter_paths``. It self-scopes
   by tool *schema* (any tool exposing ``filters``/``group_by``), so it is one cross-cutting instance,
   not something each filtering plugin owns a copy of.
+- ``WriteToolGate`` — core's write tools (start/resume/abort a workflow) are hidden from the model;
+  writes happen only through the deterministic form-fill skill (``form_fill``).
 - ``ProcessHistory`` — sliding-window history trimming, agent-wide.
 
 Per-tool *result* behavior (mapping a tool's JSON into rich artifacts) is owned by the plugins
@@ -39,7 +41,7 @@ from pydantic_ai.tools import RunContext, ToolDefinition
 from orchestrator_agent.capabilities.behavior import build_plugin_capability, owned_tool_names
 from orchestrator_agent.capabilities.loader import load_plugin_specs
 from orchestrator_agent.capabilities.spec import PluginSpec
-from orchestrator_agent.tool_names import DISCOVER_FILTER_PATHS_TOOL, PATH_CONSUMING_PARAMS
+from orchestrator_agent.tool_names import DISCOVER_FILTER_PATHS_TOOL, PATH_CONSUMING_PARAMS, WRITE_TOOL_NAMES
 
 
 def build_capabilities(specs: list[PluginSpec] | None = None) -> list[AbstractCapability[Any]]:
@@ -47,14 +49,15 @@ def build_capabilities(specs: list[PluginSpec] | None = None) -> list[AbstractCa
 
     The full MCP toolset is passed to the Agent; a plugin's instructions hide when it is deferred,
     and ``DeferredToolGate`` hides that plugin's *tools* until the model loads it (both revealed by
-    one ``load_capability`` call). ``FilterPathGuard`` and history trimming are the other
-    cross-cutting hooks. Tools owned by no plugin are always available (auto-appear).
+    one ``load_capability`` call). ``FilterPathGuard``, ``WriteToolGate`` and history trimming are the
+    other cross-cutting hooks. Tools owned by no plugin are always available (auto-appear).
     """
     resolved = specs if specs is not None else load_plugin_specs()
     plugin_caps = [build_plugin_capability(spec) for spec in resolved]
     return [
         *plugin_caps,
         DeferredToolGate(resolved),
+        WriteToolGate(),
         FilterPathGuard(),
         ProcessHistory[Any](processor=trim_history),
     ]
@@ -98,6 +101,30 @@ class DeferredToolGate(AbstractCapability[Any]):
             if (owners := self._owners.get(td.name)) is None
             or any(not deferred or pid in loaded for pid, deferred in owners)
         ]
+
+
+# --- Writes never go through the model -------------------------------------------------------
+
+
+class WriteToolGate(AbstractCapability[Any]):
+    """Hide core's write tools from the model.
+
+    Starting a workflow is done by the deterministic form-fill skill (``orchestrator_agent.form_fill``),
+    which walks the form, has the calling agent confirm, and calls ``create_workflow`` from code. The model
+    only ever reads, so it cannot start a workflow on a half-filled form or on a confirmation it inferred —
+    the write tools are simply not in its toolset. Resuming and aborting processes are hidden for the same
+    reason and are not offered through the agent yet (a follow-up for the skill).
+    """
+
+    def __init__(self, hidden: tuple[str, ...] = WRITE_TOOL_NAMES) -> None:
+        self._hidden = frozenset(hidden)
+
+    @classmethod
+    def get_serialization_name(cls) -> str | None:
+        return None  # Not spec-serializable (behaviour, not data).
+
+    async def prepare_tools(self, ctx: RunContext[Any], tool_defs: list[ToolDefinition]) -> list[ToolDefinition]:
+        return [td for td in tool_defs if td.name not in self._hidden]
 
 
 # --- Deterministic search flow (discover filter paths before searching) --------------------
@@ -186,6 +213,7 @@ def trim_history(messages: list[ModelMessage]) -> list[ModelMessage]:
 __all__ = [
     "DeferredToolGate",
     "FilterPathGuard",
+    "WriteToolGate",
     "build_capabilities",
     "trim_history",
 ]

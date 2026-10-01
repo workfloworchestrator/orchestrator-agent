@@ -7,7 +7,7 @@ from uuid import uuid4
 
 os.environ.setdefault("DATABASE_URI", "postgresql://test:test@localhost:5432/test")
 
-from orchestrator_agent.state import SearchState
+from orchestrator_agent.state import FormFillSession, SearchState
 
 
 class TestSearchState:
@@ -18,6 +18,7 @@ class TestSearchState:
         assert state.query_id is None
         assert state.query is None
         assert state.pending_filters is None
+        assert state.form_fill is None
 
     def test_with_values(self):
         rid = uuid4()
@@ -32,3 +33,9 @@ class TestSearchState:
         data = state.model_dump(mode="json")
         restored = SearchState.model_validate(data)
         assert restored.user_input == "test query"
+
+    def test_form_fill_session_roundtrip(self):
+        # The validated form pages survive the per-thread snapshot (confirmation happens on a later turn).
+        session = FormFillSession(workflow_key="create_node", page_inputs=[{"product": "p-1"}, {}], status="confirming")
+        restored = SearchState.model_validate(SearchState(form_fill=session).model_dump(mode="json"))
+        assert restored.form_fill == session

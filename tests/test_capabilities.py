@@ -23,6 +23,8 @@ from orchestrator_agent.capabilities.behavior.artifacts import data_artifact, ex
 from orchestrator_agent.capabilities.hooks import (
     DeferredToolGate,
     FilterPathGuard,
+    WriteToolGate,
+    build_capabilities,
     trim_history,
 )
 from orchestrator_agent.capabilities.spec import PluginSpec
@@ -30,6 +32,7 @@ from orchestrator_agent.rendering.charts import aggregate_to_mermaid
 from orchestrator_agent.rendering.tables import search_to_markdown
 from orchestrator_agent.tool_names import (
     AGGREGATE_TOOL,
+    CREATE_WORKFLOW_TOOL,
     DISCOVER_FILTER_PATHS_TOOL,
     EXPORT_QUERY_TOOL,
     RESOLVE_ENTITY_TOOL,
@@ -238,6 +241,22 @@ class TestDeferredToolGate:
         ctx = SimpleNamespace(loaded_capability_ids=set())
         names = {t.name for t in await gate.prepare_tools(ctx, list(self.DEFS))}
         assert AGGREGATE_TOOL in names
+
+
+class TestWriteToolGate:
+    """Core's write tools never reach the model; the form-fill skill is the only writer."""
+
+    DEFS = [
+        ToolDefinition(name=n)
+        for n in (SEARCH_TOOL, CREATE_WORKFLOW_TOOL, "resume_workflow_process", "abort_workflow_process")
+    ]
+
+    async def test_write_tools_hidden_read_tools_kept(self):
+        names = {t.name for t in await WriteToolGate().prepare_tools(SimpleNamespace(), list(self.DEFS))}
+        assert names == {SEARCH_TOOL}
+
+    def test_gate_is_part_of_the_agent_capabilities(self):
+        assert any(isinstance(c, WriteToolGate) for c in build_capabilities())
 
 
 class TestArtifactMapping:

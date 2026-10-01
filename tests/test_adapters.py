@@ -41,7 +41,7 @@ from orchestrator_agent.adapters.ag_ui import AGUIEventStream, AGUIWorker, _AGUI
 from orchestrator_agent.adapters.mcp import MCPApp, MCPWorker
 from orchestrator_agent.adapters.stream import collect_stream_output
 from orchestrator_agent.artifacts import QueryArtifact
-from orchestrator_agent.state import SearchState
+from orchestrator_agent.state import FormFillSession, Reply, SearchState
 
 from .conftest import (
     make_artifact_event,
@@ -56,6 +56,22 @@ SAMPLE_ARTIFACT = QueryArtifact(
     query_id="q-123",
     total_results=5,
 )
+
+
+def _agent_doing(setup, text="model text") -> MagicMock:
+    """An agent mock whose run applies ``setup(state)`` (what the form-fill capability would do) and answers ``text``."""
+    agent = MagicMock()
+    agent.__aenter__ = AsyncMock(return_value=agent)
+    agent.__aexit__ = AsyncMock(return_value=False)
+
+    @asynccontextmanager
+    async def _run(*args, **kwargs):
+        agent._last_call = (args, kwargs)
+        setup(kwargs["deps"].state)
+        yield mock_event_stream(make_text_result_event(text))
+
+    agent.run_stream_events = MagicMock(side_effect=_run)
+    return agent
 
 
 def _agent_mock(event_stream_factory) -> MagicMock:
@@ -119,7 +135,9 @@ class TestAGUIEventStream:
         assert results[0].content == "filters applied"
 
 
-def _make_request_context(user_text: str = "show subscriptions") -> RequestContext:
+def _make_request_context(
+    user_text: str = "show subscriptions", *, task_id: str | None = None, context_id: str | None = None
+) -> RequestContext:
     """Create a RequestContext for testing."""
     msg = Message(
         role=Role.user,
@@ -127,7 +145,7 @@ def _make_request_context(user_text: str = "show subscriptions") -> RequestConte
         message_id=str(uuid.uuid4()),
     )
     params = MessageSendParams(message=msg)
-    return RequestContext(request=params)
+    return RequestContext(request=params, task_id=task_id, context_id=context_id)
 
 
 async def _collect_events(queue: EventQueue) -> list[Any]:
@@ -197,6 +215,76 @@ class TestWFOAgentExecutor:
 
         args, _kwargs = agent._last_call
         assert args[0] == "show subscriptions"
+
+    @pytest.mark.asyncio
+    @patch("orchestrator.core.db.db")
+    async def test_form_session_restored_from_prior_turn(self, _mock_db):
+        """A form being filled spans turns: the validated pages come back with the thread state.
+
+        The user's confirmation arrives on a later message (possibly relayed by another agent), so the
+        run's deps must carry the prior turn's ``form_fill``.
+        """
+        session = FormFillSession(workflow_key="create_node", page_inputs=[{"product": "p-1"}], status="confirming")
+        prior = SearchState(form_fill=session)
+        agent = _agent_mock(lambda: mock_event_stream(make_text_result_event("Started")))
+        with patch("orchestrator_agent.adapters.a2a.PostgresStatePersistence") as mock_cls:
+            mock_cls.return_value.load_state = AsyncMock(return_value=prior)
+            mock_cls.return_value.snapshot = AsyncMock()
+            await WFOAgentExecutor(agent).execute(_make_request_context("yes, go ahead"), EventQueue())
+
+            _args, kwargs = agent._last_call
+            assert kwargs["deps"].state.form_fill == session
+            # The snapshot at the end of the turn carries the (same) state object onward.
+            mock_cls.return_value.snapshot.assert_awaited_once_with(kwargs["deps"].state)
+
+    @pytest.mark.asyncio
+    @patch("orchestrator.core.db.db")
+    async def test_an_open_form_continues_on_a_new_task_of_the_same_context(self, _mock_db):
+        """A parent agent calls this agent as a new task per turn: the form is the context's, not the task's."""
+        open_form = FormFillSession(workflow_key="w", status="gathering")
+        seen = []
+        agent = _agent_doing(lambda state: seen.append(state.form_fill), text="ok")
+        with patch("orchestrator_agent.adapters.a2a.PostgresStatePersistence") as mock_cls:
+            mock_cls.return_value.load_state = AsyncMock(return_value=SearchState(form_fill=open_form))
+            mock_cls.return_value.snapshot = AsyncMock()
+            ctx = _make_request_context("Proceed with it", task_id="task-NEW", context_id="ctx-1")
+            await WFOAgentExecutor(agent).execute(ctx, EventQueue())
+            assert seen == [open_form]  # the skill sees the open form on the new task
+            assert mock_cls.call_args.kwargs["thread_id"] == "ctx-1"  # memory is keyed on the context
+
+    @pytest.mark.asyncio
+    @patch("orchestrator.core.db.db")
+    async def test_a_form_reply_left_by_the_capability_is_the_answer(self, _mock_db):
+        """The form-fill capability ends the run with the contract text; the executor delivers exactly that."""
+
+        def claimed(state):
+            state.form_fill = FormFillSession(workflow_key="w")
+            state.form_reply = Reply('{"workflow_key": "w", "status": "gathering", "page": 1}')
+
+        agent = _agent_doing(claimed, text='{"workflow_key": "w", "status": "gathering", "page": 1}\n\n| table |')
+        with patch("orchestrator_agent.adapters.a2a.PostgresStatePersistence") as mock_cls:
+            mock_cls.return_value.load_state = AsyncMock(return_value=None)
+            mock_cls.return_value.snapshot = AsyncMock()
+            queue = EventQueue()
+            await WFOAgentExecutor(agent).execute(_make_request_context("create a lightpath"), queue)
+            events = await _collect_events(queue)
+            last = [e for e in events if isinstance(e, TaskStatusUpdateEvent)][-1]
+            assert last.status.state == TaskState.completed
+            assert last.status.message.parts[0].root.text == '{"workflow_key": "w", "status": "gathering", "page": 1}'
+            (snapshot_state,), _ = mock_cls.return_value.snapshot.await_args
+            assert snapshot_state.form_fill.workflow_key == "w"
+            assert "form_reply" not in snapshot_state.model_dump(mode="json")  # transient
+
+    @pytest.mark.asyncio
+    @patch("orchestrator.core.db.db")
+    async def test_without_a_form_reply_the_models_text_is_the_answer(self, _mock_db):
+        agent = _agent_mock(lambda: mock_event_stream(make_text_result_event("model answer")))
+        queue = EventQueue()
+        await WFOAgentExecutor(agent).execute(_make_request_context("how many subscriptions"), queue)
+        events = await _collect_events(queue)
+        status_events = [e for e in events if isinstance(e, TaskStatusUpdateEvent)]
+        assert status_events[-1].status.message.parts[0].root.text == "model answer"
+        agent.run_stream_events.assert_called_once()
 
     @pytest.mark.asyncio
     @patch("orchestrator.core.db.db")
