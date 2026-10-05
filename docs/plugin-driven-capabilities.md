@@ -16,6 +16,8 @@ A plugin projects to **one capability identity**. With no `artifact:` it loads a
 `Capability` (instructions only); with `artifact: <type>` it loads as a `PluginCapability` carrying
 the matching builder from `ARTIFACT_BUILDERS` (instructions + the result hook, one id). Genuinely
 cross-cutting hooks (`FilterPathGuard`, `WriteToolGate`, `ProcessHistory`) are *not* plugins; they stay in `hooks.py`.
+`WriteToolGate` and the `workflow` plugin (it owns the form-fill handoff tool) are only part of the agent the
+form-fill skill runs in (A2A): `build_capabilities(form_fill=True)`.
 
 ## On-disk layout
 

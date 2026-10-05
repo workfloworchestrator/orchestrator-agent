@@ -1,4 +1,4 @@
-"""A person's answers core rejected are interpreted once, a page at a time; agents are never interpreted."""
+"""What a person typed for a field and core rejected is interpreted once, a page at a time; nothing else is read."""
 
 from __future__ import annotations
 
@@ -14,8 +14,8 @@ from pydantic_ai.models.function import AgentInfo, FunctionModel
 
 from orchestrator_agent.form_fill import FormFillSkill, ModelInterpreter
 from orchestrator_agent.form_fill.core_bridge import page_model
-from orchestrator_agent.form_fill.interpret import Interpretation, fields_model, reading_type
-from orchestrator_agent.state import Decision, SearchState
+from orchestrator_agent.form_fill.interpret import fields_model, reading_type
+from orchestrator_agent.state import SearchState
 
 from .test_form_fill import LIGHTPATH_PAGE, SPEED, FakeCore, open_form, rejected, rejection, turn
 
@@ -46,11 +46,8 @@ class FakeInterpreter:
         self.calls.append(([name for name in form.model_fields if name in words], dict(words)))
         return {name: value for name, value in self.values.items() if name in words}
 
-    async def message(self, form, text, decisions, asked):
-        return Interpretation()
 
-
-REQUEST = '{"customer_name": "UT", "speed": "ten gig", "speed_policer": "yes please"}'
+REQUEST = {"customer_name": "UT", "speed": "ten gig", "speed_policer": "yes please"}  # what the person typed
 
 
 class TestSkillReinterpretsRejectedAnswers:
@@ -66,6 +63,11 @@ class TestSkillReinterpretsRejectedAnswers:
         core, state = PickyCore(), SearchState()
         reply = await open_form(FormFillSkill(), core, state, "create_demo_lightpath", REQUEST)
         assert rejected(reply) == ["speed", "speed_policer"] and reply.rejected[0]["msg"].startswith("Input should be")
+        # The rejected fields are asked again as questions with their options, and core's reason on each.
+        speed, policer = reply.question("speed"), reply.question("speed_policer")
+        assert reply.asked == ["speed", "speed_policer"] and "— Input should be" in speed.question
+        assert speed.choices == ("1 Gbit/s", "10 Gbit/s", "100 Gbit/s") and speed.values == ("1000", "10000", "100000")
+        assert policer.choices == ("True", "False") and policer.values == (True, False)
         assert state.form_fill.values["speed"] == "ten gig"
 
     async def test_answers_that_state_no_value_are_rejected_once_not_looped(self):
@@ -75,25 +77,44 @@ class TestSkillReinterpretsRejectedAnswers:
         reply = await open_form(skill, core, state, "create_demo_lightpath", REQUEST)
         assert len(interpreter.calls) == 1 and rejected(reply) == ["speed", "speed_policer"]
         # The same words are not interpreted again on the next turn; new words are.
-        await turn(skill, core, state, '{"ticket_id": "T-1"}')
+        await turn(skill, core, state, {"ticket_id": "T-1"})
         assert len(interpreter.calls) == 1
-        await turn(skill, core, state, '{"speed": "ten gigabit"}')
+        await turn(skill, core, state, {"speed": "ten gigabit"})
         assert interpreter.calls[-1][1] == {"speed": "ten gigabit"}
 
 
 class TestReadingType:
-    """The interpreter's output type is the page model with every field optional (plus the decision)."""
+    """The interpreter's output type is the page model with every field optional."""
 
     def test_one_attribute_per_field_typed_as_its_value(self):
         reading = reading_type(fields_model(LIGHTPATH, ["speed", "speed_policer"]))
         assert list(reading.model_fields) == ["speed", "speed_policer"]
-        parsed = reading(speed="10000", speed_policer="true")
-        assert parsed.speed == "10000" and parsed.speed_policer is True
+        parsed = reading(speed=["10000"], speed_policer="true")
+        assert parsed.speed == ["10000"] and parsed.speed_policer is True
         assert reading().speed is None and reading().speed_policer is None
         with pytest.raises(ValidationError):
-            reading(speed="42")  # a value outside the options
+            reading(speed=["42"])  # a value outside the options
 
-    def test_types_follow_the_schema_and_the_decision_is_a_literal(self):
+    def test_a_choice_between_several_options_is_read_as_every_option_the_words_fit(self):
+        page = page_model(
+            {
+                "properties": {
+                    "speed": SPEED,
+                    "only": {"enum": ["x"], "type": "string"},
+                    "many": {"items": {"enum": ["a", "b"], "type": "string"}, "type": "array"},
+                    "confirm": {"enum": ["ACCEPTED", "INCOMPLETE"], "format": "accept", "type": "string"},
+                }
+            }
+        )
+        properties = reading_type(page).model_json_schema()["properties"]
+        assert properties["speed"]["anyOf"][0] == {"items": {"enum": SPEED["enum"], "type": "string"}, "type": "array"}
+        assert properties["speed"]["labels"] == SPEED["options"]  # still shown with what people call the options
+        # One option, a list of options and consent are read as the value itself: there is nothing to tell apart.
+        assert properties["only"]["anyOf"][0] == {"const": "x", "type": "string"}
+        assert properties["many"]["anyOf"][0]["items"] == {"enum": ["a", "b"], "type": "string"}
+        assert properties["confirm"]["anyOf"][0] == {"const": "ACCEPTED", "type": "string"}
+
+    def test_types_follow_the_schema(self):
         page = page_model(
             {
                 "properties": {
@@ -109,12 +130,11 @@ class TestReadingType:
                 "required": ["n", "p"],
             }
         )
-        reading = reading_type(page, [Decision.CANCEL])
+        reading = reading_type(page)
         assert reading(n="12").n == 12
-        ports = reading(p=[{"subscription_id": "p-1"}], decision="cancel")
-        assert ports.model_dump(exclude_unset=True) == {"p": [{"subscription_id": "p-1"}], "decision": "cancel"}
-        with pytest.raises(ValidationError):
-            reading(decision="start")  # not offered at this stop
+        ports = reading(p=[{"subscription_id": "p-1"}])
+        assert ports.model_dump(exclude_unset=True) == {"p": [{"subscription_id": "p-1"}]}
+        assert "decision" not in reading.model_fields  # a decision is never something a model reads
 
 
 def _scripted(values):
@@ -129,7 +149,7 @@ def _scripted(values):
 
 class TestModelInterpreter:
     async def test_one_run_covers_the_page_and_the_model_sees_the_asked_fields_with_their_answers(self):
-        model, seen = _scripted({"speed": "10000", "speed_policer": True})
+        model, seen = _scripted({"speed": ["10000"], "speed_policer": True})
         answers = {"speed": "ten gig please", "speed_policer": "yes please"}
         assert await ModelInterpreter(model).answers(LIGHTPATH, answers) == {"speed": "10000", "speed_policer": True}
         # The prompt carries the fields' schema (with the labels behind the values) and the person's words.
@@ -150,17 +170,9 @@ class TestModelInterpreter:
         )
         assert await ModelInterpreter(model).answers(page, {"n": "the second", "m": "no idea"}) == {"n": ["b"]}
 
-    async def test_a_message_is_read_for_values_and_only_an_outright_decision(self):
-        model, seen = _scripted({"speed": "10000", "decision": None})
-        asked = "workflow `create_demo_lightpath`: the person was asked to confirm the start"
-        read = await ModelInterpreter(model).message(
-            LIGHTPATH, "make it ten gig", [Decision.CANCEL, Decision.START], asked
-        )
-        assert read == Interpretation(values={"speed": "10000"}, decision=None)
-        assert "Decisions the message may state: cancel, start" in seen["prompt"]
-        assert "make it ten gig" in seen["prompt"] and f"Asked: {asked}" in seen["prompt"]  # read in context
-        model, _ = _scripted({"speed": None, "decision": "start"})
-        read = await ModelInterpreter(model).message(
-            LIGHTPATH, "yes, go ahead", [Decision.CANCEL, Decision.START], asked
-        )
-        assert read == Interpretation(values={}, decision=Decision.START)
+    async def test_words_that_fit_more_than_one_option_or_none_leave_the_field_open(self):
+        # "fast" names two speeds: picking one would be a guess, so the person is asked again.
+        for fits in (["10000", "100000"], []):
+            model, _ = _scripted({"speed": fits, "customer_name": "UT"})
+            words = {"speed": "fast", "customer_name": "for UT"}
+            assert await ModelInterpreter(model).answers(LIGHTPATH, words) == {"customer_name": "UT"}

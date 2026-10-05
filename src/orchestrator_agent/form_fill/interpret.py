@@ -11,35 +11,37 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""A person's answers that core rejected, interpreted into the values the fields expect — one call per page.
+"""What a person typed for a field, interpreted into the value the field expects — one call per page.
 
-Over A2A the caller is an agent: it reads the stop, which carries the page model's JSON schema, and sends
-exactly that. Nothing here runs for it. Through a chat client (a parent agent relaying the person's
-messages) the answers are a person's words, and words are not form values. Core rejects them; the skill
-then asks the ``Interpreter`` once, for all rejected fields of the page at once, and core decides again.
-Any message that is not the data model — prose from an agent, a person's words — is read the same way
-against the current stop, and a decision (start, cancel) is only ever read by the interpreter: no word is
-ever matched by this code.
+A form's stops are questions a human answers. A picked option travels as its value and needs nothing
+here. What a person *types* is words, and words are not form values: core rejects them, the skill then
+asks the ``Interpreter`` once, for all rejected fields of the page at once, and core decides again. The
+human sees the result before anything starts, at the approval. Nothing else is ever read: no chat
+message, no decision.
 
 The seam is one protocol call — the form's model plus the person's words, in; the values, out — so any
 engine that answers a page of typed questions in one call can sit behind it. Here it is pydantic-ai with
 the page model's partial variant as the output type (``ModelInterpreter``); the Jev branch puts its typed
 decision engine behind the same protocol.
+
+Words that fit more than one option of a field are not a value: the output type asks for every option the
+words fit, and the field is taken only when that is exactly one (``reading_type``).
 """
 
 from __future__ import annotations
 
 import json
-from collections.abc import Iterable, Mapping, Sequence
+from collections.abc import Iterable, Mapping
 from dataclasses import dataclass
-from typing import Any, Literal, Protocol
+from typing import Any, Protocol
 
 import structlog
 from pydantic import BaseModel, ConfigDict, Field, create_model
+from pydantic.fields import FieldInfo
 from pydantic_ai import Agent
 from pydantic_ai.models import Model
 
-from orchestrator_agent.state import Decision
+from orchestrator_agent.form_fill.core_bridge import choices, is_list, value_type
 
 logger = structlog.get_logger(__name__)
 
@@ -48,42 +50,21 @@ INSTRUCTIONS = (
     "where a field carries labels, they map each allowed value to how it is shown to people. Translate what was "
     "said into the values the fields expect, typed exactly as the schema says: a number written in words or with "
     "a unit is that number, a label or a description of an option is that option's value, details of items are "
-    "the objects the schema describes. Leave a field null when nothing usable was said for it. Never add what "
-    "the words do not support."
+    "the objects the schema describes. A field that takes one of several options is asked as a list: give every "
+    "allowed value the words fit, so more than one when they do not tell the options apart; choosing between "
+    "them is not yours. Leave a field null when nothing usable was said for it. Never add what the words do not "
+    "support."
 )
-DECISION_INSTRUCTIONS = (
-    " The message answers what the form just asked (given). It may instead decide about the form itself: `start` "
-    "means the person agrees that the workflow be run as summarised, `cancel` that the person abandons the form "
-    "and the workflow is not run; read it in the light of what was asked. Set the decision only when the message "
-    "states that decision outright and on its own; a message that also gives or changes values decides nothing, "
-    "and a remark or a question decides nothing."
-)
-
-
-class Interpretation(BaseModel):
-    """What a message said: values for the form, and a decision about it when one was stated outright."""
-
-    values: dict[str, Any] = {}
-    decision: Decision | None = None
 
 
 class Interpreter(Protocol):
-    """The two readings a form needs from an engine, one call each; a field the words say nothing usable about is left out.
+    """The one reading a form needs from an engine: the person's words per rejected field -> the values they meant.
 
-    ``form`` is the pydantic model of the fields in play (a page's, or every walked page's — see
-    ``core_bridge.page_model`` / ``form_model``).
-
-    ``answers``: the person's words per rejected field -> the values they meant.
-    ``message``: the caller's whole message -> values and, only when stated outright, a decision; ``asked`` says
-    what the form just asked (the workflow, and whether it was a page's values or the confirmation of the start),
-    the context the message is read in.
+    ``form`` is the pydantic model of the fields in play (``core_bridge.form_model``); a field the words
+    say nothing usable about is left out.
     """
 
     async def answers(self, form: type[BaseModel], words: Mapping[str, str]) -> Mapping[str, Any]: ...
-
-    async def message(
-        self, form: type[BaseModel], text: str, decisions: Sequence[Decision], asked: str
-    ) -> Interpretation: ...
 
 
 def fields_model(form: type[BaseModel], names: Iterable[str]) -> type[BaseModel]:
@@ -95,25 +76,28 @@ def fields_model(form: type[BaseModel], names: Iterable[str]) -> type[BaseModel]
     return create_model("Fields", __config__=ConfigDict(protected_namespaces=()), **picked)
 
 
-def reading_type(form: type[BaseModel], decisions: Sequence[Decision] = ()) -> type[BaseModel]:
-    """The output model of one reading: every field of ``form`` made optional, plus the decision when one may be made."""
+def reading_type(form: type[BaseModel]) -> type[BaseModel]:
+    """The output model of one reading: every field of ``form`` made optional.
+
+    A field that takes one of several options is read as every option the words fit (``_one_of_several``): a
+    model asked for the one value settles words that fit two by guessing, asked for all of them it names both,
+    and ``_values`` then takes the field only when exactly one fits.
+    """
     attributes: dict[str, Any] = {
         name: (
-            _optional(info.annotation),
+            _optional(list[value_type(info)] if _one_of_several(info) else info.annotation),  # type: ignore[misc]
             Field(
                 default=None, title=info.title, description=info.description, json_schema_extra=info.json_schema_extra
             ),
         )
         for name, info in form.model_fields.items()
     }
-    if decisions:
-        attributes["decision"] = (_optional(_literal(tuple(d.value for d in decisions))), None)
     return create_model("Reading", __config__=ConfigDict(protected_namespaces=()), **attributes)
 
 
-def _literal(values: tuple[str, ...]) -> Any:
-    """``Literal`` of runtime values; a static checker cannot type a dynamic Literal."""
-    return Literal.__getitem__(values)
+def _one_of_several(info: FieldInfo) -> bool:
+    """A field whose value is one of several options (not a list of them, not a single-option field)."""
+    return not is_list(info) and len(choices(info) or ()) > 1
 
 
 def _optional(annotation: Any) -> Any:
@@ -142,46 +126,27 @@ class ModelInterpreter:
                 *(f"- {name}: {words[name]}" for name in asked.model_fields),
             ]
         )
-        values = _values((await agent.run(prompt)).output)
+        values = _values((await agent.run(prompt)).output, asked)
         logger.info("Form-fill answers interpreted", asked=list(asked.model_fields), values=values)
         return values
 
-    async def message(
-        self, form: type[BaseModel], text: str, decisions: Sequence[Decision], asked: str
-    ) -> Interpretation:
-        agent: Agent[None, Any] = Agent(
-            self.model, output_type=reading_type(form, decisions), instructions=INSTRUCTIONS + DECISION_INSTRUCTIONS
-        )
-        prompt = "\n".join(
-            [
-                f"Asked: {asked}",
-                f"Fields (JSON schema): {_schema(form)}",
-                "Decisions the message may state: " + ", ".join(d.value for d in decisions),
-                f"Message: {text}",
-            ]
-        )
-        output = (await agent.run(prompt)).output
-        decision = getattr(output, "decision", None)
-        read = Interpretation(values=_values(output), decision=Decision(decision) if decision else None)
-        logger.info("Form-fill message interpreted", values=read.values, decision=read.decision)
-        return read
+
+def _values(output: BaseModel, form: type[BaseModel]) -> dict[str, Any]:
+    """The fields the reading gave a value, as plain data (a nested model is its object); nulls are left out.
+
+    A field read as the options the words fit is a value only when exactly one fits: words that fit none, or
+    do not tell several apart, leave it open and the person is asked again.
+    """
+    values: dict[str, Any] = {}
+    for name, value in output.model_dump(mode="json", exclude_unset=True).items():
+        if value is None:
+            continue
+        if _one_of_several(form.model_fields[name]):
+            if len(value) != 1:
+                continue
+            (value,) = value
+        values[name] = value
+    return values
 
 
-def _values(output: BaseModel) -> dict[str, Any]:
-    """The fields the reading gave a value, as plain data (a nested model is its object); nulls are left out."""
-    return {
-        name: value
-        for name, value in output.model_dump(mode="json", exclude_unset=True).items()
-        if value is not None and name != "decision"
-    }
-
-
-__all__ = [
-    "DECISION_INSTRUCTIONS",
-    "INSTRUCTIONS",
-    "Interpretation",
-    "Interpreter",
-    "ModelInterpreter",
-    "fields_model",
-    "reading_type",
-]
+__all__ = ["INSTRUCTIONS", "Interpreter", "ModelInterpreter", "fields_model", "reading_type"]

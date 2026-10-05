@@ -255,8 +255,16 @@ class TestWriteToolGate:
         names = {t.name for t in await WriteToolGate().prepare_tools(SimpleNamespace(), list(self.DEFS))}
         assert names == {SEARCH_TOOL}
 
-    def test_gate_is_part_of_the_agent_capabilities(self):
-        assert any(isinstance(c, WriteToolGate) for c in build_capabilities())
+    def test_the_gate_and_the_handoff_plugin_come_with_the_form_fill_skill_only(self):
+        def parts(capabilities):
+            gated = any(isinstance(c, WriteToolGate) for c in capabilities)
+            return gated, {getattr(c, "id", None) for c in capabilities}
+
+        gated, ids = parts(build_capabilities(form_fill=True))
+        assert gated and "workflow" in ids
+        # Without the skill (MCP, AG-UI) the agent is what it was: no handoff to a tool that is not there.
+        gated, ids = parts(build_capabilities())
+        assert not gated and "workflow" not in ids and "search" in ids
 
 
 class TestArtifactMapping:

@@ -40,7 +40,7 @@ from pydantic_ai.messages import ToolReturnPart
 
 from orchestrator_agent.agent import new_deps
 from orchestrator_agent.artifacts import ToolArtifact
-from orchestrator_agent.capabilities import load_plugin_specs
+from orchestrator_agent.capabilities import load_plugin_specs, needs_form_fill
 from orchestrator_agent.mcp_client import bind_outbound_token
 
 if TYPE_CHECKING:
@@ -128,7 +128,7 @@ class MCPApp:
         worker = self.worker
 
         for spec in load_plugin_specs():
-            if spec.advertise:
+            if spec.advertise and not needs_form_fill(spec):  # the form-fill skill runs over A2A only
                 self.server.add_tool(self._run_query_tool(), name=spec.id, description=_tool_description(spec))
 
         @self.server.tool()

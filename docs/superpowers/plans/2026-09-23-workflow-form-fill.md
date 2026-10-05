@@ -470,20 +470,228 @@ core exactly as sent, and the kagent adapter leaves an unanswered question out o
 sending `""` (an all-empty answer still reaches the skill as `{}`, so the page's defaults apply; words for a
 free question go to the interpreter).
 
+## Text only (2026-10-01)
+
+**History: superseded the same day by "Human in the loop only" below.** The HITL
+adapters (`adapters/a2a_hitl.py`, `adapters/kagent_hitl.py`), the questions and chips built for them and
+the approval envelope are gone, and the endpoint is back on A2A 0.3 (a2a-sdk 0.3.x), the version the
+runtimes in front of it speak. Reason: behind a parent agent and a chat client there is no way to get a
+structured pause to the person and their structured answer back — the chat client renders text. So every
+stop is a completed reply (the `FormReply` JSON object as text), the person's next message comes back as
+text, and the interpreter reads it, the confirmation included (`Interpreter.message(form, text, decisions,
+asked)`, where `asked` says what the form just asked). The commit stays code-owned: `create_workflow` is
+called from code after a start decision at the summary, never by a model.
+
+### Review fixes (same day)
+
+A review of that state found the following; each is fixed with a test, and the flows were re-run live
+(create, modify, terminate, cancel, a task) against a database clone.
+
+- **Python 3.11.** pydantic rejects pydantic-forms' `ErrorDict` (a `typing.TypedDict`) on Python < 3.12, so
+  the package did not import there. `state.FormError` is the same shape as a `typing_extensions.TypedDict`.
+- **Page model.** A choice core has no option for (`enum: []`) crashed `Literal`; it now keeps its base
+  type with the empty `enum` in its schema. A required field with a bare `const` was dropped as display-only
+  and could never be answered; it is a one-option choice now (read-only is `readOnly` / a disabled widget).
+- **A start is sent once.** A tool error at `create_workflow` that is not core's validation of the pages
+  used to reopen the form, and a start core answered with something other than a process id used to restore
+  the confirming session: both let the next "yes" start a second process. Only core's validation errors
+  reopen the form now; anything else closes it.
+- **Consent.** `Accept` consent was kept per field name with a page index: a correction to an earlier page
+  kept it, and one name on two pages overwrote each other. It is kept per page and field with a fingerprint
+  of what it was given for (the pages before it and the rest of its own) and is void once that changes.
+- **A start that restates the summary** (the reading carries a start and values equal to what is
+  summarised) did not start and could not: it is a start now; a start next to a changed value still is not.
+- **Tasks.** The handoff checked keys against user-facing workflows only while the model's listing shows
+  tasks too, so a task was an endless tool retry. The catalogue is the whole of core's, asked for in its two
+  halves (core's `list_workflows` tool does not take a call without a filter — see follow-up 6).
+- **A2A only.** `WriteToolGate` and the `workflow` plugin applied to every agent, so the MCP and AG-UI
+  agents (no skill) lost core's write tools and were told to call a handoff tool they do not have. Both now
+  come with the skill only (`build_capabilities(form_fill=True)`); the MCP adapter does not register a
+  `workflow` tool.
+- **Words that fit two options** were settled by a guess (stable only because the workflow key happened to
+  lean one way). Instruction wording did not change that in live runs; what did: a field that takes one of
+  several options is read as *every* option the words fit, and is a value only when exactly one fits.
+- **Smaller ones.** The one option of a required choice is taken each walk and never stored (a regenerated
+  page may offer another; an optional one is not forced). `labels` on a reply says how the form shows a
+  value that is an option. After core refuses a start, words are read against the whole form, not its last
+  page. A message that is a data part is read as its JSON. A handoff that cannot be walked closes the form
+  with a `failed` reply instead of leaving the model's "opened" line.
+
+## Human in the loop only (2026-10-01)
+
+**This section is the current state.** The text-only skill was reviewed, fixed (above) and then dropped as
+the way a person starts a workflow: its confirmation was a model's reading of chat text relayed by another
+model, and nothing on our side can tell a typed "yes" from one the parent produced. Decision (user: "lets
+do kagent-only human in-the-loop", "assuming its kagent 1.0", "we dont need to be backwards compatible"):
+a form is filled through kagent's HITL extension only, on A2A 1.0 (a2a-sdk 1.x again), and no chat text
+is read for a value or a decision.
+
+- **Stops are pauses.** A page stop is an `ask_user_request` (one question per field core rejected or
+  nobody answered: title, required or optional, options as chips by label, core's message); the summary is
+  a `tool_approval_request` for `create_workflow` with the call as it will be made plus `labels` for its
+  ids. `Reply` carries `ask` / `approval`; its text stays the `FormReply` JSON (without the page schema).
+- **Input is the human's response.** `adapters/a2a_hitl.py` maps an `ask_user_response` onto field values
+  (a chip to the value behind it, typed as the form has it) and a `tool_approval_response` onto a start or
+  a cancel; that is `SearchState.form_input`, the only thing `FormFillSkill.handle` acts on. A response
+  that does not match the pending stop shows the stop again; a rejection's reason is never read.
+- **Gone:** `Interpreter.message` and decisions read from words, the JSON-object-as-text contract
+  (`values_in`), values taken from the opening request, the data-part input, `FormReply.schema`. The
+  interpreter keeps one job: what a person *typed* for a field and core rejected (a number in words, a
+  structured field) becomes the field's value, shown to them at the approval before anything starts.
+- **An unanswered stop ends the form.** A rejection that reaches this agent cancels the form, but kagent's
+  Go runtime does not forward a rejection of a nested approval (its ADK returns the rejection before the
+  remote-agent tool runs; the tool itself would pass it on, and the Python runtime's does), and an
+  abandoned form must not swallow the next request. So a message
+  without a response closes the form and goes to the model. Exception, forced by the runtime: a parent
+  pauses once per tool call, so the stop that answers a response is not shown until the parent calls
+  again; the transport marks it `unseen` and the skill shows it on the next message instead of closing.
+  The parent's instruction tells it to call again with `continue` while a form is open.
+- **No correction path.** A validated answer is not asked again; to change one, reject and start over.
+  An "edit" stop (every field as a question, empty keeps the value) is a possible follow-up.
+- **A caller without the extension** gets no form: the handoff tool opens nothing and says so.
+
+Verified live against a database clone, with a direct A2A 1.0 client and through kagent's Go runtime
+1.0.0-alpha3 as the parent (the newest that runs without a control plane; `go/api/a2a/hitl.go` is
+identical in alpha7): create (chips, a typed "twenty" becoming 20, approve), modify, terminate, a
+rejection (direct: cancelled; through the parent: not forwarded, the next question is answered and the
+form is gone), a typed "yes" at the approval (nothing starts), a caller without the extension.
+
+**Not verified, and open on the kagent side (1.0.0-alpha7):** this agent inside a kagent 1.0 install, and
+with it the prompts in kagent's own UI. A local 1.0 control plane was brought up on kind the way kagent's
+CI does (a plain `kagent install --profile minimal` leaves the controller crash-looping: it needs Agent
+Substrate, which needs a cluster with the `ClusterTrustBundle`, `ClusterTrustBundleProjection` and
+`PodCertificateRequest` feature gates), and the 1.0 CLI works against it. What stands between that and
+this agent, per kagent's source and runtime docs:
+
+- The 1.0 CLI has no local mode (`run`, `invoke --agent` are gone): it talks to the control plane only,
+  and `kagent agent invoke` sends task text — it cannot answer a pause; the UI can.
+- An own agent is a `Harness` with `byo: {}`: an image pinned by digest that serves A2A over **gRPC on
+  port 80** inside a gVisor sandbox on Substrate, created suspended and resumed per task.
+- Outbound traffic from that sandbox is limited to the HTTP(S) origins of the configured models and MCP
+  servers, by DNS name. This agent's PostgreSQL connection (state persistence, `init_database`) has no
+  place in that; running as BYO means persistence that does not need the orchestrator database.
+- An Agent as another Agent's tool by reference (`agentRef`) is deferred in the API — only in-process
+  `templateRef` sub-agents exist; the runtime's remote A2A tool used in the live runs here is configured
+  in the runtime's own config, not through a CRD.
+
+### kagent 0.10 tried, 1.0 kept (2026-10-02)
+
+Before settling on the 1.0 extension, forms were tried on a real kagent 0.10.2 install with the
+production shape (this agent as a BYO agent, a declarative Python-runtime parent using it as an agent
+tool). kagent 0.x has no HITL extension: it recognises a pause only as its own ADK's
+`adk_request_confirmation` data part and answers with a `decision_type` data part. With an experimental
+adapter for that format a whole form worked when the agent was called directly, and through the parent
+each page and the approval were relayed and nothing started unapproved. Two things made it a poor
+target: the Python runtime opens a new A2A context for every tool call (the form had to be keyed on the
+forwarded `x-kagent-parent-context-id` header), and after each answer the parent's model has to call
+again — a small model often did not, and twice told the user the workflow had started before the
+approval was shown. The format is also internal to kagent 0.x and replaced by the extension in 1.0.
+Decision: the 1.0 extension stays the only way to fill a form; the experiment was not kept.
+
+What was kept from it: the endpoint also serves A2A 0.3 (`enable_v0_3_compat` and a 0.3 interface on
+the card), because a 0.3 client cannot even parse a 1.0-only card and kagent 0.x — like part of the
+wider ecosystem — still speaks 0.3. Those callers get everything but forms.
+
+### Checked against the earlier commits (2026-10-02)
+
+Going back to pauses meant rebuilding parts that earlier commits and reviews had already hardened, so every
+test that existed at any commit of the branch was compared with the tree, and the fixes recorded in the
+reviews above were re-checked one by one. Intentionally gone with the text path: token and JSON parsing,
+decisions from words, a JSON rejection reason as a correction, values taken from the opening request. Found
+back and fixed, each with a test:
+
+- **One chat could reach another chat's form.** The form was keyed on the A2A context again, which a
+  kagent parent shares across chats (or renews per call) — the "form wiped by a message on another task" /
+  "form leaks into the next conversation" problem. Memory and the form are now keyed on the chat kagent
+  forwards (`x-kagent-root-context-id`, then `x-kagent-parent-context-id`), the A2A context only without
+  one; the per-conversation lock uses the same key. Verified live: two chats interleaved through one parent.
+- **A passing failure in core closed the form.** A refusal that is no form verdict used to keep the session
+  open with the reason; the rewrite closed it. The page is asked again with what core said.
+- **A malformed response ended the form.** It is ignored as before, but a message sent as a response still
+  shows the stop again instead of being treated as chat.
+- **Dropped test scenarios restored:** a form continuing on a new task of the same conversation, the nested
+  model's JSON schema (what the interpreter reads), the options of re-asked rejected fields, and a 0.3
+  streaming call.
+
+Knowingly back, in a limited form: a message that is not about the form, sent right after an answer, gets
+the next stop shown once before it is answered (the `unseen` rule the pause-once runtime needs).
+
+## LibreChat as a second human-in-the-loop transport (2026-10-04)
+
+The reason the text path was dropped — "the chat client renders text" — no longer holds for LibreChat
+v0.8.8: it has an ask-user tool (`ask_user_question`) that it offers to whatever it calls as its model
+when the chat runs on a model spec with `askUserQuestion: true`. So LibreChat can call this agent directly
+as a custom endpoint, with no parent agent and no model of its own in between:
+
+- `adapters/chat/completions.py` — `POST /v1/chat/completions` (and `/v1/models`), the same agent the A2A
+  adapter drives, one turn per request. `state.hitl` is the `X-Agent-Client: librechat` header the
+  endpoint is configured to send, on a chat that offers a tool at all (2026-10-05: first the name of the
+  tool in the request's `tools`, which is LibreChat's to change and says nothing about who is calling);
+  memory and the open form are keyed on `X-Conversation-Id`; the latest user message is the turn's input.
+- `adapters/chat/librechat.py` — a stop of the skill as calls of the tool (`pause`, `ask_card`,
+  `approval_card`), the tool message back as `FormInput` (`read`), a reply worded for a person (`shown`).
+  What a pending stop remembers and how answers become field values is the same for every transport and
+  lives in `form_fill/pending.py` (2026-10-05: moved out of `kagent_hitl.py`, so neither transport
+  depends on the other).
+- `turn.py` (at the package root: it is what adapters call, not an adapter) — what the A2A executor and the
+  chat adapter both do between a request and its
+  answer: one turn at a time per conversation (`ConversationLocks`) and the agent run on the
+  conversation's memory and open form (`run_turn`). Loading the state, reading the response, recording
+  the stop and the snapshot stay with each adapter.
+- **Layout (2026-10-05).** A protocol with a client that can show a form is a package: `adapters/a2a/`
+  (`adapter.py`, and `kagent.py` — the former `kagent_hitl.py` and `a2a_hitl.py` in one) and
+  `adapters/chat/` (`completions.py`, `request.py`, `librechat.py`). AG-UI and MCP stay single modules.
+  Each client is one class with the same four methods (`adapters/hitl.py`, `HumanInTheLoop`: claim a
+  request, read the response, pause, word the reply), and an adapter picks the transport whose client is
+  calling — `KagentHitl` by the extension, `LibreChatHitl` by the header. The wire models stay each
+  client's own; a third client is a module in its protocol's package, added to that adapter's transports.
+  The chat endpoint's responses are the OpenAI SDK's models and its request is parsed by FastAPI.
+- **Fewer data models (2026-10-05).** What a pending stop remembers is the skill's own `AskField`s
+  (`PendingAsk.questions`): the separate `PendingQuestion` is gone, and LibreChat's `PendingCards` with it —
+  its cards, call ids and option values are worked out from the stop's id and the position of each question
+  and choice, the same way when a later card is built and when an answer is read, so nothing of LibreChat's
+  is stored. Its `read` returns the assistant message itself for a next card or a refused call (no
+  `NextCard` / `Refused`); an A2A transport's stop is the message metadata, keyed by its extension's URI (no
+  `A2APause`); a chat transport reads the `ChatRequest` and the adapter picks it by the client's name (no
+  `ChatCall`). Left: kagent's eight wire models (its contract), the three request models and LibreChat's
+  one-field answer model. The OpenAI SDK's request types were tried and not adopted: validated by pydantic
+  they hand back one-shot lazy iterators for messages and content. A form paused before this change does
+  not resume (the stored stop has the old shape).
+- The skill is unchanged but for `AskField`, which now also carries `required`, `title` and `problem`, so a
+  transport can word a question its own way (LibreChat's card is plain text, and an optional field is left
+  as it is by picking "Keep default": the card does not take an empty answer).
+
+What the tool's limits force (four questions a call, twelve options a question, every question answered,
+typed text always possible, "Skip" as a fixed sentence) is handled in the adapter; the README lists it.
+`unseen` is not needed on this path: the next stop is another call in the same run.
+
+Verified live against LibreChat v0.8.8 and the database clone, through LibreChat's HTTP API and in its web
+UI: create service port (chips, a 33-option picker typed, an eight-field page as two cards, approve →
+process `completed`, state exact), a typed "twenty" becoming 20 and a typed "yes" at the approval starting
+nothing, reject, "Skip" on a required card, a chat message instead of an answer (the form ends, the model
+answers), modify note and terminate (both `completed`), and a chat without the model spec (no form). In
+the create run the model was called twice, both for the handoff; the five answer turns called none. The
+one model call a form turn can make is the interpreter's, for typed text core rejected, as on A2A.
+
+Not done: paging a picker of more than twelve options instead of typing; reading the tool's limits from
+the schema in the request instead of constants; LibreChat's Stop and regenerate buttons on a paused form;
+the user's OpenID token on the request that follows a long pause.
+
 ## Out of scope / follow-ups
 
-0. **Persist A2A tasks** (own PR, before HITL is relied on in production or the deployment goes
-   multi-replica): a2a-sdk 1.x's `DatabaseTaskStore` (`postgresql` extra, `a2a-db` migration) so a paused
-   human-in-the-loop task survives a restart and can resume on another replica; the per-context lock then
-   needs a database-level equivalent. Changes runtime behaviour and deployment, hence not in this branch.
+0. **Persist A2A tasks / replicas** (own PR, before the deployment goes multi-replica): the task store and
+   the per-context lock are in-process. Related: a start is made at most once per confirmation *within a
+   process*; a crash between core's answer and the state snapshot can still leave a confirming session
+   behind, which only an idempotency key on core's side closes.
 1. **Eval on real WFO forms** — Jev's pick accuracy per field kind and the routing false-positive rate,
    to tune `JEV_PREFILL_THRESHOLD` (one threshold today). The confirmation summary is the safety net.
 2. **Suspended processes** (`get_process_status().form` → `resume_workflow_process`): the same skill
    shape, one page at a time, each resume commits.
 3. **Large pickers** (thousands of subscriptions): the contract points the caller at the search skill
    for an id; a Jev `Choice` cannot hold them.
-4. **Structured A2A parts**: the contract is text because ADK's `AgentTool` text-extracts; a `DataPart`
-   twin of the need-input message can be added when the parent side consumes it.
+4. **An edit stop**: a validated answer is never asked again, so a correction means rejecting and
+   starting over. A stop that asks every field again (an empty answer keeps the value) would give a
+   correction path without reading text.
 5. **An agent-facing form page in core** (core PR, then a version bump here): `get_workflow_form` returns
    the raw pydantic-forms JSON schema, written for a browser (`$ref` / `allOf` / nullable `anyOf`,
    `uniforms` widget hints, display-only `format` markers, enum labels in a side table, nested `$defs`
@@ -494,3 +702,9 @@ free question go to the interpreter).
    the agent side is isolated in **`form_fill/core_bridge.py`**: its schema-reading half is deleted and
    `page_model` is built from core's field spec instead; the built model, and everything that works from it
    (the interpreter's output type, the stops, the questions, the summary), stays as it is.
+6. **`list_workflows` without a filter** (core): the MCP tool rejects a call with no argument (HTTP 422,
+   `body: Field required`), although its description says "leave empty for all". The agent asks for the
+   catalogue in two calls (`is_task` false, then true) until that is fixed.
+7. **Prefilling from the opening request**: nothing the request states is read at the handoff; each page
+   asks. Reading the request against every new page costs a model call per page and would put a model's
+   reading into the values again (visible at the approval), so it was left out.

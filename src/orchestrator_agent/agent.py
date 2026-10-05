@@ -51,13 +51,14 @@ def build_agent(model: "Model | KnownModelName | str", *, form_fill: "FormFillSk
     Args:
         model: A pydantic-ai model or model name/string.
         form_fill: The workflow form-fill skill to run in front of the model (A2A); it shares the
-            agent's core MCP session.
+            agent's core MCP session. Only with it does the model get the handoff to the skill and
+            lose core's write tools.
 
     Returns:
         A plain ``Agent`` ready to run inside ``async with agent:``.
     """
     core_toolset = build_core_toolset()
-    capabilities = build_capabilities()
+    capabilities = build_capabilities(form_fill=form_fill is not None)
     if form_fill is not None:
         capabilities.append(FormFillCapability(form_fill, core_toolset))
     logger.debug("Building WFO agent", model=str(model), capability_count=len(capabilities))

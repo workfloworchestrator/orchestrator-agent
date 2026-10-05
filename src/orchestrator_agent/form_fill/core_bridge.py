@@ -40,13 +40,12 @@ from typing import Any, Literal, Union, get_args, get_origin
 from annotated_types import MaxLen, MinLen
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, create_model
 from pydantic.fields import FieldInfo
-from pydantic_forms.exceptions import ErrorDict
 
-from orchestrator_agent.state import ACCEPT_VALUE
+from orchestrator_agent.state import ACCEPT_VALUE, FormError
 
-# pydantic-forms ``format`` markers the skill interprets (the ``json_schema_extra`` of its field types). The
-# types themselves are not imported: ``pydantic_forms.validators`` pulls in a contact-person field that needs
-# ``email-validator``, which this agent does not ship.
+# pydantic-forms ``format`` markers the skill interprets (the ``json_schema_extra`` of its field types).
+# Those field classes are not imported: ``pydantic_forms.validators`` pulls in a contact-person field that
+# needs ``email-validator``, which this agent does not ship.
 FORMAT_ACCEPT = "accept"
 DISPLAY_ONLY_FORMATS = frozenset({"label", "divider", "summary", "markdown", "callout", "hidden", "subscription"})
 
@@ -107,7 +106,7 @@ def _object_model(title: str, obj: Mapping[str, Any], defs: Mapping[str, Any]) -
 def _field(name: str, prop: Mapping[str, Any], defs: Mapping[str, Any], *, required: bool) -> tuple[Any, FieldInfo]:
     """One model field: the type the value must have, its default, and what the stops need to know about it."""
     annotation = _annotation(prop, defs)
-    extra: dict[str, Any] = {}
+    extra: dict[str, Any] = {**_no_options(prop, defs)}
     if fmt := prop.get(FORMAT):
         extra[FORMAT] = fmt
     if labels := _labels(prop, defs):
@@ -130,11 +129,9 @@ def _field(name: str, prop: Mapping[str, Any], defs: Mapping[str, Any], *, requi
 
 def _annotation(prop: Mapping[str, Any], defs: Mapping[str, Any]) -> Any:
     """The Python type of the value a field expects: its allowed values, a scalar, a list, or a nested model."""
-    if prop.get(FORMAT) == FORMAT_ACCEPT:
-        return Literal[ACCEPT_VALUE]
-    if isinstance(prop.get("enum"), list):
-        return _literal(tuple(prop["enum"]))
-    match prop.get("type"):
+    if allowed := _allowed(prop):
+        return _literal(allowed)
+    match prop.get("type"):  # a choice core offers no option for keeps its base type: see ``_no_options``
         case "boolean":
             return bool
         case "integer":
@@ -152,6 +149,15 @@ def _annotation(prop: Mapping[str, Any], defs: Mapping[str, Any]) -> Any:
     return Any
 
 
+def _allowed(prop: Mapping[str, Any]) -> tuple[Any, ...]:
+    """The values a field is limited to — consent, its one ``const``, its ``enum`` — or () when it is not limited."""
+    if prop.get(FORMAT) == FORMAT_ACCEPT:
+        return (ACCEPT_VALUE,)
+    if "const" in prop:
+        return (prop["const"],)
+    return tuple(prop["enum"]) if isinstance(prop.get("enum"), list) else ()
+
+
 def _labels(prop: Mapping[str, Any], defs: Mapping[str, Any]) -> dict[str, str] | None:
     """``value -> label`` of an enum field (or of a list of them), when any label differs from its value."""
     if prop.get("type") == "array":
@@ -163,8 +169,23 @@ def _labels(prop: Mapping[str, Any], defs: Mapping[str, Any]) -> dict[str, str] 
     return labels if any(value != text for value, text in labels.items()) else None
 
 
+def _no_options(prop: Mapping[str, Any], defs: Mapping[str, Any]) -> dict[str, Any]:
+    """The empty ``enum`` of a choice core has no option for (or of a list of them), kept in the field's schema.
+
+    ``Literal`` cannot be empty, so such a field is typed by its base type; the caller still reads, from the
+    schema, that no value is allowed, and core rejects whatever is sent.
+    """
+    if prop.get("enum") == []:
+        return {"enum": []}
+    if prop.get("type") == "array":
+        items = resolve_property(prop.get("items") or {}, defs)
+        if items.get("enum") == []:
+            return {"items": {key: items[key] for key in ("type", "enum") if key in items}}
+    return {}
+
+
 def _literal(values: tuple[Any, ...]) -> Any:
-    """``Literal`` of runtime values (the field's allowed ones); a static checker cannot type a dynamic Literal."""
+    """``Literal`` of runtime values (a field's allowed ones); a static checker cannot type a dynamic Literal."""
     return Literal.__getitem__(values)
 
 
@@ -183,9 +204,12 @@ def resolve_property(prop: Mapping[str, Any], defs: Mapping[str, Any]) -> dict[s
 
 
 def is_read_only(prop: Mapping[str, Any]) -> bool:
-    """A field the form renders but never lets the user change (``ReadOnlyField`` / ``const``)."""
+    """A field the form renders but never lets the user change (``ReadOnlyField``).
+
+    A bare ``const`` is not that: it is a field with one allowed value, which core still requires.
+    """
     widgets = (prop.get("uniforms") or {}, prop.get("extraProperties") or {})
-    return "const" in prop or bool(prop.get("readOnly")) or any(w.get("disabled") for w in widgets)
+    return bool(prop.get("readOnly")) or any(w.get("disabled") for w in widgets)
 
 
 # --- what a page model says about its fields ---------------------------------------------------------------
@@ -211,10 +235,10 @@ def item_type(info: FieldInfo) -> Any:
     return get_args(inner)[0] if get_origin(inner) is list else inner
 
 
-def choices(info: FieldInfo) -> tuple[str, ...] | None:
-    """The values an enum field (or a list of them) allows, in order; None when the field is free."""
+def choices(info: FieldInfo) -> tuple[Any, ...] | None:
+    """The values an enum field (or a list of them) allows, as core gave them, in order; None when the field is free."""
     item = item_type(info)
-    return tuple(str(v) for v in get_args(item)) if get_origin(item) is Literal else None
+    return get_args(item) if get_origin(item) is Literal else None
 
 
 def labels(info: FieldInfo) -> dict[str, str]:
@@ -222,6 +246,14 @@ def labels(info: FieldInfo) -> dict[str, str]:
     extra = info.json_schema_extra
     found = extra.get(LABELS) if isinstance(extra, dict) else None
     return {str(value): str(text) for value, text in found.items()} if isinstance(found, dict) else {}
+
+
+def label_of(info: FieldInfo, value: Any) -> Any:
+    """How the form shows ``value`` (each item of a list), or None when it shows the value itself."""
+    shown = labels(info)
+    if isinstance(value, list):
+        return [shown.get(str(item), item) for item in value] if any(str(item) in shown for item in value) else None
+    return shown.get(str(value))
 
 
 def is_accept(info: FieldInfo) -> bool:
@@ -249,10 +281,10 @@ class _FormErrorBody(BaseModel):
     """What pydantic-forms' FastAPI handler returns for an invalid page (its ``form_error_handler``)."""
 
     detail: str = ""
-    validation_errors: list[ErrorDict] = Field(default_factory=list)
+    validation_errors: list[FormError] = Field(default_factory=list)
 
 
-def form_errors(error: str) -> list[ErrorDict]:
+def form_errors(error: str) -> list[FormError]:
     """Core's validation errors out of the tool error text, as pydantic-forms reports them; [] when it is no such body.
 
     fastmcp relays core's 400 body as its Python repr inside the text; that body is pydantic-forms' own
@@ -281,6 +313,7 @@ __all__ = [
     "is_single_pick",
     "item_bounds",
     "item_type",
+    "label_of",
     "labels",
     "page_model",
     "resolve_property",
