@@ -19,6 +19,7 @@ from orchestrator_agent.form_fill.core_bridge import (
     item_type,
     labels,
     page_model,
+    summaries,
 )
 from orchestrator_agent.form_fill.skill import FormFillSkill, questions
 from orchestrator_agent.state import AskField, Decision, FormFillSession, FormInput, FormReply, Reply, SearchState
@@ -71,6 +72,36 @@ ACCEPT_PAGE = {
     "required": ["confirm"],
     "title": "Dry run",
 }
+# The last page of a form that ends in core's summary form (``base_summary``), as core 5.4 renders it: tables to
+# show, nothing to fill.
+SUMMARY_TABLE = {
+    "columns": [["SURF", "10 Gbit/s", "Protected"]],
+    "headers": [],
+    "labels": ["customer_name", "speed", "redundancy"],
+}
+SUMMARY_PAGE = {
+    "$defs": {"MigrationSummaryValue": {"properties": {}, "title": "MigrationSummaryValue", "type": "object"}},
+    "additionalProperties": False,
+    "properties": {
+        "divider_1": {
+            "anyOf": [{"type": "string"}, {"type": "null"}],
+            "default": None,
+            "format": "divider",
+            "title": "Divider 1",
+            "type": "string",
+        },
+        "product_summary": {
+            "$ref": "#/$defs/MigrationSummaryValue",
+            "default": None,
+            "extraProperties": {"data": SUMMARY_TABLE},
+            "format": "summary",
+            "type": "string",
+            "uniforms": {"data": SUMMARY_TABLE},
+        },
+    },
+    "title": "Demo Lightpath Summary",
+    "type": "object",
+}
 
 
 def rejection(problems: dict[str, str]) -> str:
@@ -87,9 +118,10 @@ class FakeCore:
     Like core, it does not accept a submitted page that lacks a required field (``Field required`` per field).
     """
 
-    def __init__(self, reject=None, accept_page=False):
+    def __init__(self, reject=None, accept_page=False, summary_page=False):
         self.reject = reject  # (page_index, message): raise when that page's inputs are submitted
         self.accept_page = accept_page
+        self.summary_page = summary_page  # the form ends in the workflow's own summary (core's summary form)
         self.created: list[dict] = []
 
     # Rows as core's ``list_workflows`` returns them (``WorkflowSchema``).
@@ -168,6 +200,8 @@ class FakeCore:
             pages.append(REDUNDANCY_PAGE if inputs[1].get("speed") in ("10000", "100000") else TICKET_PAGE)
         if self.accept_page:
             pages.append(ACCEPT_PAGE)
+        if self.summary_page:
+            pages.append(SUMMARY_PAGE)
         if inputs:
             self.require(pages[len(inputs) - 1], inputs[-1])
         if len(inputs) >= len(pages):
@@ -256,6 +290,11 @@ class TestPageModel:
         assert choices(product) == (PRODUCT,) and labels(product) == {PRODUCT: "Demo Lightpath"}
         (confirm,) = page_model(ACCEPT_PAGE).model_fields.values()
         assert is_accept(confirm) and choices(confirm) == ("ACCEPTED",)
+
+    def test_a_summary_page_has_nothing_to_fill_but_tables_to_show(self):
+        assert page_model(SUMMARY_PAGE).model_fields == {}
+        assert summaries(SUMMARY_PAGE) == [SUMMARY_TABLE]
+        assert summaries(LIGHTPATH_PAGE) == []  # labels and dividers are no summary
 
     def test_single_select_list_is_a_list_of_one(self):
         schema = {
@@ -497,6 +536,16 @@ class TestWalk:
             "speed_policer": False,
             "ticket_id": "",
         }  # optional, never set: the form default applies
+        assert reply.summary == []  # this form has no summary page of its own
+
+    async def test_the_workflows_own_summary_page_is_carried_to_the_approval(self):
+        """A form that ends in core's summary form: its tables are what the workflow's author wants confirmed."""
+        core, state = FakeCore(summary_page=True), SearchState()
+        reply = await open_form(make_skill(), core, state, "create_demo_lightpath", FULL)
+        # The summary page asks nothing, so it is no stop of its own: it is submitted as it is.
+        assert reply.status == "confirming" and state.form_fill.page_inputs[-1] == {}
+        assert reply.summary == [SUMMARY_TABLE]
+        assert reply.values["customer_name"] == "UT"  # the values as they will be sent are still on the reply
 
     async def test_a_changed_answer_rewalks_and_regenerates_later_pages(self):
         core, state = FakeCore(), SearchState()

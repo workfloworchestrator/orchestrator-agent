@@ -301,6 +301,29 @@ class TestShown:
             "Defaults that apply: policer = true",
         ]
 
+    def test_the_approval_adds_the_workflows_own_summary_when_its_form_has_one(self):
+        summary = {
+            "headers": ["before", "after"],
+            "labels": ["customer", "port_mode"],
+            "columns": [["ACE", "untagged"], ["ACE", "tagged"]],
+        }
+        confirming = {"workflow_key": "modify_port", "status": "confirming", "values": {"port_mode": "tagged"}}
+        reply = Reply(json.dumps({**confirming, "summary": [summary]}), approval=APPROVAL.approval)
+        assert shown(reply).splitlines() == [
+            "**Start workflow `modify_port` with these values?**",
+            "",
+            "| Field | Value |",  # what is approved is what is sent: always shown, whatever the summary leaves out
+            "|---|---|",
+            "| port_mode | tagged |",
+            "",
+            "The workflow's own summary:",
+            "",
+            "| | before | after |",
+            "|---|---|---|",
+            "| customer | ACE | ACE |",
+            "| port_mode | untagged | tagged |",
+        ]
+
     def test_the_outcome_is_a_sentence(self):
         started = Reply('{"workflow_key":"w","status":"started","process_id":"p-1"}')
         assert shown(started) == "Workflow `w` started. Process id: `p-1`"

@@ -51,7 +51,16 @@ from pydantic import BaseModel, ValidationError
 
 from orchestrator_agent.adapters.chat.request import ChatRequest
 from orchestrator_agent.form_fill.pending import PendingAsk, answered_values, pending_approval, pending_ask, pending_of
-from orchestrator_agent.state import Approval, AskField, Decision, FormFillSession, FormInput, FormReply, Reply
+from orchestrator_agent.state import (
+    Approval,
+    AskField,
+    Decision,
+    FormFillSession,
+    FormInput,
+    FormReply,
+    Reply,
+    SummaryTable,
+)
 
 logger = structlog.get_logger(__name__)
 
@@ -74,6 +83,7 @@ APPROVE_LABEL = "Approve"
 REJECT_LABEL = "Reject"
 APPROVAL_HEADER = "Approval"
 APPROVAL_NOTE = "Nothing is started until you approve. A typed answer is not read as a decision."
+SUMMARY_CAPTION = "The workflow's own summary:"
 UNTITLED = "unknown"  # pydantic-forms' title of a form page that was given none
 
 
@@ -328,7 +338,8 @@ def shown(reply: Reply) -> str:
     """A reply as the person reads it: the text above the card of a stop, or the outcome when the form is over.
 
     The skill's own text is one JSON object, written for a calling agent; a person in a chat gets the same
-    data as a line of markdown, and at the approval as the table of what will be submitted.
+    data as a line of markdown, and at the approval as a table of the values as they will be sent — always,
+    as that is what is approved — with the workflow's own summary under it when its form has one.
     """
     form = _form(reply)
     if form is None:
@@ -338,20 +349,38 @@ def shown(reply: Reply) -> str:
         titled = form.title and form.title != UNTITLED
         return f"**Workflow form {key}**" + (f" — {form.title}" if titled else "")
     if form.status == "confirming":
-        lines = [f"**Start workflow {key} with these values?**"]
-        if form.values:
-            lines += ["", "| Field | Value |", "|---|---|"]
-            lines += [f"| {name} | {_cell(form.labels.get(name, value))} |" for name, value in form.values.items()]
-        if form.defaults:
-            defaults = ", ".join(f"{name} = {_cell(value)}" for name, value in form.defaults.items())
-            lines += ["", f"Defaults that apply: {defaults}"]
-        return "\n".join(lines)
+        tables = [line for table in form.summary for line in _summary_table(table)]
+        summary = ["", SUMMARY_CAPTION, *tables] if tables else []
+        return "\n".join([f"**Start workflow {key} with these values?**", *_values_table(form), *summary])
     if form.status == "started":
         outcome = f"Process id: `{form.process_id}`" if form.process_id else (form.reason or "")
         return f"Workflow {key} started. {outcome}".rstrip()
     if form.status == "cancelled":
         return f"The {key} form was cancelled; nothing was started."
     return f"The {key} form failed: {form.reason}"
+
+
+def _summary_table(table: SummaryTable) -> list[str]:
+    """One table of the workflow's own summary: a row per label, a column per item, headed when the form heads them."""
+    columns = table.get("columns") or [[]]
+    headers = [*table.get("headers", []), *[""] * len(columns)][: len(columns)]
+    lines = ["", "| | " + " | ".join(_cell(header) for header in headers) + " |", "|---|" + "---|" * len(columns)]
+    for row, label in enumerate(table.get("labels", [])):
+        cells = [_cell(column[row]) if row < len(column) else "" for column in columns]
+        lines.append(f"| {_cell(label)} | " + " | ".join(cells) + " |")
+    return lines
+
+
+def _values_table(form: FormReply) -> list[str]:
+    """The values as they will be submitted (an id as the label the form has for it), and the defaults that apply."""
+    lines: list[str] = []
+    if form.values:
+        lines += ["", "| Field | Value |", "|---|---|"]
+        lines += [f"| {name} | {_cell(form.labels.get(name, value))} |" for name, value in form.values.items()]
+    if form.defaults:
+        defaults = ", ".join(f"{name} = {_cell(value)}" for name, value in form.defaults.items())
+        lines += ["", f"Defaults that apply: {defaults}"]
+    return lines
 
 
 def _form(reply: Reply) -> FormReply | None:

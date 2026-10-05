@@ -86,12 +86,25 @@ class FormError(TypedDict):
     ctx: NotRequired[dict[str, Any]]
 
 
+class SummaryTable(TypedDict, total=False):
+    """One table of a workflow's own summary page, as pydantic-forms carries it (the shape of its ``SummaryData``).
+
+    A row per label and a column per item compared (before and after, for a modify), headed when the form
+    heads them.
+    """
+
+    headers: list[str]
+    labels: list[str]
+    columns: list[list[Any]]
+
+
 class FormReply(BaseModel):
     """What a turn of the form-fill skill came to, as data: the text of its reply, one JSON object.
 
     Nothing in it is phrased by this code; it carries core's own data. ``gathering``: the page core did not
     accept and what core ``rejected`` in its own words (pydantic-forms' error dicts), the ``values`` known
-    so far. ``confirming``: the ``values`` to be submitted and the ``defaults`` that apply. ``started``:
+    so far. ``confirming``: the ``values`` to be submitted and the ``defaults`` that apply, and the
+    workflow's own ``summary`` of the start when its form ends in one (core's summary form). ``started``:
     the ``process_id`` (or, when core's answer was not one, that answer as the ``reason``). ``failed``: the
     ``reason``, as the error came. ``labels`` says how the form shows a value that is one of its options
     (an id is not something a person can confirm).
@@ -106,6 +119,7 @@ class FormReply(BaseModel):
     values: dict[str, Any] = Field(default_factory=dict)
     labels: dict[str, Any] = Field(default_factory=dict)  # field -> the label of its value, where the form has one
     defaults: dict[str, Any] = Field(default_factory=dict)
+    summary: list[SummaryTable] = Field(default_factory=list)  # the tables of the form's own summary page
     process_id: str | None = None
 
     def as_text(self) -> str:

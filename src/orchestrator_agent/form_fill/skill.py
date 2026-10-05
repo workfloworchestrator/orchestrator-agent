@@ -71,6 +71,7 @@ from orchestrator_agent.form_fill.core_bridge import (
     label_of,
     labels,
     page_model,
+    summaries,
     value_type,
 )
 from orchestrator_agent.form_fill.interpret import Interpreter
@@ -460,7 +461,11 @@ class FormFillSkill:
         return {name: label for name, label in shown.items() if label is not None}
 
     def _summary(self, session: FormFillSession) -> Reply:
-        """Every value to be submitted and the defaults that apply, with the create call for the human to approve."""
+        """Every value to be submitted and the defaults that apply, with the create call for the human to approve.
+
+        A form that ends in the workflow's own summary page (core's summary form) has its tables on the
+        reply as well: what the workflow's author wants confirmed, as core made it of these very values.
+        """
         given = _given(session)
         shown = self._labels(session, given)
         defaults = {
@@ -469,7 +474,12 @@ class FormFillSkill:
             if name not in given and not info.is_required()
         }
         data = FormReply(
-            workflow_key=session.workflow_key, status="confirming", values=given, labels=shown, defaults=defaults
+            workflow_key=session.workflow_key,
+            status="confirming",
+            values=given,
+            labels=shown,
+            defaults=defaults,
+            summary=[table for schema in session.pages for table in summaries(schema)],
         )
         # The call is shown as it will be made; ``labels`` only says what its ids stand for.
         args = {**self._create_args(session), **({"labels": shown} if shown else {})}

@@ -230,7 +230,10 @@ extension gets no form (the handoff tool says so and the model relays it). The s
    open: the page is asked again with what core said.
 4. **Confirms** — at `complete: true` the stop is an approval of the `create_workflow` call, shown as it
    will be made (`workflow_key`, `json_data`: exactly the validated pages) plus `labels` saying what its
-   ids stand for. Approve starts; reject cancels.
+   ids stand for. Approve starts; reject cancels. A form that ends in the workflow's own summary page
+   (core's summary form) has its tables on the reply as `summary`. LibreChat's approval always shows the
+   values as they will be sent — that is what is approved — and adds those tables under them: what the
+   workflow's author wants confirmed, before and after for a modify.
 5. **Starts** — `create_workflow` from code with exactly the last walk's validated pages. A start is
    sent once per approval: only core's own validation errors on the pages reopen the form (the rejected
    fields are asked again); any other failure leaves it unknown whether the process started, so the

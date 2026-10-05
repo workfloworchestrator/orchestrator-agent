@@ -38,16 +38,17 @@ from types import NoneType, UnionType
 from typing import Any, Literal, Union, get_args, get_origin
 
 from annotated_types import MaxLen, MinLen
-from pydantic import BaseModel, ConfigDict, Field, ValidationError, create_model
+from pydantic import BaseModel, ConfigDict, Field, TypeAdapter, ValidationError, create_model
 from pydantic.fields import FieldInfo
 
-from orchestrator_agent.state import ACCEPT_VALUE, FormError
+from orchestrator_agent.state import ACCEPT_VALUE, FormError, SummaryTable
 
 # pydantic-forms ``format`` markers the skill interprets (the ``json_schema_extra`` of its field types).
 # Those field classes are not imported: ``pydantic_forms.validators`` pulls in a contact-person field that
 # needs ``email-validator``, which this agent does not ship.
 FORMAT_ACCEPT = "accept"
-DISPLAY_ONLY_FORMATS = frozenset({"label", "divider", "summary", "markdown", "callout", "hidden", "subscription"})
+FORMAT_SUMMARY = "summary"  # a table of the workflow's own recap (``MigrationSummary``): shown, never filled
+DISPLAY_ONLY_FORMATS = frozenset({"label", "divider", FORMAT_SUMMARY, "markdown", "callout", "hidden", "subscription"})
 
 # What a page model's fields carry in ``json_schema_extra``: the form's ``format`` marker, and the label
 # behind each allowed value when the two differ.
@@ -203,6 +204,31 @@ def resolve_property(prop: Mapping[str, Any], defs: Mapping[str, Any]) -> dict[s
     return merged
 
 
+_SUMMARY_TABLE: TypeAdapter[SummaryTable] = TypeAdapter(SummaryTable)
+
+
+def summaries(schema: Mapping[str, Any]) -> list[SummaryTable]:
+    """The tables of the workflow's own summary on a page: what its author wants confirmed before the start.
+
+    A summary field is display-only, so it is no field of the page model; its table is not a value but
+    part of the field's schema, carried with the widget hints (core's summary form, ``MigrationSummary``).
+    """
+    defs = schema.get("$defs") or {}
+    tables: list[SummaryTable] = []
+    for prop in (schema.get("properties") or {}).values():
+        resolved = resolve_property(prop, defs) if isinstance(prop, Mapping) else {}
+        if resolved.get(FORMAT) != FORMAT_SUMMARY:
+            continue
+        hints = resolved.get("extraProperties") or resolved.get("uniforms") or {}
+        try:
+            table = _SUMMARY_TABLE.validate_python(hints.get("data"))
+        except ValidationError:
+            continue
+        if table.get("labels"):
+            tables.append(table)
+    return tables
+
+
 def is_read_only(prop: Mapping[str, Any]) -> bool:
     """A field the form renders but never lets the user change (``ReadOnlyField``).
 
@@ -317,5 +343,6 @@ __all__ = [
     "labels",
     "page_model",
     "resolve_property",
+    "summaries",
     "value_type",
 ]
