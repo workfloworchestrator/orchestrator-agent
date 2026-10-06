@@ -13,16 +13,17 @@
 
 from orchestrator_agent.adapters.a2a import A2AAdapter, WFOAgentExecutor
 from orchestrator_agent.adapters.ag_ui import AGUIEventStream, AGUIWorker
+from orchestrator_agent.adapters.chat import ChatCompletionsAdapter
 from orchestrator_agent.adapters.mcp import MCPApp, MCPWorker
-from orchestrator_agent.adapters.stream import NO_RESULTS, collect_stream_output  # noqa: F401  (public re-export)
+from orchestrator_agent.turn import NO_RESULTS
 
 __all__ = [
     "A2AAdapter",
     "WFOAgentExecutor",
     "AGUIEventStream",
     "AGUIWorker",
+    "ChatCompletionsAdapter",
     "MCPApp",
     "MCPWorker",
     "NO_RESULTS",
-    "collect_stream_output",
 ]

@@ -11,9 +11,12 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+from collections.abc import Sequence
+from typing import Any
 from uuid import UUID
 
 from orchestrator.core.db.models import GraphSnapshotTable
+from pydantic_ai.messages import ModelMessage, ModelMessagesTypeAdapter
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 from structlog import get_logger
@@ -21,6 +24,16 @@ from structlog import get_logger
 from orchestrator_agent.state import SearchState
 
 logger = get_logger(__name__)
+
+
+def dump_messages(messages: Sequence[ModelMessage]) -> list[dict[str, Any]]:
+    """Model messages as the JSON the state stores in ``message_history``."""
+    return ModelMessagesTypeAdapter.dump_python(list(messages), mode="json")
+
+
+def load_messages(stored: Sequence[dict[str, Any]]) -> list[ModelMessage] | None:
+    """The stored ``message_history`` back as model messages; None when there is none to replay."""
+    return ModelMessagesTypeAdapter.validate_python(list(stored)) if stored else None
 
 
 class PostgresStatePersistence:

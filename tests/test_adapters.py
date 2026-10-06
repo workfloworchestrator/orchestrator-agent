@@ -17,31 +17,27 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import httpx
 import pytest
 from a2a.server.agent_execution import RequestContext
-from a2a.server.apps.jsonrpc.fastapi_app import A2AFastAPIApplication
-from a2a.server.events import EventQueue
-from a2a.server.request_handlers.default_request_handler import DefaultRequestHandler
-from a2a.server.tasks import InMemoryTaskStore
+from a2a.server.context import ServerCallContext
+from a2a.server.events import EventQueueLegacy
 from a2a.types import (
-    AgentCapabilities,
-    AgentCard,
     Message,
-    MessageSendParams,
     Part,
     Role,
+    SendMessageRequest,
     TaskArtifactUpdateEvent,
     TaskState,
     TaskStatusUpdateEvent,
-    TextPart,
 )
 from ag_ui.core import RunAgentInput, ToolCallResultEvent, UserMessage
+from google.protobuf import json_format
 from pydantic_ai.messages import ToolReturnPart
 
-from orchestrator_agent.adapters.a2a import A2A_SKILLS, NO_RESULTS, WFOAgentExecutor
+from orchestrator_agent.adapters.a2a import A2A_SKILLS, NO_RESULTS, A2AAdapter, WFOAgentExecutor
+from orchestrator_agent.adapters.a2a.kagent import HITL_EXTENSION_URI
 from orchestrator_agent.adapters.ag_ui import AGUIEventStream, AGUIWorker, _AGUIAdapter
 from orchestrator_agent.adapters.mcp import MCPApp, MCPWorker
-from orchestrator_agent.adapters.stream import collect_stream_output
 from orchestrator_agent.artifacts import QueryArtifact
-from orchestrator_agent.state import SearchState
+from orchestrator_agent.state import Approval, AskField, Decision, FormFillSession, FormInput, Reply, SearchState
 
 from .conftest import (
     make_artifact_event,
@@ -56,6 +52,22 @@ SAMPLE_ARTIFACT = QueryArtifact(
     query_id="q-123",
     total_results=5,
 )
+
+
+def _agent_doing(setup, text="model text") -> MagicMock:
+    """An agent mock whose run applies ``setup(state)`` (what the form-fill capability would do) and answers ``text``."""
+    agent = MagicMock()
+    agent.__aenter__ = AsyncMock(return_value=agent)
+    agent.__aexit__ = AsyncMock(return_value=False)
+
+    @asynccontextmanager
+    async def _run(*args, **kwargs):
+        agent._last_call = (args, kwargs)
+        setup(kwargs["deps"].state)
+        yield mock_event_stream(make_text_result_event(text))
+
+    agent.run_stream_events = MagicMock(side_effect=_run)
+    return agent
 
 
 def _agent_mock(event_stream_factory) -> MagicMock:
@@ -75,22 +87,6 @@ def _agent_mock(event_stream_factory) -> MagicMock:
 
     agent.run_stream_events = MagicMock(side_effect=_run_stream_events)
     return agent
-
-
-class TestCollectStreamOutput:
-    @pytest.mark.asyncio
-    async def test_artifacts_take_priority_over_text(self):
-        stream = mock_event_stream(
-            make_artifact_event("search", SAMPLE_ARTIFACT),
-            make_text_result_event("Execution completed"),
-        )
-        result = await collect_stream_output(stream)
-        assert result == SAMPLE_ARTIFACT.model_dump_json()
-
-    @pytest.mark.asyncio
-    async def test_empty_stream(self):
-        result = await collect_stream_output(mock_event_stream())
-        assert result == "No results"
 
 
 class TestAGUIEventStream:
@@ -121,16 +117,11 @@ class TestAGUIEventStream:
 
 def _make_request_context(user_text: str = "show subscriptions") -> RequestContext:
     """Create a RequestContext for testing."""
-    msg = Message(
-        role=Role.user,
-        parts=[Part(root=TextPart(text=user_text))],
-        message_id=str(uuid.uuid4()),
-    )
-    params = MessageSendParams(message=msg)
-    return RequestContext(request=params)
+    msg = Message(role=Role.ROLE_USER, parts=[Part(text=user_text)], message_id=str(uuid.uuid4()))
+    return RequestContext(call_context=ServerCallContext(), request=SendMessageRequest(message=msg))
 
 
-async def _collect_events(queue: EventQueue) -> list[Any]:
+async def _collect_events(queue: EventQueueLegacy) -> list[Any]:
     """Drain all events from an EventQueue after execute() completes."""
     events = []
     while True:
@@ -149,7 +140,7 @@ class TestWFOAgentExecutor:
 
         load_state -> None, snapshot -> no-op.
         """
-        with patch("orchestrator_agent.adapters.a2a.PostgresStatePersistence") as mock_cls:
+        with patch("orchestrator_agent.adapters.a2a.adapter.PostgresStatePersistence") as mock_cls:
             instance = mock_cls.return_value
             instance.load_state = AsyncMock(return_value=None)
             instance.snapshot = AsyncMock()
@@ -169,7 +160,7 @@ class TestWFOAgentExecutor:
         ex = WFOAgentExecutor(agent)
 
         ctx = _make_request_context()
-        queue = EventQueue()
+        queue = EventQueueLegacy()
         await ex.execute(ctx, queue)
         events = await _collect_events(queue)
 
@@ -178,11 +169,12 @@ class TestWFOAgentExecutor:
         assert len(artifact_events) == 1
         # Structured tool result rides A2A as a DataPart (not raw-JSON text), so it survives
         # for rich/direct clients without polluting text-only consumers.
-        assert artifact_events[0].artifact.parts[0].root.data == json.loads(SAMPLE_ARTIFACT.model_dump_json())
-        assert status_events[0].status.state == TaskState.working
-        assert status_events[-1].status.state == TaskState.completed
+        data = json_format.MessageToDict(artifact_events[0].artifact.parts[0].data)
+        assert data["query_id"] == str(SAMPLE_ARTIFACT.query_id)  # a JSON value in the part, not raw-JSON text
+        assert status_events[0].status.state == TaskState.TASK_STATE_WORKING
+        assert status_events[-1].status.state == TaskState.TASK_STATE_COMPLETED
         # Completed message is the agent's own (markdown) answer — never raw tool JSON.
-        completed_text = status_events[-1].status.message.parts[0].root.text
+        completed_text = status_events[-1].status.message.parts[0].text
         assert completed_text == "Execution completed"
 
     @pytest.mark.asyncio
@@ -192,11 +184,121 @@ class TestWFOAgentExecutor:
         ex = WFOAgentExecutor(agent)
 
         ctx = _make_request_context("show subscriptions")
-        queue = EventQueue()
+        queue = EventQueueLegacy()
         await ex.execute(ctx, queue)
 
         args, _kwargs = agent._last_call
         assert args[0] == "show subscriptions"
+
+    @pytest.mark.asyncio
+    @patch("orchestrator.core.db.db")
+    async def test_form_session_restored_from_prior_turn(self, _mock_db):
+        """A form being filled spans turns: the validated pages come back with the thread state.
+
+        The human's response arrives on a later message, so the run's deps must carry the prior turn's
+        ``form_fill``.
+        """
+        session = FormFillSession(workflow_key="create_node", page_inputs=[{"product": "p-1"}], status="confirming")
+        prior = SearchState(form_fill=session)
+        agent = _agent_mock(lambda: mock_event_stream(make_text_result_event("Started")))
+        with patch("orchestrator_agent.adapters.a2a.adapter.PostgresStatePersistence") as mock_cls:
+            mock_cls.return_value.load_state = AsyncMock(return_value=prior)
+            mock_cls.return_value.snapshot = AsyncMock()
+            await WFOAgentExecutor(agent).execute(_make_request_context("yes, go ahead"), EventQueueLegacy())
+
+            _args, kwargs = agent._last_call
+            assert kwargs["deps"].state.form_fill == session
+            # The snapshot at the end of the turn carries the (same) state object onward.
+            mock_cls.return_value.snapshot.assert_awaited_once_with(kwargs["deps"].state)
+
+    @pytest.mark.asyncio
+    @patch("orchestrator.core.db.db")
+    async def test_an_open_form_continues_on_a_new_task_of_the_same_context(self, _mock_db):
+        """A parent agent calls this agent as a new task per turn: the form is the conversation's, not the task's."""
+        open_form = FormFillSession(workflow_key="w", status="gathering")
+        seen = []
+        agent = _agent_doing(lambda state: seen.append(state.form_fill), text="ok")
+        with patch("orchestrator_agent.adapters.a2a.adapter.PostgresStatePersistence") as mock_cls:
+            mock_cls.return_value.load_state = AsyncMock(return_value=SearchState(form_fill=open_form))
+            mock_cls.return_value.snapshot = AsyncMock()
+            msg = Message(role=Role.ROLE_USER, parts=[Part(text="continue")], message_id=str(uuid.uuid4()))
+            ctx = RequestContext(
+                call_context=ServerCallContext(),
+                request=SendMessageRequest(message=msg),
+                task_id="task-NEW",
+                context_id="ctx-1",
+            )
+            await WFOAgentExecutor(agent).execute(ctx, EventQueueLegacy())
+            assert seen == [open_form]  # the skill sees the open form on the new task
+            assert mock_cls.call_args.kwargs["thread_id"] == "ctx-1"  # memory is keyed on the conversation
+
+    @pytest.mark.asyncio
+    @patch("orchestrator.core.db.db")
+    @pytest.mark.parametrize(
+        "headers, expected",
+        [
+            pytest.param({}, "ctx-1", id="no-lineage: the A2A context"),
+            pytest.param({"x-kagent-parent-context-id": "chat-P"}, "chat-P", id="the calling agent's chat"),
+            pytest.param(
+                {"x-kagent-parent-context-id": "chat-P", "x-kagent-root-context-id": "chat-R"},
+                "chat-R",
+                id="the user-facing chat wins",
+            ),
+        ],
+    )
+    async def test_memory_and_the_form_are_keyed_on_the_chat_a_parent_forwards(self, _mock_db, headers, expected):
+        """A parent's own A2A context is shared by every chat (or new per call); the chat it forwards is the conversation.
+
+        Keyed on the context alone, one chat could continue or end another chat's open form.
+        """
+        agent = _agent_mock(lambda: mock_event_stream(make_text_result_event("ok")))
+        with patch("orchestrator_agent.adapters.a2a.adapter.PostgresStatePersistence") as mock_cls:
+            mock_cls.return_value.load_state = AsyncMock(return_value=None)
+            mock_cls.return_value.snapshot = AsyncMock()
+            msg = Message(role=Role.ROLE_USER, parts=[Part(text="hi")], message_id=str(uuid.uuid4()))
+            ctx = RequestContext(
+                call_context=ServerCallContext(state={"headers": headers}),
+                request=SendMessageRequest(message=msg),
+                context_id="ctx-1",
+            )
+            executor = WFOAgentExecutor(agent)
+            assert executor._conversation(ctx) == expected
+            await executor.execute(ctx, EventQueueLegacy())
+            assert mock_cls.call_args.kwargs["thread_id"] == expected
+            assert not executor._locks  # the per-conversation lock is released
+
+    @pytest.mark.asyncio
+    @patch("orchestrator.core.db.db")
+    async def test_a_form_reply_left_by_the_capability_is_the_answer(self, _mock_db):
+        """The form-fill capability ends the run with its reply; the executor delivers exactly that text."""
+
+        def claimed(state):
+            state.form_reply = Reply('{"workflow_key":"w","status":"started"}')
+
+        agent = _agent_doing(claimed, text='{"workflow_key":"w","status":"started"}\n\n| table |')
+        with patch("orchestrator_agent.adapters.a2a.adapter.PostgresStatePersistence") as mock_cls:
+            mock_cls.return_value.load_state = AsyncMock(return_value=None)
+            mock_cls.return_value.snapshot = AsyncMock()
+            queue = EventQueueLegacy()
+            await WFOAgentExecutor(agent).execute(_make_request_context("create a lightpath"), queue)
+            events = await _collect_events(queue)
+            last = [e for e in events if isinstance(e, TaskStatusUpdateEvent)][-1]
+            assert last.status.state == TaskState.TASK_STATE_COMPLETED
+            assert last.status.message.parts[0].text == '{"workflow_key":"w","status":"started"}'
+            (snapshot_state,), _ = mock_cls.return_value.snapshot.await_args
+            dumped = snapshot_state.model_dump(mode="json")  # what this turn carried is transient
+            assert not {"form_reply", "form_input", "hitl"} & set(dumped)
+
+    @pytest.mark.asyncio
+    @patch("orchestrator.core.db.db")
+    async def test_without_a_form_reply_the_models_text_is_the_answer(self, _mock_db):
+        agent = _agent_mock(lambda: mock_event_stream(make_text_result_event("model answer")))
+        queue = EventQueueLegacy()
+        await WFOAgentExecutor(agent).execute(_make_request_context("how many subscriptions"), queue)
+        events = await _collect_events(queue)
+        status_events = [e for e in events if isinstance(e, TaskStatusUpdateEvent)]
+        assert status_events[-1].status.message.parts[0].text == "model answer"
+        agent.run_stream_events.assert_called_once()
 
     @pytest.mark.asyncio
     @patch("orchestrator.core.db.db")
@@ -206,13 +308,13 @@ class TestWFOAgentExecutor:
         ex = WFOAgentExecutor(agent)
 
         ctx = _make_request_context()
-        queue = EventQueue()
+        queue = EventQueueLegacy()
         await ex.execute(ctx, queue)
         events = await _collect_events(queue)
 
         status_events = [e for e in events if isinstance(e, TaskStatusUpdateEvent)]
-        assert status_events[-1].status.state == TaskState.completed
-        assert status_events[-1].status.message.parts[0].root.text == "Done"
+        assert status_events[-1].status.state == TaskState.TASK_STATE_COMPLETED
+        assert status_events[-1].status.message.parts[0].text == "Done"
 
     @pytest.mark.asyncio
     @patch("orchestrator.core.db.db")
@@ -221,13 +323,13 @@ class TestWFOAgentExecutor:
         ex = WFOAgentExecutor(agent)
 
         ctx = _make_request_context()
-        queue = EventQueue()
+        queue = EventQueueLegacy()
         await ex.execute(ctx, queue)
         events = await _collect_events(queue)
 
         status_events = [e for e in events if isinstance(e, TaskStatusUpdateEvent)]
-        assert status_events[-1].status.state == TaskState.completed
-        assert status_events[-1].status.message.parts[0].root.text == NO_RESULTS
+        assert status_events[-1].status.state == TaskState.TASK_STATE_COMPLETED
+        assert status_events[-1].status.message.parts[0].text == NO_RESULTS
 
     @pytest.mark.asyncio
     @patch("orchestrator.core.db.db")
@@ -245,25 +347,198 @@ class TestWFOAgentExecutor:
         ex = WFOAgentExecutor(agent)
 
         ctx = _make_request_context()
-        queue = EventQueue()
+        queue = EventQueueLegacy()
         await ex.execute(ctx, queue)
         events = await _collect_events(queue)
 
         status_events = [e for e in events if isinstance(e, TaskStatusUpdateEvent)]
-        assert status_events[-1].status.state == TaskState.failed
+        assert status_events[-1].status.state == TaskState.TASK_STATE_FAILED
 
     @pytest.mark.asyncio
     @patch("orchestrator.core.db.db")
     async def test_cancel(self, _mock_db):
         ex = WFOAgentExecutor(_agent_mock(lambda: mock_event_stream()))
         ctx = _make_request_context()
-        queue = EventQueue()
+        queue = EventQueueLegacy()
         await ex.cancel(ctx, queue)
         events = await _collect_events(queue)
 
         assert len(events) == 1
         assert isinstance(events[0], TaskStatusUpdateEvent)
-        assert events[0].status.state == TaskState.canceled
+        assert events[0].status.state == TaskState.TASK_STATE_CANCELED
+
+
+class TestWFOAgentExecutorHITL:
+    """kagent's human-in-the-loop extension: a stop of the skill is an input-required pause, a response resumes it."""
+
+    URI = HITL_EXTENSION_URI
+
+    @staticmethod
+    def _context(text, *, metadata=None, task_id="task-1", extension=True):
+        msg = Message(role=Role.ROLE_USER, parts=[Part(text=text)], message_id=str(uuid.uuid4()), metadata=metadata)
+        call_context = ServerCallContext(requested_extensions={TestWFOAgentExecutorHITL.URI} if extension else set())
+        return RequestContext(
+            call_context=call_context, request=SendMessageRequest(message=msg), task_id=task_id, context_id="ctx-1"
+        )
+
+    @staticmethod
+    def _persistence(prior=None):
+        patcher = patch("orchestrator_agent.adapters.a2a.adapter.PostgresStatePersistence")
+        mock_cls = patcher.start()
+        mock_cls.return_value.load_state = AsyncMock(return_value=prior)
+        mock_cls.return_value.snapshot = AsyncMock()
+        return patcher, mock_cls
+
+    async def _run(self, agent, context, prior=None):
+        """One executor turn: (the last status event, the state that was snapshotted)."""
+        patcher, mock_cls = self._persistence(prior)
+        try:
+            queue = EventQueueLegacy()
+            await WFOAgentExecutor(agent).execute(context, queue)
+            last = [e for e in await _collect_events(queue) if isinstance(e, TaskStatusUpdateEvent)][-1]
+            (snapshot_state,), _ = mock_cls.return_value.snapshot.await_args
+            assert mock_cls.call_args.kwargs["thread_id"] == "ctx-1"  # memory stays keyed on the context
+            return last, snapshot_state
+        finally:
+            patcher.stop()
+
+    ASK = Reply(
+        '{"workflow_key":"w","status":"gathering","page":1}',
+        ask=[AskField(name="redundancy", question="Redundancy?", choices=["Protected"], values=["protected"])],
+    )
+
+    @staticmethod
+    def _stopping(reply):
+        def stopped(state):
+            state.form_fill = state.form_fill or FormFillSession(workflow_key="w", status="gathering")
+            state.form_reply = reply
+
+        return _agent_doing(stopped, text=reply.text)
+
+    def test_card_declares_the_extension(self):
+        adapter = A2AAdapter(_agent_mock(lambda: mock_event_stream()), url="http://x/")
+        card = adapter.agent_card
+        assert [e.uri for e in card.capabilities.extensions] == [self.URI]
+        assert card.capabilities.extensions[0].required is False
+        assert [i.protocol_version for i in card.supported_interfaces] == ["1.0", "0.3"]
+
+    @pytest.mark.asyncio
+    @patch("orchestrator.core.db.db")
+    async def test_a_stop_pauses_the_task_with_an_ask_user_request(self, _mock_db):
+        last, state = await self._run(self._stopping(self.ASK), self._context("create a lightpath"))
+        assert last.status.state == TaskState.TASK_STATE_INPUT_REQUIRED
+        assert last.status.message.parts[0].text == self.ASK.text
+        payload = json_format.MessageToDict(last.status.message.metadata)[self.URI]
+        assert payload["type"] == "ask_user_request" and payload["questions"] == [
+            {"question": "Redundancy?", "choices": ["Protected"], "multiple": False}
+        ]
+        assert list(last.status.message.extensions) == [self.URI]
+        # The session remembers what was asked (keyed by the request id), before the state is persisted.
+        assert state.form_fill.pending == {
+            "id": payload["id"],
+            "kind": "ask",
+            "questions": [
+                {
+                    "name": "redundancy",
+                    "question": "Redundancy?",
+                    "choices": ["Protected"],
+                    "values": ["protected"],
+                    "multiple": False,
+                    "required": True,
+                    "title": "",
+                    "problem": "",
+                }
+            ],
+        }
+        assert state.form_fill.unseen is False  # it answers a message: the human gets to see it
+
+    @pytest.mark.asyncio
+    @patch("orchestrator.core.db.db")
+    async def test_a_summary_pauses_the_task_with_the_start_to_approve(self, _mock_db):
+        approval = Approval(hint="Start?", tool_name="create_workflow", args={"workflow_key": "w", "json_data": [{}]})
+        reply = Reply('{"workflow_key":"w","status":"confirming"}', approval=approval)
+        last, state = await self._run(self._stopping(reply), self._context("go on"))
+        assert last.status.state == TaskState.TASK_STATE_INPUT_REQUIRED
+        payload = json_format.MessageToDict(last.status.message.metadata)[self.URI]
+        (tool,) = payload["tools"]
+        assert payload["type"] == "tool_approval_request" and payload["hint"] == "Start?"
+        assert tool["name"] == "create_workflow" and tool["args"] == {"workflow_key": "w", "json_data": [{}]}
+        assert state.form_fill.pending == {"id": tool["id"], "kind": "approval", "questions": []}
+
+    @pytest.mark.asyncio
+    @patch("orchestrator.core.db.db")
+    async def test_an_ask_user_response_is_the_skills_input_and_the_next_stop_is_unseen(self, _mock_db):
+        questions = [{"name": "redundancy", "question": "Redundancy?"}, {"name": "ticket_id", "question": "Ticket?"}]
+        pending = {"id": "req-9", "kind": "ask", "questions": questions}
+        prior = SearchState(form_fill=FormFillSession(workflow_key="w", status="gathering", pending=pending))
+        answers = [{"answer": ["protected"]}, {"answer": []}]
+        metadata = {self.URI: {"type": "ask_user_response", "id": "req-9", "answers": answers}}
+        agent = self._stopping(self.ASK)
+        _last, state = await self._run(agent, self._context("Human input supplied", metadata=metadata), prior)
+        _args, kwargs = agent._last_call
+        run_state = kwargs["deps"].state
+        assert run_state.hitl and run_state.form_input == FormInput(
+            values={"redundancy": "protected"}
+        )  # empty: nothing
+        # The stop that answers a response goes out on a resumed call, which a parent runtime does not show.
+        assert state.form_fill.unseen is True and state.form_fill.pending["id"] != "req-9"
+
+    @pytest.mark.asyncio
+    @patch("orchestrator.core.db.db")
+    @pytest.mark.parametrize(
+        "approval, expected",
+        [
+            ({"id": "req-5", "approved": True}, FormInput(decision=Decision.START)),
+            ({"id": "req-5", "approved": False, "rejection_reason": "not now"}, FormInput(decision=Decision.CANCEL)),
+            # A rejection's reason is never read: not even a JSON object in it is a correction.
+            ({"id": "req-5", "approved": False, "rejection_reason": '{"a": 1}'}, FormInput(decision=Decision.CANCEL)),
+            ({"id": "other", "approved": True}, FormInput()),  # not about the pending stop: it is shown again
+        ],
+    )
+    async def test_a_tool_approval_response_is_a_decision(self, _mock_db, approval, expected):
+        pending = {"id": "req-5", "kind": "approval"}
+        prior = SearchState(form_fill=FormFillSession(workflow_key="w", status="confirming", pending=pending))
+        metadata = {self.URI: {"type": "tool_approval_response", "approvals": [approval]}}
+        agent = _agent_mock(lambda: mock_event_stream(make_text_result_event("ok")))
+        await self._run(agent, self._context("Human input supplied", metadata=metadata), prior)
+        _args, kwargs = agent._last_call
+        assert kwargs["deps"].state.form_input == expected
+
+    @pytest.mark.asyncio
+    @patch("orchestrator.core.db.db")
+    async def test_a_malformed_response_is_ignored_but_keeps_the_human_with_the_form(self, _mock_db):
+        pending = {"id": "req-5", "kind": "approval"}
+        prior = SearchState(form_fill=FormFillSession(workflow_key="w", status="confirming", pending=pending))
+        metadata = {self.URI: {"type": "tool_approval_response", "approvals": "nope"}}
+        agent = _agent_mock(lambda: mock_event_stream(make_text_result_event("ok")))
+        last, _state = await self._run(agent, self._context("Human input supplied", metadata=metadata), prior)
+        _args, kwargs = agent._last_call
+        assert kwargs["deps"].state.form_input == FormInput()  # not a start, not a chat message: shown again
+        assert last.status.state == TaskState.TASK_STATE_COMPLETED  # and the task did not fail
+
+    @pytest.mark.asyncio
+    @patch("orchestrator.core.db.db")
+    async def test_a_message_without_a_response_carries_no_input(self, _mock_db):
+        pending = {"id": "req-5", "kind": "approval"}
+        prior = SearchState(form_fill=FormFillSession(workflow_key="w", status="confirming", pending=pending))
+        agent = _agent_mock(lambda: mock_event_stream(make_text_result_event("ok")))
+        last, _state = await self._run(agent, self._context("yes, start it"), prior)
+        _args, kwargs = agent._last_call
+        assert kwargs["deps"].state.form_input is None  # words are never an approval
+        assert last.status.state == TaskState.TASK_STATE_COMPLETED
+
+    @pytest.mark.asyncio
+    @patch("orchestrator.core.db.db")
+    async def test_without_the_extension_nothing_pauses_and_no_response_is_read(self, _mock_db):
+        pending = {"id": "req-5", "kind": "approval"}
+        prior = SearchState(form_fill=FormFillSession(workflow_key="w", status="confirming", pending=pending))
+        metadata = {self.URI: {"type": "tool_approval_response", "approvals": [{"id": "req-5", "approved": True}]}}
+        agent = self._stopping(self.ASK)
+        last, _state = await self._run(agent, self._context("x", metadata=metadata, extension=False), prior)
+        _args, kwargs = agent._last_call
+        assert kwargs["deps"].state.hitl is False and kwargs["deps"].state.form_input is None
+        assert last.status.state == TaskState.TASK_STATE_COMPLETED
+        assert not json_format.MessageToDict(last.status.message.metadata)
 
 
 class TestA2AEndpoint:
@@ -275,7 +550,7 @@ class TestA2AEndpoint:
 
         load_state -> None, snapshot -> no-op.
         """
-        with patch("orchestrator_agent.adapters.a2a.PostgresStatePersistence") as mock_cls:
+        with patch("orchestrator_agent.adapters.a2a.adapter.PostgresStatePersistence") as mock_cls:
             instance = mock_cls.return_value
             instance.load_state = AsyncMock(return_value=None)
             instance.snapshot = AsyncMock()
@@ -283,29 +558,13 @@ class TestA2AEndpoint:
 
     @pytest.fixture
     async def a2a_app(self):
-        agent = _agent_mock(lambda: mock_event_stream(make_text_result_event("Done")))
-        executor = WFOAgentExecutor(agent)
-        task_store = InMemoryTaskStore()
-        request_handler = DefaultRequestHandler(
-            agent_executor=executor,
-            task_store=task_store,
-        )
-        agent_card = AgentCard(
-            name="Test Agent",
-            url="http://localhost:8080",
-            description="Test",
-            version="1.0.0",
-            capabilities=AgentCapabilities(streaming=True),
-            skills=A2A_SKILLS,
-            default_input_modes=["application/json"],
-            default_output_modes=["application/json"],
-        )
-        a2a = A2AFastAPIApplication(agent_card=agent_card, http_handler=request_handler)
         from fastapi import FastAPI
 
+        agent = _agent_mock(lambda: mock_event_stream(make_text_result_event("Done")))
+        adapter = A2AAdapter(agent, url="http://localhost:8080/")
         app = FastAPI()
-        a2a.add_routes_to_app(app)
-        yield type("A2AAppFixture", (), {"app": app, "agent": agent, "executor": executor})
+        adapter.add_routes(app)
+        yield type("A2AAppFixture", (), {"app": app, "agent": agent, "executor": adapter.executor})
 
     @staticmethod
     def _jsonrpc_request(method: str, user_text: str = "show subscriptions", req_id: int = 1) -> dict:
@@ -314,68 +573,116 @@ class TestA2AEndpoint:
             "id": req_id,
             "method": method,
             "params": {
-                "message": {
-                    "role": "user",
-                    "parts": [{"kind": "text", "text": user_text}],
-                    "messageId": str(uuid.uuid4()),
-                }
+                "message": {"role": "ROLE_USER", "parts": [{"text": user_text}], "messageId": str(uuid.uuid4())}
             },
         }
 
     @pytest.mark.asyncio
     @patch("orchestrator.core.db.db")
-    async def test_message_send_endpoint_returns_completed(self, _mock_db, a2a_app):
-        """HTTP message/send returns a JSON-RPC response with a completed task and artifacts."""
+    async def test_send_message_returns_a_completed_task_with_artifacts(self, _mock_db, a2a_app):
         a2a_app.executor.agent = _agent_mock(
             lambda: mock_event_stream(
                 make_artifact_event("search", SAMPLE_ARTIFACT),
                 make_text_result_event("Execution completed"),
             )
         )
-
         transport = httpx.ASGITransport(app=a2a_app.app)
         async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
-            resp = await client.post("/", json=self._jsonrpc_request("message/send"))
-
+            resp = await client.post("/", json=self._jsonrpc_request("SendMessage"), headers={"A2A-Version": "1.0"})
         assert resp.status_code == 200
         body = resp.json()
-        assert body["jsonrpc"] == "2.0"
-        assert body["id"] == 1
-        result = body["result"]
-        assert result["status"]["state"] == "completed"
-        assert len(result["artifacts"]) >= 1
+        assert body["jsonrpc"] == "2.0" and body["id"] == 1
+        task = body["result"]["task"]
+        assert task["status"]["state"] == "TASK_STATE_COMPLETED"
+        assert len(task["artifacts"]) >= 1
+        assert task["status"]["message"]["parts"][0]["text"] == "Execution completed"
 
     @pytest.mark.asyncio
     @patch("orchestrator.core.db.db")
-    async def test_message_stream_endpoint_returns_completed(self, _mock_db, a2a_app):
-        """HTTP message/stream returns SSE events ending with completed status."""
+    async def test_send_streaming_message_ends_completed(self, _mock_db, a2a_app):
         transport = httpx.ASGITransport(app=a2a_app.app)
         async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
-            resp = await client.post("/", json=self._jsonrpc_request("message/stream"))
-
+            resp = await client.post(
+                "/", json=self._jsonrpc_request("SendStreamingMessage"), headers={"A2A-Version": "1.0"}
+            )
         assert resp.status_code == 200
-        events = []
-        for line in resp.text.strip().split("\n"):
-            if line.startswith("data: "):
-                events.append(json.loads(line[6:]))
-
-        assert len(events) >= 2
-        states = [e["result"]["status"]["state"] for e in events if "status" in e.get("result", {})]
-        assert "working" in states
-        assert "completed" in states
+        events = [json.loads(line[6:]) for line in resp.text.strip().split("\n") if line.startswith("data: ")]
+        states = [
+            e["result"]["statusUpdate"]["status"]["state"] for e in events if "statusUpdate" in e.get("result", {})
+        ]
+        assert "TASK_STATE_WORKING" in states and states[-1] == "TASK_STATE_COMPLETED"
 
     @pytest.mark.asyncio
     async def test_agent_card_endpoint(self, a2a_app):
-        """GET /.well-known/agent.json returns the agent card."""
         transport = httpx.ASGITransport(app=a2a_app.app)
         async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
-            resp = await client.get("/.well-known/agent.json")
-
+            resp = await client.get("/.well-known/agent-card.json")
         assert resp.status_code == 200
         card = resp.json()
-        assert card["name"] == "Test Agent"
-        assert card["capabilities"]["streaming"] is True
+        assert card["name"] == "WFO Agent" and card["capabilities"]["streaming"] is True
+        assert [i["protocolVersion"] for i in card["supportedInterfaces"]] == ["1.0", "0.3"]
+        # A 0.3 client (kagent before 1.0) reads the legacy fields the SDK adds for the 0.3 interface.
+        assert card["url"] == "http://localhost:8080/" and card["protocolVersion"] == "0.3"
         assert len(card["skills"]) == len(A2A_SKILLS)
+
+    @pytest.mark.asyncio
+    @patch("orchestrator.core.db.db")
+    async def test_an_a2a_0_3_client_is_served_on_the_same_endpoint_but_gets_no_pause(self, _mock_db, a2a_app):
+        """A 0.3 caller (``message/send``, parts by ``kind``) is answered; a form stop is never a pause for it."""
+        ask = Reply('{"status":"gathering"}', ask=[AskField(name="speed", question="Speed?")])
+
+        def stopped(state):
+            assert state.hitl is False  # no extension: the handoff tool opens no form for this caller
+            state.form_reply = ask
+
+        a2a_app.executor.agent = _agent_doing(stopped, text=ask.text)
+        request = {
+            "jsonrpc": "2.0",
+            "id": 7,
+            "method": "message/send",
+            "params": {
+                "message": {
+                    "kind": "message",
+                    "role": "user",
+                    "messageId": str(uuid.uuid4()),
+                    "parts": [{"kind": "text", "text": "how many subscriptions?"}],
+                }
+            },
+        }
+        transport = httpx.ASGITransport(app=a2a_app.app)
+        with patch("orchestrator_agent.adapters.a2a.adapter.PostgresStatePersistence") as mock_cls:
+            mock_cls.return_value.load_state = AsyncMock(return_value=None)
+            mock_cls.return_value.snapshot = AsyncMock()
+            async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
+                resp = await client.post("/", json=request)
+        task = resp.json()["result"]
+        assert task["kind"] == "task" and task["status"]["state"] == "completed"
+        assert task["status"]["message"]["parts"] == [{"kind": "text", "text": ask.text}]
+
+    @pytest.mark.asyncio
+    @patch("orchestrator.core.db.db")
+    async def test_an_a2a_0_3_client_can_stream(self, _mock_db, a2a_app):
+        """``message/stream`` in the 0.3 wire format: SSE events that end completed (kagent 0.x streams)."""
+        request = {
+            "jsonrpc": "2.0",
+            "id": 8,
+            "method": "message/stream",
+            "params": {
+                "message": {
+                    "kind": "message",
+                    "role": "user",
+                    "messageId": str(uuid.uuid4()),
+                    "parts": [{"kind": "text", "text": "show subscriptions"}],
+                }
+            },
+        }
+        transport = httpx.ASGITransport(app=a2a_app.app)
+        async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
+            resp = await client.post("/", json=request)
+        assert resp.status_code == 200
+        events = [json.loads(line[6:]) for line in resp.text.strip().split("\n") if line.startswith("data: ")]
+        states = [e["result"]["status"]["state"] for e in events if "status" in e.get("result", {})]
+        assert "working" in states and states[-1] == "completed"
 
 
 def _run_agent_mock(output: str = "", messages: list | None = None) -> MagicMock:
@@ -469,7 +776,8 @@ class TestMCPAppInit:
         app = MCPApp(MagicMock())
         names = {t.name for t in await app.server.list_tools()}
         advertised = {s.id for s in load_plugin_specs() if s.advertise}
-        assert advertised <= names  # every advertised plugin is a tool
+        # Every advertised plugin is a tool, but the form-fill handoff: that skill runs over A2A only.
+        assert advertised - {"workflow"} <= names and "workflow" not in names
         assert "ask" in names
 
 

@@ -23,6 +23,8 @@ from orchestrator_agent.capabilities.behavior.artifacts import data_artifact, ex
 from orchestrator_agent.capabilities.hooks import (
     DeferredToolGate,
     FilterPathGuard,
+    WriteToolGate,
+    build_capabilities,
     trim_history,
 )
 from orchestrator_agent.capabilities.spec import PluginSpec
@@ -30,6 +32,7 @@ from orchestrator_agent.rendering.charts import aggregate_to_mermaid
 from orchestrator_agent.rendering.tables import search_to_markdown
 from orchestrator_agent.tool_names import (
     AGGREGATE_TOOL,
+    CREATE_WORKFLOW_TOOL,
     DISCOVER_FILTER_PATHS_TOOL,
     EXPORT_QUERY_TOOL,
     RESOLVE_ENTITY_TOOL,
@@ -238,6 +241,30 @@ class TestDeferredToolGate:
         ctx = SimpleNamespace(loaded_capability_ids=set())
         names = {t.name for t in await gate.prepare_tools(ctx, list(self.DEFS))}
         assert AGGREGATE_TOOL in names
+
+
+class TestWriteToolGate:
+    """Core's write tools never reach the model; the form-fill skill is the only writer."""
+
+    DEFS = [
+        ToolDefinition(name=n)
+        for n in (SEARCH_TOOL, CREATE_WORKFLOW_TOOL, "resume_workflow_process", "abort_workflow_process")
+    ]
+
+    async def test_write_tools_hidden_read_tools_kept(self):
+        names = {t.name for t in await WriteToolGate().prepare_tools(SimpleNamespace(), list(self.DEFS))}
+        assert names == {SEARCH_TOOL}
+
+    def test_the_gate_and_the_handoff_plugin_come_with_the_form_fill_skill_only(self):
+        def parts(capabilities):
+            gated = any(isinstance(c, WriteToolGate) for c in capabilities)
+            return gated, {getattr(c, "id", None) for c in capabilities}
+
+        gated, ids = parts(build_capabilities(form_fill=True))
+        assert gated and "workflow" in ids
+        # Without the skill (MCP, AG-UI) the agent is what it was: no handoff to a tool that is not there.
+        gated, ids = parts(build_capabilities())
+        assert not gated and "workflow" not in ids and "search" in ids
 
 
 class TestArtifactMapping:

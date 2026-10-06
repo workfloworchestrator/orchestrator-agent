@@ -15,12 +15,25 @@ from orchestrator_agent.capabilities.spec import PluginSpec
 
 def test_default_specs_present():
     by_id = {s.id: s for s in load_plugin_specs()}
-    assert {"search", "aggregate", "entity", "export"} <= set(by_id)
+    assert {"search", "aggregate", "entity", "export", "workflow"} <= set(by_id)
 
 
 def test_specs_sorted_by_id():
     ids = [s.id for s in load_plugin_specs()]
-    assert ids == ["aggregate", "entity", "export", "search"]
+    assert ids == ["aggregate", "entity", "export", "search", "workflow"]
+
+
+def test_workflow_plugin_only_lists_and_hands_off():
+    # Form filling is the deterministic skill's job; the plugin advertises it on the A2A card and gives
+    # the model just the read-only listing and the handoff tool — never the form or write tools.
+    from orchestrator_agent.capabilities.behavior import owned_tool_names
+    from orchestrator_agent.tool_names import LIST_WORKFLOWS_TOOL, START_WORKFLOW_FORM_TOOL
+
+    spec = {s.id: s for s in load_plugin_specs()}["workflow"]
+    assert spec.artifact is None
+    assert spec.advertise is True
+    assert owned_tool_names(spec) == {LIST_WORKFLOWS_TOOL, START_WORKFLOW_FORM_TOOL}
+    assert "form-fill" in spec.instructions
 
 
 def test_spec_round_trips_through_json():

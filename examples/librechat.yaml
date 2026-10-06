@@ -1,0 +1,41 @@
+# Example LibreChat configuration for talking to the orchestrator-agent directly.
+#
+# LibreChat calls the agent as an OpenAI-compatible chat model (POST /v1/chat/completions). Workflow
+# forms are shown through LibreChat's ask-user tool, which needs LibreChat >= v0.8.8 and a model spec
+# with `askUserQuestion: true`. See "LibreChat directly (chat completions)" in the README.
+#
+# Merge the `endpoints.custom` entry and the `modelSpecs` entry into your own librechat.yaml.
+version: 1.3.17
+
+endpoints:
+  custom:
+    - name: 'WFO agent'
+      # Sent as "Authorization: Bearer <apiKey>" unless a header below sets Authorization.
+      apiKey: 'unused'
+      baseURL: 'http://orchestrator-agent:8080/v1'
+      models:
+        default: ['wfo']
+        fetch: false
+      # Otherwise LibreChat asks the agent itself for a chat title before the first answer.
+      titleConvo: false
+      modelDisplayLabel: 'WFO agent'
+      headers:
+        # The agent keeps a conversation's memory and its open form under this id.
+        X-Conversation-Id: '{{LIBRECHAT_BODY_CONVERSATIONID}}'
+        # Names the client, and is required: the agent opens a workflow form only for a caller that
+        # says it is LibreChat. LibreChat does not identify itself on its own (its requests carry the
+        # user agent of the OpenAI client library it is built on).
+        X-Agent-Client: 'librechat'
+        # With OpenID login, forward the signed-in user's token; the agent passes it on to
+        # orchestrator-core. Leave it out when the agent runs with OAUTH2_ACTIVE=false.
+        # Authorization: 'Bearer {{LIBRECHAT_OPENID_ACCESS_TOKEN}}'
+
+modelSpecs:
+  list:
+    - name: 'wfo'
+      label: 'WFO'
+      # Offers the ask-user tool to the agent. Without it the agent opens no workflow form.
+      askUserQuestion: true
+      preset:
+        endpoint: 'WFO agent'
+        model: 'wfo'

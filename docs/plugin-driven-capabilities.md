@@ -15,7 +15,9 @@ extend the agent, with YAML frontmatter for metadata. There is no bespoke templa
 A plugin projects to **one capability identity**. With no `artifact:` it loads as a plain
 `Capability` (instructions only); with `artifact: <type>` it loads as a `PluginCapability` carrying
 the matching builder from `ARTIFACT_BUILDERS` (instructions + the result hook, one id). Genuinely
-cross-cutting hooks (`FilterPathGuard`, `ProcessHistory`) are *not* plugins; they stay in `hooks.py`.
+cross-cutting hooks (`FilterPathGuard`, `WriteToolGate`, `ProcessHistory`) are *not* plugins; they stay in `hooks.py`.
+`WriteToolGate` and the `workflow` plugin (it owns the form-fill handoff tool) are only part of the agent the
+form-fill skill runs in (A2A): `build_capabilities(form_fill=True)`.
 
 ## On-disk layout
 
@@ -23,7 +25,7 @@ cross-cutting hooks (`FilterPathGuard`, `ProcessHistory`) are *not* plugins; the
 src/orchestrator_agent/capabilities/
   spec.py            # PluginSpec (validates frontmatter, carries instructions) + skills_from_specs
   loader.py          # discover *.md, parse frontmatter -> PluginSpec (body is the prompt, verbatim)
-  hooks.py           # build_capabilities() + cross-cutting hooks (FilterPathGuard, history trim)
+  hooks.py           # build_capabilities() + cross-cutting hooks (FilterPathGuard, WriteToolGate, history trim)
   behavior/          # shared behaviour: PluginCapability base + artifact mappers + `artifact:` registry
   system_prompt.md   # agent-level system prompt (NOT a plugin) — loaded by load_system_prompt()
   plugins/           # shipped plugins (data, not code) — only plugin files live here
@@ -31,6 +33,7 @@ src/orchestrator_agent/capabilities/
     aggregate.md
     entity.md
     export.md
+    workflow.md
 ```
 
 `system_prompt.md` is the agent system prompt and sits beside `plugins/`, not in it. Files prefixed `_`

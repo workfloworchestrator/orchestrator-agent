@@ -31,33 +31,42 @@ from pydantic_ai.ui import StateDeps
 
 from orchestrator_agent.capabilities.hooks import build_capabilities
 from orchestrator_agent.capabilities.loader import load_system_prompt
+from orchestrator_agent.form_fill import FormFillCapability
 from orchestrator_agent.mcp_client import build_core_toolset
 from orchestrator_agent.state import SearchState
 
 if TYPE_CHECKING:
     from pydantic_ai.models import KnownModelName, Model
 
+    from orchestrator_agent.form_fill import FormFillSkill
+
 logger = structlog.get_logger(__name__)
 
 WFOAgent = Agent[StateDeps[SearchState], str]
 
 
-def build_agent(model: "Model | KnownModelName | str") -> WFOAgent:
+def build_agent(model: "Model | KnownModelName | str", *, form_fill: "FormFillSkill | None" = None) -> WFOAgent:
     """Build the capabilities-based WFO agent.
 
     Args:
         model: A pydantic-ai model or model name/string.
+        form_fill: The workflow form-fill skill to run in front of the model (A2A); it shares the
+            agent's core MCP session. Only with it does the model get the handoff to the skill and
+            lose core's write tools.
 
     Returns:
         A plain ``Agent`` ready to run inside ``async with agent:``.
     """
-    capabilities = build_capabilities()
+    core_toolset = build_core_toolset()
+    capabilities = build_capabilities(form_fill=form_fill is not None)
+    if form_fill is not None:
+        capabilities.append(FormFillCapability(form_fill, core_toolset))
     logger.debug("Building WFO agent", model=str(model), capability_count=len(capabilities))
     agent: WFOAgent = Agent(
         model=model,
         deps_type=StateDeps[SearchState],
         instructions=load_system_prompt(),
-        toolsets=[build_core_toolset()],
+        toolsets=[core_toolset],
         capabilities=capabilities,
         retries=2,
     )
