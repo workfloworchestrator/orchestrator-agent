@@ -81,6 +81,7 @@ def _value(session: FormFillSession, index: int, label: str) -> str:
 
 
 def _decision_value(pending: PendingAsk, label: str) -> str:
+    assert APPROVAL.approval is not None
     (question,) = approval_card(pending, APPROVAL.approval)["questions"]
     return next(option["value"] for option in question["options"] if option["label"] == label)
 

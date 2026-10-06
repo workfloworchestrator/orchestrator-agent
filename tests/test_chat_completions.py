@@ -103,8 +103,8 @@ class _Turn:
             persistence.return_value.load_state = AsyncMock(return_value=self.prior)
             persistence.return_value.snapshot = AsyncMock()
             transport = httpx.ASGITransport(app=app)
-            async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
-                response = await client.post("/v1/chat/completions", json=body, headers=headers)
+            async with httpx.AsyncClient(transport=transport, base_url="http://test") as http:
+                response = await http.post("/v1/chat/completions", json=body, headers=headers)
             self.thread = persistence.call_args.kwargs["thread_id"] if persistence.call_args else None
             if persistence.return_value.snapshot.await_args:
                 (self.snapshot,), _ = persistence.return_value.snapshot.await_args
