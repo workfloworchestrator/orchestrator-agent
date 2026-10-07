@@ -45,6 +45,11 @@ class AgentSettings(BaseSettings):
         description="Optional operator-supplied domain knowledge appended to the agent system prompt "
         "(e.g. identifier conventions and their filter fields). Empty disables the section.",
     )
+    FORM_WIDGET_EXTENDER: str | None = Field(
+        default=None,
+        description="Optional 'package.module:callable' that receives the form-fill widgets and returns the list "
+        "to use (a deployment's own formats first). Unset uses the built-ins (customerId, productId).",
+    )
     OAUTH2_OUTBOUND_ACTIVE: bool | None = Field(
         default=None,
         description="Enable OAuth2 client-credentials auth on outgoing requests. When unset, follows OAUTH2_ACTIVE.",
