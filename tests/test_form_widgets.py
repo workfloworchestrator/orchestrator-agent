@@ -73,6 +73,38 @@ class TestNarrowing:
     def test_whole_words_first_then_substrings(self, words, expected):
         assert [option.value for option in narrow_options(CUSTOMERS, words)] == expected
 
+    @pytest.mark.parametrize(
+        "options,words,expected",
+        [
+            pytest.param(
+                [Option("a", "Hogeschool-Utrecht"), Option("b", "Avans Hogeschool")],
+                "hogeschool utrecht",
+                ["a", "b"],
+                id="spaced-search-finds-hyphenated-name",
+            ),
+            pytest.param(
+                [Option("a", "Hogeschool Utrecht"), Option("b", "Avans Hogeschool")],
+                "hogeschool-utrecht",
+                ["a", "b"],
+                id="hyphenated-search-finds-spaced-name",
+            ),
+            pytest.param(
+                [Option("a", "Hogeschool-Utrecht"), Option("b", "Hogeschool Utrecht"), Option("c", "Avans Hogeschool")],
+                "hogeschool-utrecht",
+                ["a", "b", "c"],
+                id="same-spelling-first",
+            ),
+            pytest.param(
+                [Option("a", "Hogeschool Utrecht")],
+                "hogeschool-utrecht",
+                ["a"],
+                id="only-hyphenated-search",
+            ),
+        ],
+    )
+    def test_spaced_and_hyphenated_spellings_meet(self, options, words, expected):
+        assert [option.value for option in narrow_options(options, words)] == expected
+
     def test_a_search_is_capped(self):
         many = [Option(f"c-{n}", f"Customer {n}") for n in range(120)]
         assert len(narrow_options(many, "customer")) == MAX_CANDIDATES

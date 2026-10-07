@@ -53,7 +53,7 @@ def load_extender(path: str | None) -> FieldWidgetExtender | None:
         raise ValueError(f"{SETTING}={path!r}: {exc}") from exc
     if not callable(extender):
         raise ValueError(f"{SETTING}={path!r}: {attribute} is not callable")
-    return extender  # type: ignore[no-any-return]
+    return extender
 
 
 def widget_target(prop: Mapping[str, Any]) -> Mapping[str, Any]:

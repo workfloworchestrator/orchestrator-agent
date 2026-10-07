@@ -108,12 +108,15 @@ def names_of(option: Option) -> tuple[str, ...]:
 
 
 def _words(text: str) -> set[str]:
-    """The words of a text; an identifier such as ``c-3`` is one word."""
-    return set(re.findall(r"\w+(?:-\w+)*", text.casefold()))
+    """The words of a text: each plain word and each hyphenated compound, so spaced and hyphenated spellings meet."""
+    folded = text.casefold()
+    return {*re.findall(r"\w+", folded), *re.findall(r"\w+(?:-\w+)+", folded)}
 
 
 def _shared_words(option: Option, wanted: set[str]) -> int:
-    return len(wanted & set().union(*map(_words, names_of(option))))
+    """How many wanted words the option has; its value is one whole word, so "c-3" shares nothing with "c-1"."""
+    known = {str(option.value).casefold()}.union(*map(_words, (option.label, *option.aliases)))
+    return len(wanted & known)
 
 
 def narrow_options(options: Sequence[Option], words: str, limit: int = MAX_CANDIDATES) -> list[Option]:
