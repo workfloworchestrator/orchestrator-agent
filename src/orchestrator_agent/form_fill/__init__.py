@@ -16,20 +16,48 @@
 The pauses travel over A2A (kagent's human-in-the-loop extension) or chat completions (LibreChat's ask-user tool).
 """
 
+from collections.abc import Sequence
+
 from pydantic_ai.models import Model
 
 from orchestrator_agent.form_fill.capability import FormFillCapability
 from orchestrator_agent.form_fill.interpret import Interpreter, ModelInterpreter
 from orchestrator_agent.form_fill.skill import CallTool, FormFillSkill
+from orchestrator_agent.form_fill.widgets import (
+    BUILTIN_WIDGETS,
+    CoreGraphQL,
+    FieldWidget,
+    GraphQL,
+    build_widgets,
+    graphql_url,
+    load_extender,
+)
+from orchestrator_agent.settings import agent_settings
 from orchestrator_agent.state import Approval, AskField, FormInput, FormReply, Reply
 
 
-def build_form_fill_skill(model: Model | str | None = None) -> FormFillSkill:
-    """The skill as configured, with ``model`` interpreting what a person typed for a field when core rejected it.
+def build_form_fill_skill(
+    model: Model | str | None = None,
+    *,
+    widgets: Sequence[FieldWidget] | None = None,
+    graphql: GraphQL | None = None,
+) -> FormFillSkill:
+    """The skill as configured, with ``model`` reading what a person typed where a value was expected.
 
-    The interpreter is one protocol attribute; the Jev branch puts its decision engine behind the same protocol.
+    ``model`` interprets typed answers core rejected and chooses the option typed words mean for a long-list
+    widget field. The widgets are the built-ins as ``FORM_WIDGET_EXTENDER`` arranges them (a bad extender
+    fails here, at startup); they read core's GraphQL API beside its MCP endpoint unless configured otherwise.
     """
-    return FormFillSkill(interpret=ModelInterpreter(model) if model is not None else None)
+    reader = ModelInterpreter(model) if model is not None else None
+    return FormFillSkill(
+        interpret=reader,
+        widgets=build_widgets(BUILTIN_WIDGETS, load_extender(agent_settings.FORM_WIDGET_EXTENDER))
+        if widgets is None
+        else list(widgets),
+        graphql=graphql
+        or CoreGraphQL(graphql_url(agent_settings.WFO_CORE_MCP_URL, agent_settings.WFO_CORE_GRAPHQL_URL)),
+        choose=reader,
+    )
 
 
 __all__ = [

@@ -44,7 +44,8 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
 
     a2a_url = f"{agent_settings.BASE_URL}/"
     model = agent_settings.create_model()
-    a2a = A2AAdapter(build_agent(model, form_fill=build_form_fill_skill(model)), url=a2a_url)
+    form_fill = build_form_fill_skill(model)
+    a2a = A2AAdapter(build_agent(model, form_fill=form_fill), url=a2a_url)
     a2a.add_routes(app)
     # The same agent as an OpenAI-compatible chat model (LibreChat): forms through its ask-user tool.
     ChatCompletionsAdapter(a2a.agent).add_routes(app)
@@ -65,6 +66,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
         mcp_path="/mcp",
         agent_model=agent_settings.AGENT_MODEL,
         form_fill_skill="literal",
+        form_fill_widgets=[widget.id for widget in form_fill.widgets],
     )
 
     yield

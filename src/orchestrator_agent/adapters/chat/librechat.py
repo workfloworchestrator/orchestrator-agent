@@ -155,7 +155,7 @@ def _question(request_id: str, index: int, field: AskField, header: str) -> dict
         "header": _cut(header, MAX_HEADER),
         "question": _cut(text, MAX_QUESTION),
     }
-    described = [field.problem] if field.problem else []
+    described = [text for text in (field.problem, field.hint) if text]
     options = [{"label": _label(label), "value": token} for token, label in _option_values(request_id, index, field)]
     if field.choices and not options:
         described.append(f"Type one of its {len(field.choices)} options: " + "; ".join(field.choices))

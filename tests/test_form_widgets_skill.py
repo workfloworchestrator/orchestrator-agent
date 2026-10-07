@@ -12,10 +12,15 @@ from typing import Any
 import pytest
 from pydantic_ai import ModelRetry
 
+from orchestrator_agent.adapters.a2a.kagent import ask_request
+from orchestrator_agent.adapters.chat.librechat import ask_card
+from orchestrator_agent.adapters.chat.librechat import pause as librechat_pause
+from orchestrator_agent.form_fill import build_form_fill_skill
+from orchestrator_agent.form_fill.interpret import ModelInterpreter
 from orchestrator_agent.form_fill.pending import pending_of
 from orchestrator_agent.form_fill.skill import NOTHING_FIT, SEVERAL_FIT, TOO_MANY_FIT, FormFillSkill
-from orchestrator_agent.form_fill.widgets import Option
-from orchestrator_agent.state import FormFillSession, SearchState
+from orchestrator_agent.form_fill.widgets import CoreGraphQL, Option
+from orchestrator_agent.state import AskField, FormFillSession, Reply, SearchState
 
 from .test_form_fill import FakeCore, open_form, rejection, turn
 from .test_form_widgets import FormatWidget
@@ -183,3 +188,42 @@ def test_a_session_persisted_before_widgets_still_loads():
     session = FormFillSession.model_validate(old)
     pending = pending_of(session)
     assert session.resolved == {} and pending is not None and pending.questions[0].hint == ""
+
+
+HINTED = AskField(
+    name="customer_id",
+    question="Customer (`customer_id`, required)",
+    title="Customer",
+    hint="Type a name — 23 options.",
+)
+
+
+def test_librechat_shows_the_hint_in_the_description():
+    session = FormFillSession(workflow_key=KEY, pages=[{"title": "Customer"}])
+    pending = librechat_pause(Reply("{}", ask=[HINTED]), session)
+    (question,) = ask_card(pending, session, 0)["questions"]
+    assert question["description"] == "Type a name — 23 options."
+
+
+def test_kagent_shows_the_hint_after_the_question():
+    payload, _ = ask_request("req-1", [HINTED])
+    assert payload.questions[0].question == "Customer (`customer_id`, required) — Type a name — 23 options."
+
+
+def test_the_skill_is_built_with_the_builtins_as_the_extender_arranges_them(monkeypatch):
+    own = FormatWidget("surf-customer", "customerId")
+    monkeypatch.setattr("orchestrator_agent.form_fill.agent_settings.FORM_WIDGET_EXTENDER", "fake_widgets:extend")
+    monkeypatch.setattr("orchestrator_agent.form_fill.load_extender", lambda path: lambda widgets: [own, *widgets])
+    skill = build_form_fill_skill("test")
+    assert [widget.id for widget in skill.widgets] == ["surf-customer", "customerId", "productId"]
+    assert isinstance(skill.interpret, ModelInterpreter) and skill.choose is skill.interpret
+    assert isinstance(skill.graphql, CoreGraphQL) and skill.graphql.url.endswith("/api/graphql")
+
+
+def test_without_a_model_nothing_reads_typed_words():
+    skill = build_form_fill_skill()
+    assert (
+        skill.interpret is None
+        and skill.choose is None
+        and [w.id for w in skill.widgets] == ["customerId", "productId"]
+    )
