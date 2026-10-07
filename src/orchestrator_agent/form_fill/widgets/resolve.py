@@ -30,6 +30,7 @@ from orchestrator_agent.form_fill.widgets.base import (
     MAX_FULL_READ,
     MAX_INLINE,
     Option,
+    Widget,
     WidgetContext,
     names_of,
     narrow_options,
@@ -54,9 +55,16 @@ def exact_options(options: Sequence[Option], words: str) -> list[Option]:
 
 
 async def _candidates(long_list: LongList, words: str, ctx: WidgetContext, *, full: bool) -> tuple[Option, ...]:
-    """What the words are read against: a short enough list in ``full``, else the first options a search finds."""
+    """What the words are read against: a short enough list in ``full``, else the options a search finds.
+
+    The search is made in the list itself — the field's options, or a cascade step's (a node, before the port):
+    asking the widget would search the field's own options, and fetch them again. Only a widget whose source
+    searches on its own (``options`` overridden, the list not fetched whole) is asked.
+    """
     if len(long_list.options) <= MAX_FULL_READ:
         return long_list.options if full else tuple(narrow_options(long_list.options, words))
+    if long_list.step is not None or isinstance(long_list.widget, Widget):
+        return tuple(narrow_options(long_list.options, words))
     return tuple(await long_list.widget.options(long_list.field, ctx, search=words) or ())[:MAX_CANDIDATES]
 
 

@@ -142,12 +142,13 @@ async def test_a_picked_candidate_continues_and_is_not_read_again():
     assert chooser.calls == ["uni"]
 
 
-async def test_a_short_list_is_chips_and_a_single_option_is_taken():
+async def test_a_short_list_is_chips_and_a_single_option_is_still_asked():
     reply = await open_form(make(options=(UT, UU)), WidgetCore(), SearchState(), KEY)
     customer = reply.question("customer_id")
     assert customer.choices == (UT.label, UU.label) and customer.values == ("c-ut", "c-uu") and customer.hint == ""
-    only = await open_form(make(options=(TA,)), WidgetCore(), SearchState(), KEY)  # plain core: one default customer
-    assert only.status == "confirming" and only.values["customer_id"] == "c-ta"
+    # A widget's options are what the source has now (one customer, one free port): the person chooses, always.
+    only = await open_form(make(options=(TA,)), WidgetCore(), SearchState(), KEY)
+    assert only.status == "gathering" and only.question("customer_id").values == ("c-ta",)
 
 
 @pytest.mark.parametrize("picks", [pytest.param(None, id="no-model"), pytest.param([], id="the-model-finds-no-fit")])
@@ -289,7 +290,10 @@ async def test_a_value_of_a_field_that_waits_again_is_never_submitted():
 async def test_words_for_a_one_option_field_core_rejected_are_asked_again_with_what_matched():
     only_customer = page_of({"customer_id": CUSTOMER}, ["customer_id"])
     core, state, skill = WidgetCore(refuse="c-ta", pages=[only_customer]), SearchState(), make(options=(TA,))
-    refused = await open_form(skill, core, state, KEY)  # the one option is taken, and core rejects it
+    await open_form(skill, core, state, KEY)
+    refused = await turn(
+        skill, core, state, {"customer_id": "c-ta"}
+    )  # the person picks the one option; core rejects it
     assert refused.question("customer_id").problem == "Customer not allowed"
     reply = await turn(skill, core, state, {"customer_id": "someone else"})
     customer = reply.question("customer_id")

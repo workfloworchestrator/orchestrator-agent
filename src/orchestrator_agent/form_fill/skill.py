@@ -76,7 +76,7 @@ from orchestrator_agent.form_fill.core_bridge import (
     widget_mark,
 )
 from orchestrator_agent.form_fill.interpret import Chooser, Interpreter
-from orchestrator_agent.form_fill.widgets import MAX_INLINE, FieldWidget, GraphQL, WidgetContext
+from orchestrator_agent.form_fill.widgets import MAX_INLINE, CascadeWidget, FieldWidget, GraphQL, WidgetContext
 from orchestrator_agent.form_fill.widgets.enrich import EnrichedPage, LongList, enrich
 from orchestrator_agent.form_fill.widgets.resolve import Resolution, resolve_answer, shown_as
 from orchestrator_agent.state import (
@@ -124,6 +124,8 @@ LONG_LIST_HINT = "Type a name or part of it — {total} options."
 SEVERAL_FIT = "More than one option fits what was typed: pick one, or type more of the name."
 TOO_MANY_FIT = "Many options fit what was typed: type more of the name."
 NOTHING_FIT = "Nothing matched {words}: type another name."
+NO_OPTIONS = "There are no options for {title} here."
+CHANGE_STEP = "Choose another {step}"  # the answer that goes back to a cascade field's steps (another node)
 
 
 async def _no_graphql(query: str, variables: Mapping[str, Any] | None = None) -> dict[str, Any]:
@@ -201,7 +203,12 @@ def question(name: str, info: FieldInfo, problem: str = "") -> AskField:
         options = (True, False)
     shown = labels(info)
     mark = widget_mark(info) or {}
-    hint = LONG_LIST_HINT.format(total=mark["total"]) if "total" in mark else ""
+    hint = LONG_LIST_HINT.format(total=mark["total"]) if mark.get("total") else ""
+    if "total" in mark and not mark["total"]:  # a widget field whose source has nothing to offer
+        hint = NO_OPTIONS.format(title=info.title or name)
+    if stepped := mark.get("stepped"):  # its options follow from steps chosen first: offer to choose again
+        change = CHANGE_STEP.format(step=" / ".join(stepped))
+        options, hint = (*options, change), " ".join(filter(None, (hint, f'Pick "{change}" to go back.')))
     return AskField(
         name=name,
         question=text,
@@ -253,6 +260,17 @@ def _record(session: FormFillSession, name: str, choice: LongList, outcome: Reso
     else:
         session.values.pop(name, None)
         session.resolved.pop(name, None)
+
+
+def _goes_back(choice: LongList, answer: Any) -> bool:
+    """Whether the answer to a field asked after its steps is the choice to go back to them (another node)."""
+    stepped = isinstance(answer, str) and choice.step is None and isinstance(choice.widget, CascadeWidget)
+    return stepped and answer.strip().casefold().startswith(CHANGE_STEP.format(step="").strip().casefold())
+
+
+def _takes_only_option(info: FieldInfo) -> bool:
+    """Whether a field's only option is taken without asking: a required choice the form itself offers, not a widget's."""
+    return info.is_required() and is_single_pick(info) and widget_mark(info) is None
 
 
 def _stepped(widget_choices: Mapping[str, LongList], session: FormFillSession) -> bool:
@@ -463,6 +481,11 @@ class FormFillSkill:
         options and stands without a model call. A resolved value replaces the words, so the next walk finds
         it among the options and reads nothing again.
         """
+        back = {name for name, choice in widget_choices.items() if _goes_back(choice, session.values.get(name))}
+        for name in back:  # "Choose another node": the field's steps are asked again, from the first
+            session.steps.pop(name, None)
+            session.values.pop(name, None)
+            session.resolved.pop(name, None)
         answered = {
             name: choice for name, choice in widget_choices.items() if session.values.get(name) not in (None, "", [])
         }
@@ -561,9 +584,10 @@ class FormFillSkill:
     def _see_page(session: FormFillSession, model: type[BaseModel], pages: list[dict[str, Any]]) -> dict[str, Any]:
         """Collect what is known for the fields of the page after ``pages``: the caller's values, the obvious.
 
-        A value goes to core exactly as sent; nothing here judges it. A required choice with exactly one
-        option is taken without asking anyone (as the one-item list a single-select list wants), each walk
-        anew: the options of a regenerated page may differ. A widget field still waiting for its options
+        A value goes to core exactly as sent; nothing here judges it. A required choice of the form's own with
+        exactly one option is taken without asking anyone (as the one-item list a single-select list wants),
+        each walk anew: the options of a regenerated page may differ. A widget field's only option is never
+        taken: its options are what the network has now (one free port), and choosing it is the person's. A widget field still waiting for its options
         sends nothing: no value of it is one of its options yet. Consent (``Accept``) counts for what it was
         given for — see ``_consented``.
         """
@@ -574,7 +598,7 @@ class FormFillSkill:
                 accepts.append(name)
             elif name in session.values and not _waits(info):
                 values[name] = session.values[name]
-            elif info.is_required() and is_single_pick(info) and len(options := choices(info) or ()) == 1:
+            elif _takes_only_option(info) and len(options := choices(info) or ()) == 1:
                 (only,) = options
                 values[name] = [only] if is_list(info) else only
         if accepts:
@@ -672,6 +696,8 @@ class FormFillSkill:
 
 
 __all__ = [
+    "CHANGE_STEP",
+    "NO_OPTIONS",
     "LONG_LIST_HINT",
     "NOTHING_FIT",
     "SEVERAL_FIT",

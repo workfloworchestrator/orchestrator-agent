@@ -167,7 +167,9 @@ async def _with_options(
     if options is None:
         return _Property(name, {**resolved, WIDGET_MARK: {"id": widget.id, "later": True}})
     choice = LongList(widget, target, tuple(options), title=title, multiple=resolved.get("type") == "array")
-    return _shown(name, resolved, target, widget, choice, {})
+    # A field whose options follow from steps chosen first can go back to them (another node).
+    stepped = {"stepped": list(chosen)} if isinstance(widget, CascadeWidget) and chosen else {}
+    return _shown(name, resolved, target, widget, choice, stepped)
 
 
 def _shown(
@@ -179,7 +181,7 @@ def _shown(
     mark: dict[str, Any],
 ) -> _Property:
     """The property as asked: its options as chips when they fit a question, else marked as a long list to type."""
-    if len(choice.options) <= MAX_INLINE:
+    if choice.options and len(choice.options) <= MAX_INLINE:
         inlined = {**_with_target(prop, _choice(target, choice.options)), WIDGET_MARK: {"id": widget.id, **mark}}
         return _Property(name, inlined, choice)
     total = {"id": widget.id, "total": len(choice.options), **mark}

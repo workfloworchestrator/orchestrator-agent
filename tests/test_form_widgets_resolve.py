@@ -121,12 +121,35 @@ async def test_a_chosen_value_outside_the_candidates_is_ignored():
     assert resolution == Resolution(value="c-ut", resolved=True)
 
 
-async def test_a_list_longer_than_the_full_read_is_searched_first():
-    widget = Searchable(MANY)
+class OwnSearch:
+    """A widget whose source searches on its own (thousands of subscriptions): it implements ``options``."""
+
+    id = "subscriptionId"
+
+    def __init__(self, options: Sequence[Option]) -> None:
+        self._options = options
+        self.searches: list[str | None] = []
+
+    def matches(self, field: Mapping[str, Any]) -> bool:
+        return True
+
+    async def options(self, field, ctx, search=None):
+        self.searches.append(search)
+        return self._options if search is None else self._options[:80]  # its own search: more than the cap
+
+
+@pytest.mark.parametrize(
+    "widget,searched",
+    [
+        pytest.param(Searchable(MANY), [], id="whole-list-widget-narrowed-locally"),
+        pytest.param(OwnSearch(MANY), ["customer 7"], id="own-search-widget-asked"),
+    ],
+)
+async def test_a_list_longer_than_the_full_read_is_searched_first(widget, searched):
     chooser = FakeChooser(["c-7"])
     resolution = await resolve_words(long_list(MANY, widget=widget), "customer 7", CTX, chooser)
     assert resolution == Resolution(value="c-7", resolved=True)
-    assert widget.searches == ["customer 7"] and len(chooser.calls[0][1]) == 50  # the widget's search, capped
+    assert widget.searches == searched and len(chooser.calls[0][1]) <= 50  # capped either way
 
 
 @pytest.mark.parametrize(
