@@ -11,7 +11,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""What a person typed for a long-list field, resolved to one of its options before core sees it.
+"""What a person typed for a widget field, resolved to one of its options before core sees it.
 
 Core accepts anything for some of these fields (``CustomerId`` is a plain string), so words never travel as a
 value: an exact name is its option, otherwise the interpreter reads the words over the candidates and only an

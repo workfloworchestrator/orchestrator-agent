@@ -67,7 +67,8 @@ CTX = WidgetContext(call_tool=no_tool, graphql=no_graphql)
 
 async def test_a_short_list_becomes_cores_own_choice_shape():
     page = await enrich(PAGE, [Customers(FEW)], CTX)
-    assert page.long_lists == {}
+    assert set(page.choices) == {"customer_id", "backup", "customers"}  # kept for resolving what is typed
+    assert page.choices["customer_id"].options == tuple(FEW) and page.choices["customers"].multiple is True
     fields = page_model(page.schema).model_fields
     assert choices(fields["customer_id"]) == ("c-0", "c-1", "c-2") and fields["customer_id"].is_required()
     assert labels(fields["customer_id"]) == {"c-0": "Customer 0", "c-1": "Customer 1", "c-2": "Customer 2"}
@@ -79,11 +80,11 @@ async def test_a_short_list_becomes_cores_own_choice_shape():
 
 async def test_a_long_list_is_marked_and_kept_for_resolving():
     page = await enrich(PAGE, [Customers(MANY)], CTX)
-    assert set(page.long_lists) == {"customer_id", "backup", "customers"}
-    customer = page.long_lists["customer_id"]
+    assert set(page.choices) == {"customer_id", "backup", "customers"}
+    customer = page.choices["customer_id"]
     assert customer.options == tuple(MANY) and customer.field["format"] == "customerId"
     assert customer.title == "Customer Id" and customer.multiple is False
-    customers = page.long_lists["customers"]
+    customers = page.choices["customers"]
     assert customers.field == {"format": "customerId", "type": "string"} and customers.multiple is True  # its items
     fields = page_model(page.schema).model_fields
     assert fields["customer_id"].annotation is str and choices(fields["customer_id"]) is None  # asked as text
@@ -97,7 +98,8 @@ async def test_a_long_list_is_marked_and_kept_for_resolving():
 async def test_the_inline_threshold(count, inlined):
     options = [Option(f"c-{n}", f"Customer {n}") for n in range(count)]
     page = await enrich(PAGE, [Customers(options)], CTX)
-    assert ("customer_id" not in page.long_lists) is inlined
+    mark = widget_mark(page_model(page.schema).model_fields["customer_id"])
+    assert ("total" not in mark) is inlined and page.choices["customer_id"].options == tuple(options)
 
 
 async def test_options_that_wait_for_another_value_mark_the_field():
@@ -106,11 +108,12 @@ async def test_options_that_wait_for_another_value_mark_the_field():
         "id": "customerId",
         "later": True,
     }
+    assert page.choices == {}  # nothing to resolve against yet
 
 
 async def test_a_failing_widget_leaves_the_property_as_it_was():
     page = await enrich(PAGE, [Customers(RuntimeError("core down"))], CTX)
-    assert page.schema == PAGE and page.long_lists == {}
+    assert page.schema == PAGE and page.choices == {}
 
 
 async def test_the_options_are_fetched_once_per_page_and_the_schema_is_not_mutated():

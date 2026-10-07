@@ -15,8 +15,8 @@
 
 A field a widget knows is rewritten before the page model is built: a short list becomes core's own choice
 shape (``enum`` + ``options``), so the stops, the labels and the approval need nothing new; a long list is
-marked and kept aside, and what a person types for it is resolved to one of its options before core sees it
-(``widgets.resolve``).
+marked and asked as text. Either way the field and its options are kept aside (``EnrichedPage.choices``), and
+what a person types for it is resolved to one of its options before core sees it (``widgets.resolve``).
 """
 
 from __future__ import annotations
@@ -43,7 +43,11 @@ logger = structlog.get_logger(__name__)
 
 @dataclass(frozen=True)
 class LongList:
-    """A field with more options than a question shows: its widget, its (items') property, every option."""
+    """A widget field with its options: its widget, its (items') property, every option.
+
+    Named for the long list a question cannot show; a short list shown as chips is kept the same way, so what
+    is typed for either is resolved to one of its options.
+    """
 
     widget: FieldWidget
     field: dict[str, Any]
@@ -54,17 +58,19 @@ class LongList:
 
 @dataclass(frozen=True)
 class EnrichedPage:
+    """The rewritten schema, and every widget field that got options (inlined or long), by name."""
+
     schema: dict[str, Any]
-    long_lists: dict[str, LongList] = field(default_factory=dict)
+    choices: dict[str, LongList] = field(default_factory=dict)
 
 
 @dataclass(frozen=True)
 class _Property:
-    """One property of the page after ``enrich``: as it goes into the schema, and its long list if it is one."""
+    """One property of the page after ``enrich``: as it goes into the schema, and its options if a widget gave some."""
 
     name: str
     schema: Any
-    long_list: LongList | None = None
+    choice: LongList | None = None
 
 
 def _choice(target: Mapping[str, Any], options: Sequence[Option]) -> dict[str, Any]:
@@ -97,10 +103,10 @@ async def enrich(schema: Mapping[str, Any], widgets: Sequence[FieldWidget], ctx:
     found = [
         await _property(name, prop, defs, widgets, fetch) for name, prop in (schema.get("properties") or {}).items()
     ]
-    long_lists = {p.name: p.long_list for p in found if p.long_list is not None}
+    widget_choices = {p.name: p.choice for p in found if p.choice is not None}
     if not found:
         return EnrichedPage(dict(schema))
-    return EnrichedPage({**schema, "properties": {p.name: p.schema for p in found}}, long_lists)
+    return EnrichedPage({**schema, "properties": {p.name: p.schema for p in found}}, widget_choices)
 
 
 async def _property(
@@ -119,12 +125,13 @@ async def _property(
         return _Property(name, prop)
     if options is None:
         return _Property(name, {**resolved, WIDGET_MARK: {"id": widget.id, "later": True}})
-    if len(options) <= MAX_INLINE:
-        return _Property(name, {**_with_target(resolved, _choice(target, options)), WIDGET_MARK: {"id": widget.id}})
-    marked = {**_with_target(resolved, target), WIDGET_MARK: {"id": widget.id, "total": len(options)}}
     title = str(resolved.get("title") or name)
-    long_list = LongList(widget, target, tuple(options), title=title, multiple=resolved.get("type") == "array")
-    return _Property(name, marked, long_list)
+    choice = LongList(widget, target, tuple(options), title=title, multiple=resolved.get("type") == "array")
+    if len(options) <= MAX_INLINE:
+        inlined = {**_with_target(resolved, _choice(target, options)), WIDGET_MARK: {"id": widget.id}}
+        return _Property(name, inlined, choice)
+    marked = {**_with_target(resolved, target), WIDGET_MARK: {"id": widget.id, "total": len(options)}}
+    return _Property(name, marked, choice)
 
 
 __all__ = ["EnrichedPage", "LongList", "enrich"]

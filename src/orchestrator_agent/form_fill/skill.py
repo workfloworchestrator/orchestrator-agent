@@ -49,7 +49,7 @@ import hashlib
 import json
 import time
 from collections.abc import Mapping, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from dataclasses import field as dc_field
 from typing import Any, Literal, Protocol
 
@@ -73,8 +73,12 @@ from orchestrator_agent.form_fill.core_bridge import (
     page_model,
     summaries,
     value_type,
+    widget_mark,
 )
-from orchestrator_agent.form_fill.interpret import Interpreter
+from orchestrator_agent.form_fill.interpret import Chooser, Interpreter
+from orchestrator_agent.form_fill.widgets import MAX_INLINE, FieldWidget, GraphQL, WidgetContext
+from orchestrator_agent.form_fill.widgets.enrich import LongList, enrich
+from orchestrator_agent.form_fill.widgets.resolve import Resolution, resolve_answer, shown_as
 from orchestrator_agent.state import (
     ACCEPT_VALUE,
     SUBSCRIPTION_ID,
@@ -115,6 +119,16 @@ _WORKFLOWS_TTL = 300.0  # seconds the workflow catalogue is cached per skill ins
 
 _MISSING = "missing"  # pydantic's error type for a required field without a value: the question says so already
 
+# What a stop says about a widget field (``AskField.hint``): the size of a long list, what typed words matched.
+LONG_LIST_HINT = "Type a name or part of it — {total} options."
+SEVERAL_FIT = "More than one option fits what was typed: pick one, or type more of the name."
+TOO_MANY_FIT = "Many options fit what was typed: type more of the name."
+NOTHING_FIT = "Nothing matched {words}: type another name."
+
+
+async def _no_graphql(query: str, variables: Mapping[str, Any] | None = None) -> dict[str, Any]:
+    raise RuntimeError("no GraphQL endpoint of core is configured for the form-fill widgets")
+
 
 def as_reply(data: FormReply, *, ask: Sequence[AskField] | None = None, approval: Approval | None = None) -> Reply:
     return Reply(data.as_text(), ask=ask, approval=approval)
@@ -134,7 +148,9 @@ def questions(
     is asked. A page core refused without naming one of its fields — its errors name none, or the refusal
     is no form verdict at all (``reason``) — is asked again in full, the first question with what core said.
     """
-    fields = model.model_fields
+    waiting = {name for name, info in model.model_fields.items() if (widget_mark(info) or {}).get("later")}
+    fields = {name: info for name, info in model.model_fields.items() if name not in waiting}
+    errors = [error for error in errors if not (error["loc"] and str(error["loc"][0]) in waiting)]
     problems: dict[str, str] = {}
     for error in errors:
         if error["loc"] and (name := str(error["loc"][0])) in fields:
@@ -163,6 +179,8 @@ def question(name: str, info: FieldInfo, problem: str = "") -> AskField:
     elif value_type(info) is bool:
         options = (True, False)
     shown = labels(info)
+    mark = widget_mark(info) or {}
+    hint = LONG_LIST_HINT.format(total=mark["total"]) if "total" in mark else ""
     return AskField(
         name=name,
         question=text,
@@ -172,7 +190,39 @@ def question(name: str, info: FieldInfo, problem: str = "") -> AskField:
         required=info.is_required(),
         title=info.title or name,
         problem=problem,
+        hint=hint,
     )
+
+
+def offered(reply: Reply, unresolved: Mapping[str, Resolution]) -> Reply:
+    """The stop, with what resolving said about each field whose words it could not resolve."""
+    if not reply.ask or not unresolved:
+        return reply
+    return replace(reply, ask=[_offer(field, unresolved.get(field.name)) for field in reply.ask])
+
+
+def _offer(field: AskField, outcome: Resolution | None) -> AskField:
+    """A field asked again: the options that fit as chips, or why nothing is offered."""
+    match outcome:
+        case None:
+            return field
+        case Resolution(candidates=candidates) if 0 < len(candidates) <= MAX_INLINE:
+            labels, values = tuple(o.label for o in candidates), tuple(o.value for o in candidates)
+            return replace(field, choices=labels, values=values, hint=SEVERAL_FIT)
+        case Resolution(candidates=candidates) if candidates:
+            return replace(field, hint=TOO_MANY_FIT)
+        case _:
+            return replace(field, hint=NOTHING_FIT.format(words=", ".join(f"'{w}'" for w in outcome.unmatched)))
+
+
+def _record(session: FormFillSession, name: str, choice: LongList, outcome: Resolution) -> None:
+    """Keep what the words resolved to in place of the words; drop words that did not resolve (core never sees them)."""
+    if outcome.resolved:
+        session.values[name] = outcome.value
+        session.resolved[name] = {"value": outcome.value, "label": shown_as(choice, outcome.value)}
+    else:
+        session.values.pop(name, None)
+        session.resolved.pop(name, None)
 
 
 def _given(session: FormFillSession) -> dict[str, Any]:
@@ -188,6 +238,9 @@ def _fingerprint(pages: list[dict[str, Any]]) -> str:
 @dataclass
 class FormFillSkill:
     interpret: Interpreter | None = None  # a person's answers core rejected -> the values the fields expect
+    widgets: Sequence[FieldWidget] = ()  # the formats whose options core leaves to the frontend (``form_fill.widgets``)
+    graphql: GraphQL | None = None  # core's GraphQL API, for the widgets that read it
+    choose: Chooser | None = None  # words a person typed for a widget field -> the options they fit
     _catalogue: dict[str, str] | None = dc_field(default=None, init=False, repr=False)
     _catalogue_at: float = dc_field(default=0.0, init=False, repr=False)
 
@@ -308,10 +361,14 @@ class FormFillSkill:
                 self._stop(session, pages, "confirming")
                 return self._summary(session)
 
-            schema = page.schema_ or {}
-            session.pages.append(schema)
-            model = page_model(schema)
+            ctx = self._widget_context(session, call_tool, pages)
+            enriched = await enrich(page.schema_ or {}, self.widgets, ctx)
+            session.pages.append(enriched.schema)
+            model = page_model(enriched.schema)
+            unresolved = await self._resolve(session, enriched.choices, ctx)
             values = self._see_page(session, model, pages)
+            if unresolved:  # words that are no option: the page is asked again, never submitted with them
+                return offered(self._page_stop(session, [*pages, values]), unresolved)
             fields = model.model_fields
             # A page of optional fields nobody has said anything about is asked once (a modify-note page is
             # only its optional note); whatever the caller replies, defaults then apply.
@@ -321,6 +378,36 @@ class FormFillSkill:
             pages.append(values)
         session.status = "done"
         return self._reply(session, "failed", reason=f"the form did not complete after {_MAX_PAGES} pages")
+
+    def _widget_context(
+        self, session: FormFillSession, call_tool: CallTool, pages: list[dict[str, Any]]
+    ) -> WidgetContext:
+        """What a widget may use on this page: core's APIs, and every value known so far."""
+        known = {name: value for page in pages for name, value in page.items()}
+        return WidgetContext(
+            call_tool=call_tool, graphql=self.graphql or _no_graphql, values={**known, **session.values}
+        )
+
+    async def _resolve(
+        self, session: FormFillSession, widget_choices: Mapping[str, LongList], ctx: WidgetContext
+    ) -> dict[str, Resolution]:
+        """Each answered widget field of the page resolved to its options in place; those that were not, by name.
+
+        Every widget field with options is resolved, chips included: core takes any string for some of them
+        (``CustomerId``), and a transport takes typed text next to the chips. A picked chip is one of the
+        options and stands without a model call. A resolved value replaces the words, so the next walk finds
+        it among the options and reads nothing again.
+        """
+        answered = {
+            name: choice for name, choice in widget_choices.items() if session.values.get(name) not in (None, "", [])
+        }
+        outcomes = {
+            name: await resolve_answer(choice, session.values[name], ctx, self.choose)
+            for name, choice in answered.items()
+        }
+        for name, outcome in outcomes.items():
+            _record(session, name, widget_choices[name], outcome)
+        return {name: outcome for name, outcome in outcomes.items() if not outcome.resolved}
 
     def _page_stop(self, session: FormFillSession, pages: list[dict[str, Any]], error: str | None = None) -> Reply:
         """The stop at the last of ``pages``: its fields as questions, with core's verdict on it (none when it was never submitted).
@@ -383,7 +470,7 @@ class FormFillSkill:
         for problem in form_errors(error):
             name = str(problem["loc"][0]) if problem["loc"] else ""
             raw = session.values.get(name)
-            if name not in form.model_fields or name in done or raw is None:
+            if name not in form.model_fields or widget_mark(form.model_fields[name]) or name in done or raw is None:
                 continue
             done.add(name)
             answer = raw if isinstance(raw, str) else str(raw)
@@ -458,7 +545,12 @@ class FormFillSkill:
         """How the form shows each of ``values`` that is one of its field's options (an id says nothing to a person)."""
         fields = form_model(session.pages).model_fields
         shown = {name: label_of(fields[name], value) for name, value in values.items() if name in fields}
-        return {name: label for name, label in shown.items() if label is not None}
+        resolved = {
+            name: kept["label"]
+            for name, kept in session.resolved.items()
+            if name in values and values[name] == kept["value"]
+        }
+        return {**resolved, **{name: label for name, label in shown.items() if label is not None}}
 
     def _summary(self, session: FormFillSession) -> Reply:
         """Every value to be submitted and the defaults that apply, with the create call for the human to approve.
@@ -512,4 +604,15 @@ class FormFillSkill:
         return self._reply(session, "started", process_id=process_id)
 
 
-__all__ = ["CallTool", "FormFillSkill", "as_reply", "question", "questions"]
+__all__ = [
+    "LONG_LIST_HINT",
+    "NOTHING_FIT",
+    "SEVERAL_FIT",
+    "TOO_MANY_FIT",
+    "CallTool",
+    "FormFillSkill",
+    "as_reply",
+    "offered",
+    "question",
+    "questions",
+]
