@@ -28,6 +28,7 @@ from orchestrator_agent.form_fill.widgets.base import (
     names_of,
     narrow_options,
 )
+from orchestrator_agent.form_fill.widgets.graphql import CoreGraphQL, GraphQLError, core_auth, graphql_url
 from orchestrator_agent.form_fill.widgets.registry import build_widgets, load_extender, match_widget, widget_target
 
 __all__ = [
@@ -35,14 +36,18 @@ __all__ = [
     "MAX_FULL_READ",
     "MAX_INLINE",
     "WIDGET_MARK",
+    "CoreGraphQL",
     "FieldWidget",
     "FieldWidgetExtender",
     "GraphQL",
+    "GraphQLError",
     "Option",
     "Widget",
     "WidgetContext",
     "build_widgets",
+    "core_auth",
     "field_hint",
+    "graphql_url",
     "load_extender",
     "match_widget",
     "names_of",
