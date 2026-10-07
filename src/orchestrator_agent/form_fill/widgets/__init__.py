@@ -29,6 +29,7 @@ from orchestrator_agent.form_fill.widgets.base import (
     narrow_options,
 )
 from orchestrator_agent.form_fill.widgets.core import BUILTIN_WIDGETS, CustomerIdWidget, ProductIdWidget
+from orchestrator_agent.form_fill.widgets.enrich import EnrichedPage, LongList, enrich
 from orchestrator_agent.form_fill.widgets.graphql import CoreGraphQL, GraphQLError, core_auth, graphql_url
 from orchestrator_agent.form_fill.widgets.registry import build_widgets, load_extender, match_widget, widget_target
 
@@ -40,16 +41,19 @@ __all__ = [
     "WIDGET_MARK",
     "CoreGraphQL",
     "CustomerIdWidget",
+    "EnrichedPage",
     "FieldWidget",
     "FieldWidgetExtender",
     "GraphQL",
     "GraphQLError",
+    "LongList",
     "Option",
     "ProductIdWidget",
     "Widget",
     "WidgetContext",
     "build_widgets",
     "core_auth",
+    "enrich",
     "field_hint",
     "graphql_url",
     "load_extender",

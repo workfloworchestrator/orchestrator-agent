@@ -54,6 +54,7 @@ DISPLAY_ONLY_FORMATS = frozenset({"label", "divider", FORMAT_SUMMARY, "markdown"
 # behind each allowed value when the two differ.
 FORMAT = "format"
 LABELS = "labels"
+WIDGET = "x-widget"  # what a form-fill widget wrote on a field (``widgets.enrich``)
 
 
 # --- core's page schema -> the page model ----------------------------------------------------------------
@@ -112,6 +113,8 @@ def _field(name: str, prop: Mapping[str, Any], defs: Mapping[str, Any], *, requi
         extra[FORMAT] = fmt
     if labels := _labels(prop, defs):
         extra[LABELS] = labels
+    if mark := prop.get(WIDGET):
+        extra[WIDGET] = mark
     constraints: dict[str, Any] = {}
     if prop.get("type") == "array":
         constraints = {"min_length": prop.get("minItems"), "max_length": prop.get("maxItems")}
@@ -288,6 +291,13 @@ def is_accept(info: FieldInfo) -> bool:
     return isinstance(extra, dict) and extra.get(FORMAT) == FORMAT_ACCEPT
 
 
+def widget_mark(info: FieldInfo) -> dict[str, Any] | None:
+    """What a form-fill widget wrote on the field: its id, and ``total`` for a long list or ``later`` while it waits."""
+    extra = info.json_schema_extra
+    mark = extra.get(WIDGET) if isinstance(extra, dict) else None
+    return mark if isinstance(mark, dict) else None
+
+
 def item_bounds(info: FieldInfo) -> tuple[int | None, int | None]:
     """(min, max) items of a list field, from its constraints."""
     lo = next((m.min_length for m in info.metadata if isinstance(m, MinLen)), None)
@@ -330,6 +340,7 @@ __all__ = [
     "FORMAT",
     "FORMAT_ACCEPT",
     "LABELS",
+    "WIDGET",
     "choices",
     "form_errors",
     "form_model",
@@ -345,4 +356,5 @@ __all__ = [
     "resolve_property",
     "summaries",
     "value_type",
+    "widget_mark",
 ]
