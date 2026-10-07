@@ -35,6 +35,7 @@ CUSTOMERS = (
     *(Option(f"c-{n}", f"Customer {n:02d}") for n in range(20)),
 )
 MANY = tuple(Option(f"c-{n}", f"Customer {n:03d}") for n in range(250))  # longer than the full read
+FOO = Option("c-foo", "Foo, Inc.")  # a name with a comma in it
 CTX = WidgetContext(call_tool=no_tool, graphql=no_graphql)
 
 
@@ -63,7 +64,8 @@ def long_list(options: Sequence[Option] = CUSTOMERS, *, widget: Widget | None = 
 
 class FakeChooser:
     def __init__(self, picks: list[Any]) -> None:
-        self.picks, self.calls = picks, []
+        self.picks = picks
+        self.calls: list[tuple[str, list[Any], str]] = []
 
     async def choose(self, title, options, words):
         self.calls.append((title, [value for value, _ in options], words))
@@ -182,10 +184,25 @@ async def test_without_a_chooser_only_exact_names_resolve(words, expected):
             "UT, testaccount", True, Resolution(value=["c-ut", "c-ta"], resolved=True), id="list-typed-commas"
         ),
         pytest.param("UT, nobody", True, Resolution(unmatched=("nobody",)), id="list-one-item-unmatched"),
+        pytest.param(
+            ["UT, testaccount"], True, Resolution(value=["c-ut", "c-ta"], resolved=True), id="typed-in-a-list"
+        ),
+        pytest.param(
+            ["c-uu", "UT, testaccount"],
+            True,
+            Resolution(value=["c-uu", "c-ut", "c-ta"], resolved=True),
+            id="pick-and-type",
+        ),
+        pytest.param(
+            ["Foo, Inc."], True, Resolution(value=["c-foo"], resolved=True), id="a-name-with-a-comma-in-a-list"
+        ),
+        pytest.param("foo, inc.", True, Resolution(value=["c-foo"], resolved=True), id="a-name-with-a-comma"),
+        pytest.param("Foo, Inc.", False, Resolution(value="c-foo", resolved=True), id="one-answer-is-never-split"),
     ],
 )
 async def test_a_fields_answer(answer, multiple, expected):
-    assert await resolve_answer(long_list(multiple=multiple), answer, CTX, FakeChooser([])) == expected
+    options = (*CUSTOMERS, FOO)
+    assert await resolve_answer(long_list(options, multiple=multiple), answer, CTX, FakeChooser([])) == expected
 
 
 def _scripted(picks):

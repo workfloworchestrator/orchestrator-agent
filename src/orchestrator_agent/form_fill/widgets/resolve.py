@@ -89,12 +89,24 @@ async def resolve_words(long_list: LongList, words: str, ctx: WidgetContext, cho
             return Resolution(candidates=tuple(by_value[value] for value in fits))
 
 
-def _items(answer: Any, multiple: bool) -> list[Any]:
+def _split(long_list: LongList, item: Any) -> list[Any]:
+    """One typed item of a list as the names it lists: split on commas, unless the whole text is an option's name."""
+    match item:
+        case str() if not exact_options(long_list.options, item):
+            return [part.strip() for part in item.split(",") if part.strip()]
+        case _:
+            return [item]
+
+
+def _items(long_list: LongList, answer: Any) -> list[Any]:
+    """The items of an answer; for a list field, each typed text is split into the names it lists ("UT, TA")."""
     match answer:
+        case list() if long_list.multiple:
+            return [part for item in answer for part in _split(long_list, item)]
         case list():
             return answer
-        case str() if multiple:
-            return [part.strip() for part in answer.split(",") if part.strip()]
+        case str() if long_list.multiple:
+            return _split(long_list, answer)
         case _:
             return [answer]
 
@@ -106,7 +118,7 @@ async def resolve_answer(long_list: LongList, answer: Any, ctx: WidgetContext, c
         Resolution(value=item, resolved=True)
         if item in values
         else await resolve_words(long_list, str(item), ctx, chooser)
-        for item in _items(answer, long_list.multiple)
+        for item in _items(long_list, answer)
     ]
     if all(outcome.resolved for outcome in outcomes):
         resolved = [outcome.value for outcome in outcomes]

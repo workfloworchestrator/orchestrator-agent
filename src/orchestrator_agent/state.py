@@ -158,6 +158,8 @@ class FormFillSession(BaseModel):
     resolved: dict[str, dict[str, Any]] = Field(default_factory=dict)
     # cascade widget field -> the steps chosen before its value ({"node": <node>}): never sent to core
     steps: dict[str, dict[str, Any]] = Field(default_factory=dict)
+    # widget fields that waited for another value (``later``) at the last stop: asked once they have options
+    waiting: list[str] = Field(default_factory=list)
     pending: dict[str, Any] | None = None  # the stop the transport sent as a pause, to map the response back
     # The pending stop answered a response rather than a message: a parent runtime that pauses once per call
     # has not shown it yet, and its next message asks for it again.

@@ -98,7 +98,7 @@ async def test_several_fits_are_asked_again_as_chips(core, graphql):
 
 
 async def test_a_list_of_customers_resolves_each_item(core, graphql):
-    answers = {"customer_id": "C03", "customers": "testaccount, C05", "product_id": P2}
+    answers = {"customer_id": "C03", "customers": ["testaccount, C05"], "product_id": P2}  # as both transports send it
     reply = await open_form(skill(graphql, Refuses()), core.direct_call_tool, SearchState(), KEY, answers)
     assert reply.values["customers"] == ["cust-07", "cust-05"]
 

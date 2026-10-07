@@ -6,7 +6,7 @@ import os
 
 os.environ.setdefault("DATABASE_URI", "postgresql://test:test@localhost:5432/test")
 
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from typing import Any
 
 import pytest
@@ -19,15 +19,16 @@ from orchestrator_agent.form_fill import build_form_fill_skill
 from orchestrator_agent.form_fill.interpret import ModelInterpreter
 from orchestrator_agent.form_fill.pending import pending_of
 from orchestrator_agent.form_fill.skill import NOTHING_FIT, SEVERAL_FIT, TOO_MANY_FIT, FormFillSkill
-from orchestrator_agent.form_fill.widgets import CoreGraphQL, Option
+from orchestrator_agent.form_fill.widgets import CoreGraphQL, FieldWidget, Option, Widget, WidgetContext
 from orchestrator_agent.state import AskField, FormFillSession, Reply, SearchState
 
 from .test_form_fill import FakeCore, open_form, rejection, turn
 from .test_form_widgets import FormatWidget
 
+CUSTOMER: dict[str, Any] = {"format": "customerId", "title": "Customer", "type": "string"}
 PAGE = {
     "properties": {
-        "customer_id": {"format": "customerId", "title": "Customer", "type": "string"},
+        "customer_id": CUSTOMER,
         "note": {"anyOf": [{"type": "string"}, {"type": "null"}], "default": None, "title": "Note"},
     },
     "required": ["customer_id"],
@@ -42,10 +43,11 @@ KEY = "widget_demo"
 
 
 class WidgetCore:
-    """Core's form tools for a one-page task asking a customer; like core's ``CustomerId`` it takes any string."""
+    """Core's form tools for a task asking a customer (one page unless told otherwise); like core's ``CustomerId`` it takes any string."""
 
-    def __init__(self, refuse: str | None = None) -> None:
+    def __init__(self, refuse: str | None = None, pages: Sequence[dict[str, Any]] = (PAGE,)) -> None:
         self.refuse = refuse  # a customer id core's validator rejects
+        self.pages = pages
         self.submitted: list[dict[str, Any]] = []
         self.created: list[dict[str, Any]] = []
 
@@ -58,17 +60,19 @@ class WidgetCore:
         assert name == "get_workflow_form"
         inputs = args["page_inputs"]
         self.submitted.extend(inputs)
-        if not inputs:
-            return {"page": 0, "complete": False, "schema": PAGE}
-        FakeCore.require(PAGE, inputs[0])
-        if inputs[0]["customer_id"] == self.refuse:
+        if inputs:
+            FakeCore.require(self.pages[len(inputs) - 1], inputs[-1])
+        if self.refuse is not None and inputs and inputs[0].get("customer_id") == self.refuse:
             raise ModelRetry(rejection({"customer_id": "Customer not allowed"}))
-        return {"page": 1, "complete": True, "schema": None}
+        if len(inputs) >= len(self.pages):
+            return {"page": len(inputs), "complete": True, "schema": None}
+        return {"page": len(inputs), "complete": False, "schema": self.pages[len(inputs)]}
 
 
 class Chooser:
     def __init__(self, picks: list[Any]) -> None:
-        self.picks, self.calls = picks, []
+        self.picks = picks
+        self.calls: list[str] = []
 
     async def choose(self, title, options, words):
         self.calls.append(words)
@@ -83,9 +87,11 @@ class Refuses:
         raise AssertionError("no interpretation expected")
 
 
-def make(options: Sequence[Option] | None = MANY, choose=None, interpret=None) -> FormFillSkill:
+def make(
+    options: Sequence[Option] | None = MANY, choose=None, interpret=None, also: Sequence[FieldWidget] = ()
+) -> FormFillSkill:
     return FormFillSkill(
-        widgets=[FormatWidget("customerId", "customerId", options)], choose=choose, interpret=interpret
+        widgets=[FormatWidget("customerId", "customerId", options), *also], choose=choose, interpret=interpret
     )
 
 
@@ -188,6 +194,107 @@ def test_a_session_persisted_before_widgets_still_loads():
     session = FormFillSession.model_validate(old)
     pending = pending_of(session)
     assert session.resolved == {} and pending is not None and pending.questions[0].hint == ""
+    assert session.waiting == []
+
+
+def test_the_waiting_fields_are_kept_with_the_session():
+    session = FormFillSession(workflow_key=KEY, waiting=["contact"])
+    assert FormFillSession.model_validate_json(session.model_dump_json()).waiting == ["contact"]
+
+
+# --- a widget field that depends on another field (``WidgetContext.values``) -----------------------------
+
+JAN, PIET = Option("p-jan", "Jan de Vries"), Option("p-piet", "Piet Jansen")
+CONTACTS = {"c-ut": (JAN, PIET), "c-uu": (Option("p-anna", "Anna Smit"), Option("p-bob", "Bob Visser"))}
+REQUIRED_CONTACT = {"format": "contactPerson", "title": "Contact", "type": "string"}
+OPTIONAL_CONTACTS = {
+    "default": [],
+    "items": {"format": "contactPerson", "type": "string"},
+    "title": "Contacts",
+    "type": "array",
+}
+
+
+class Contacts(Widget):
+    """The contact persons of the form's customer: none (the field waits) until that is one of the customers."""
+
+    id = "contactPerson"
+
+    def matches(self, field: Mapping[str, Any]) -> bool:
+        return field.get("format") == "contactPerson"
+
+    async def fetch(self, field: Mapping[str, Any], ctx: WidgetContext) -> Sequence[Option] | None:
+        return CONTACTS.get(ctx.values.get("customer_id", ""))
+
+
+def page_of(fields: dict[str, Any], required: Sequence[str], title: str = "Customer") -> dict[str, Any]:
+    return {"properties": fields, "required": list(required), "title": title, "type": "object"}
+
+
+def with_contact(contact: dict[str, Any], *, required: bool) -> dict[str, Any]:
+    """A page asking a customer and a contact person of that customer."""
+    fields = {"customer_id": CUSTOMER, "contact": contact}
+    return page_of(fields, ["customer_id", "contact"] if required else ["customer_id"])
+
+
+@pytest.mark.parametrize("customer", [pytest.param("UT", id="typed-name"), pytest.param("c-ut", id="picked-value")])
+@pytest.mark.parametrize(
+    "contact,required,answer",
+    [
+        pytest.param(REQUIRED_CONTACT, True, "p-jan", id="required"),
+        pytest.param(OPTIONAL_CONTACTS, False, ["p-jan"], id="optional"),
+    ],
+)
+async def test_a_field_waiting_for_the_customer_is_asked_with_its_options_once_it_is_known(
+    customer, contact, required, answer
+):
+    core, state = WidgetCore(pages=[with_contact(contact, required=required)]), SearchState()
+    skill = make(also=[Contacts()])
+    first = await open_form(skill, core, state, KEY)
+    assert first.asked == ["customer_id"]  # the contact waits for its customer
+    reply = await turn(skill, core, state, {"customer_id": customer})
+    assert reply.status == "gathering" and reply.asked == ["contact"]
+    asked = reply.question("contact")
+    assert asked.values == ("p-jan", "p-piet") and asked.choices == (JAN.label, PIET.label)
+    done = await turn(skill, core, state, {"contact": answer})
+    assert done.status == "confirming" and done.values == {"customer_id": "c-ut", "contact": answer}
+    assert all(page.get("contact") in (None, answer) for page in core.submitted)
+
+
+async def test_a_stop_of_waiting_fields_only_asks_them_as_typed_text_and_never_submits_the_words():
+    customer = {**CUSTOMER, "default": None}
+    note = {"title": "Note", "type": "string"}
+    first = page_of({"customer_id": customer, "note": note}, ["note"])
+    core, state = WidgetCore(pages=[first, page_of({"contact": OPTIONAL_CONTACTS}, [], "Contacts")]), SearchState()
+    skill = make(also=[Contacts()])
+    reply = await open_form(skill, core, state, KEY, {"note": "hello"})  # no customer: the contacts wait for one
+    contacts = reply.question("contact")
+    assert reply.status == "gathering" and reply.asked == ["contact"]
+    assert contacts.choices == () and contacts.hint == ""  # asked as typed text, as a field without its widget
+    done = await turn(skill, core, state, {"contact": ["Jan"]})
+    assert done.status == "confirming" and "contact" not in done.values  # still waiting: the words are kept back
+    assert "Jan" not in str(core.submitted)
+
+
+async def test_a_value_of_a_field_that_waits_again_is_never_submitted():
+    core, state = WidgetCore(pages=[with_contact(REQUIRED_CONTACT, required=True)]), SearchState()
+    skill = make(also=[Contacts()])
+    await open_form(skill, core, state, KEY, {"customer_id": "c-ut"})
+    assert (await turn(skill, core, state, {"contact": "p-jan"})).status == "confirming"
+    again = await turn(skill, core, state, {"customer_id": "c-ta"})  # a customer without contact persons
+    assert again.status == "gathering" and again.asked == ["contact"]
+    assert not any(page.get("customer_id") == "c-ta" and "contact" in page for page in core.submitted)
+
+
+async def test_words_for_a_one_option_field_core_rejected_are_asked_again_with_what_matched():
+    only_customer = page_of({"customer_id": CUSTOMER}, ["customer_id"])
+    core, state, skill = WidgetCore(refuse="c-ta", pages=[only_customer]), SearchState(), make(options=(TA,))
+    refused = await open_form(skill, core, state, KEY)  # the one option is taken, and core rejects it
+    assert refused.question("customer_id").problem == "Customer not allowed"
+    reply = await turn(skill, core, state, {"customer_id": "someone else"})
+    customer = reply.question("customer_id")
+    assert reply.status == "gathering" and customer.hint == NOTHING_FIT.format(words="'someone else'")
+    assert "someone else" not in str(core.submitted)
 
 
 HINTED = AskField(

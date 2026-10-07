@@ -77,7 +77,7 @@ from orchestrator_agent.form_fill.core_bridge import (
 )
 from orchestrator_agent.form_fill.interpret import Chooser, Interpreter
 from orchestrator_agent.form_fill.widgets import MAX_INLINE, FieldWidget, GraphQL, WidgetContext
-from orchestrator_agent.form_fill.widgets.enrich import LongList, enrich
+from orchestrator_agent.form_fill.widgets.enrich import EnrichedPage, LongList, enrich
 from orchestrator_agent.form_fill.widgets.resolve import Resolution, resolve_answer, shown_as
 from orchestrator_agent.state import (
     ACCEPT_VALUE,
@@ -134,6 +134,11 @@ def as_reply(data: FormReply, *, ask: Sequence[AskField] | None = None, approval
     return Reply(data.as_text(), ask=ask, approval=approval)
 
 
+def _waits(info: FieldInfo) -> bool:
+    """Whether a widget field waits for another value before it has options (``later``)."""
+    return bool((widget_mark(info) or {}).get("later"))
+
+
 def questions(
     model: type[BaseModel],
     values: Mapping[str, Any],
@@ -147,8 +152,24 @@ def questions(
     ``untouched`` is false when the verdict is on the whole form rather than a page: only what core rejected
     is asked. A page core refused without naming one of its fields — its errors name none, or the refusal
     is no form verdict at all (``reason``) — is asked again in full, the first question with what core said.
+    A field waiting for another value (``later``) is left out while anything else is asked; when nothing else
+    is, it is asked as typed text, like a field without its widget, so it never leaves a stop with no question.
     """
-    waiting = {name for name, info in model.model_fields.items() if (widget_mark(info) or {}).get("later")}
+    waiting = {name for name, info in model.model_fields.items() if _waits(info)}
+    return _questions(model, values, errors, reason, untouched, waiting) or _questions(
+        model, values, errors, reason, untouched, set()
+    )
+
+
+def _questions(
+    model: type[BaseModel],
+    values: Mapping[str, Any],
+    errors: Sequence[FormError],
+    reason: str | None,
+    untouched: bool,
+    waiting: set[str],
+) -> list[AskField]:
+    """``questions``, leaving out the ``waiting`` fields and core's errors on them."""
     fields = {name: info for name, info in model.model_fields.items() if name not in waiting}
     errors = [error for error in errors if not (error["loc"] and str(error["loc"][0]) in waiting)]
     problems: dict[str, str] = {}
@@ -239,6 +260,15 @@ def _stepped(widget_choices: Mapping[str, LongList], session: FormFillSession) -
     return any(
         choice.step is not None and choice.step in session.steps.get(name, {})
         for name, choice in widget_choices.items()
+    )
+
+
+def _waiting(schemas: Sequence[Mapping[str, Any]]) -> list[str]:
+    """The widget fields of these pages that wait for another value before they have options."""
+    return list(
+        dict.fromkeys(
+            name for schema in schemas for name, info in page_model(schema).model_fields.items() if _waits(info)
+        )
     )
 
 
@@ -378,26 +408,41 @@ class FormFillSkill:
                 self._stop(session, pages, "confirming")
                 return self._summary(session)
 
-            ctx = self._widget_context(session, call_tool, pages)
-            enriched = await enrich(page.schema_ or {}, self.widgets, ctx, session.steps)
-            unresolved = await self._resolve(session, enriched.choices, ctx)
-            if _stepped(enriched.choices, session):  # a step was chosen: the page is asked for what comes next
-                enriched = await enrich(page.schema_ or {}, self.widgets, ctx, session.steps)
-                unresolved = {**unresolved, **await self._resolve(session, enriched.choices, ctx)}
+            enriched, unresolved = await self._enriched(session, call_tool, pages, page.schema_ or {})
             session.pages.append(enriched.schema)
             model = page_model(enriched.schema)
             values = self._see_page(session, model, pages)
-            if unresolved:  # words that are no option: the page is asked again, never submitted with them
-                return offered(self._page_stop(session, [*pages, values]), unresolved)
+            if unresolved:  # words that are no option: the page is asked again (with them), never submitted with them
+                asked = {name: value for name, value in values.items() if name not in unresolved}
+                return offered(self._page_stop(session, [*pages, asked]), unresolved)
             fields = model.model_fields
             # A page of optional fields nobody has said anything about is asked once (a modify-note page is
-            # only its optional note); whatever the caller replies, defaults then apply.
+            # only its optional note); whatever the caller replies, defaults then apply. So is a field that
+            # waited for another value at the last stop and has its options now.
             untouched = not values and fields and not any(f.is_required() for f in fields.values())
-            if untouched and not any(name in session.asked for name in fields):
+            offers = any(name in session.waiting and name not in values for name in enriched.choices)
+            if offers or (untouched and not any(name in session.asked for name in fields)):
                 return self._page_stop(session, [*pages, values])
             pages.append(values)
         session.status = "done"
         return self._reply(session, "failed", reason=f"the form did not complete after {_MAX_PAGES} pages")
+
+    async def _enriched(
+        self, session: FormFillSession, call_tool: CallTool, pages: list[dict[str, Any]], schema: dict[str, Any]
+    ) -> tuple[EnrichedPage, dict[str, Resolution]]:
+        """The page with its widgets' options, its answered widget fields resolved; those that were not, by name.
+
+        A widget reads the values known so far, so once resolving changed what it read — a typed name became
+        its option, a cascade step was chosen — the page is enriched and resolved once more (and only once).
+        """
+        ctx = self._widget_context(session, call_tool, pages)
+        enriched = await enrich(schema, self.widgets, ctx, session.steps)
+        unresolved = await self._resolve(session, enriched.choices, ctx)
+        resolved = self._widget_context(session, call_tool, pages)
+        if resolved.values == ctx.values and not _stepped(enriched.choices, session):
+            return enriched, unresolved
+        enriched = await enrich(schema, self.widgets, resolved, session.steps)
+        return enriched, {**unresolved, **await self._resolve(session, enriched.choices, resolved)}
 
     def _widget_context(
         self, session: FormFillSession, call_tool: CallTool, pages: list[dict[str, Any]]
@@ -510,6 +555,7 @@ class FormFillSkill:
     ) -> None:
         session.page_inputs = pages
         session.status = status
+        session.waiting = _waiting(session.pages)
 
     @staticmethod
     def _see_page(session: FormFillSession, model: type[BaseModel], pages: list[dict[str, Any]]) -> dict[str, Any]:
@@ -517,7 +563,8 @@ class FormFillSkill:
 
         A value goes to core exactly as sent; nothing here judges it. A required choice with exactly one
         option is taken without asking anyone (as the one-item list a single-select list wants), each walk
-        anew: the options of a regenerated page may differ. Consent (``Accept``) counts for what it was
+        anew: the options of a regenerated page may differ. A widget field still waiting for its options
+        sends nothing: no value of it is one of its options yet. Consent (``Accept``) counts for what it was
         given for — see ``_consented``.
         """
         values: dict[str, Any] = {}
@@ -525,7 +572,7 @@ class FormFillSkill:
         for name, info in model.model_fields.items():
             if is_accept(info):
                 accepts.append(name)
-            elif name in session.values:
+            elif name in session.values and not _waits(info):
                 values[name] = session.values[name]
             elif info.is_required() and is_single_pick(info) and len(options := choices(info) or ()) == 1:
                 (only,) = options
