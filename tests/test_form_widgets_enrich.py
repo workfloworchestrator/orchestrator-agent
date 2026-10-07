@@ -122,3 +122,19 @@ async def test_the_options_are_fetched_once_per_page_and_the_schema_is_not_mutat
     await enrich(PAGE, [widget], CTX)
     assert widget.calls == 1  # three fields of one widget with the same hints
     assert PAGE == original
+
+
+async def test_options_with_number_values_keep_their_labels():
+    ports = [Option(101, "xe-0/0/1 (free) (10GBASE-LR)"), Option(102, "xe-0/0/2 (free) (10GBASE-LR)")]
+
+    class Ports(Customers):
+        id = "imsPortId"
+
+        def matches(self, field: Mapping[str, Any]) -> bool:
+            return field.get("format") == "imsPortId"
+
+    page = {"properties": {"port_id": {"format": "imsPortId", "type": "integer"}}, "required": ["port_id"]}
+    enriched = await enrich(page, [Ports(ports)], CTX)
+    (port,) = page_model(enriched.schema).model_fields.values()
+    assert choices(port) == (101, 102)
+    assert labels(port) == {"101": "xe-0/0/1 (free) (10GBASE-LR)", "102": "xe-0/0/2 (free) (10GBASE-LR)"}

@@ -28,6 +28,7 @@ from orchestrator_agent.form_fill.widgets.base import (
     names_of,
     narrow_options,
 )
+from orchestrator_agent.form_fill.widgets.cascade import CascadeWidget, Step
 from orchestrator_agent.form_fill.widgets.core import BUILTIN_WIDGETS, CustomerIdWidget, ProductIdWidget
 from orchestrator_agent.form_fill.widgets.enrich import EnrichedPage, LongList, enrich
 from orchestrator_agent.form_fill.widgets.graphql import CoreGraphQL, GraphQLError, core_auth, graphql_url
@@ -46,6 +47,7 @@ __all__ = [
     "MAX_FULL_READ",
     "MAX_INLINE",
     "WIDGET_MARK",
+    "CascadeWidget",
     "CoreGraphQL",
     "CustomerIdWidget",
     "EnrichedPage",
@@ -57,6 +59,7 @@ __all__ = [
     "Option",
     "ProductIdWidget",
     "Resolution",
+    "Step",
     "Widget",
     "WidgetContext",
     "build_widgets",

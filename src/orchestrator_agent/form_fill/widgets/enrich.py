@@ -36,6 +36,7 @@ from orchestrator_agent.form_fill.widgets.base import (
     Option,
     WidgetContext,
 )
+from orchestrator_agent.form_fill.widgets.cascade import CascadeWidget
 from orchestrator_agent.form_fill.widgets.registry import match_widget, widget_target
 
 logger = structlog.get_logger(__name__)
@@ -46,7 +47,8 @@ class LongList:
     """A widget field with its options: its widget, its (items') property, every option.
 
     Named for the long list a question cannot show; a short list shown as chips is kept the same way, so what
-    is typed for either is resolved to one of its options.
+    is typed for either is resolved to one of its options. ``step`` is set while a cascade field is asked for
+    one of its steps instead of its value (``widgets.cascade``): what resolves then is that step's choice.
     """
 
     widget: FieldWidget
@@ -54,6 +56,7 @@ class LongList:
     options: tuple[Option, ...]
     title: str = ""
     multiple: bool = False
+    step: str | None = None
 
 
 @dataclass(frozen=True)
@@ -96,12 +99,22 @@ class _Fetches:
         return self.seen[key]
 
 
-async def enrich(schema: Mapping[str, Any], widgets: Sequence[FieldWidget], ctx: WidgetContext) -> EnrichedPage:
-    """``schema`` with every property a widget matches rewritten; every other property as it came."""
+async def enrich(
+    schema: Mapping[str, Any],
+    widgets: Sequence[FieldWidget],
+    ctx: WidgetContext,
+    steps: Mapping[str, Mapping[str, Any]] | None = None,
+) -> EnrichedPage:
+    """``schema`` with every property a widget matches rewritten; every other property as it came.
+
+    ``steps`` holds the choices made so far for each cascade field (``widgets.cascade``), by field name.
+    """
     defs = schema.get("$defs") or {}
     fetch = _Fetches(ctx)
+    chosen = steps or {}
     found = [
-        await _property(name, prop, defs, widgets, fetch) for name, prop in (schema.get("properties") or {}).items()
+        await _property(name, prop, defs, widgets, fetch, chosen.get(name) or {})
+        for name, prop in (schema.get("properties") or {}).items()
     ]
     widget_choices = {p.name: p.choice for p in found if p.choice is not None}
     if not found:
@@ -110,7 +123,12 @@ async def enrich(schema: Mapping[str, Any], widgets: Sequence[FieldWidget], ctx:
 
 
 async def _property(
-    name: str, prop: Any, defs: Mapping[str, Any], widgets: Sequence[FieldWidget], fetch: _Fetches
+    name: str,
+    prop: Any,
+    defs: Mapping[str, Any],
+    widgets: Sequence[FieldWidget],
+    fetch: _Fetches,
+    chosen: Mapping[str, Any],
 ) -> _Property:
     """One property after ``enrich``: unchanged unless a widget matches it and could say what its options are."""
     resolved = resolve_property(prop, defs) if isinstance(prop, Mapping) else {}
@@ -119,19 +137,53 @@ async def _property(
         return _Property(name, prop)
     target = resolve_property(widget_target(resolved), defs)
     try:
-        options = await fetch(widget, target)
+        return await _with_options(name, resolved, target, widget, fetch, chosen)
     except Exception as exc:  # a widget is an add-on: without it the field is asked as before
         logger.warning("Form-fill widget failed", widget=widget.id, field=name, error=str(exc))
         return _Property(name, prop)
+
+
+async def _with_options(
+    name: str,
+    resolved: dict[str, Any],
+    target: dict[str, Any],
+    widget: FieldWidget,
+    fetch: _Fetches,
+    chosen: Mapping[str, Any],
+) -> _Property:
+    """The property with its widget's options written in — or, for a cascade field, those of its next step."""
+    title = str(resolved.get("title") or name)
+    pending = widget.pending(target, chosen) if isinstance(widget, CascadeWidget) else None
+    if pending is not None:
+        step_options = await pending.step.options(target, fetch.ctx, pending.chosen)
+        step_field = {"type": "string", "title": f"{title} — {pending.step.title}"}
+        # The step is asked in the field's place, never as a list, and resolves to the step's choice.
+        asked = {key: value for key, value in resolved.items() if key not in ("items", "default", "type")}
+        choice = LongList(widget, step_field, tuple(step_options), title=step_field["title"], step=pending.step.key)
+        return _shown(name, {**asked, **step_field}, step_field, widget, choice, {"step": pending.step.key})
+    options = await (
+        widget.fetch_chosen(target, fetch.ctx, chosen) if isinstance(widget, CascadeWidget) else fetch(widget, target)
+    )
     if options is None:
         return _Property(name, {**resolved, WIDGET_MARK: {"id": widget.id, "later": True}})
-    title = str(resolved.get("title") or name)
     choice = LongList(widget, target, tuple(options), title=title, multiple=resolved.get("type") == "array")
-    if len(options) <= MAX_INLINE:
-        inlined = {**_with_target(resolved, _choice(target, options)), WIDGET_MARK: {"id": widget.id}}
+    return _shown(name, resolved, target, widget, choice, {})
+
+
+def _shown(
+    name: str,
+    prop: dict[str, Any],
+    target: dict[str, Any],
+    widget: FieldWidget,
+    choice: LongList,
+    mark: dict[str, Any],
+) -> _Property:
+    """The property as asked: its options as chips when they fit a question, else marked as a long list to type."""
+    if len(choice.options) <= MAX_INLINE:
+        inlined = {**_with_target(prop, _choice(target, choice.options)), WIDGET_MARK: {"id": widget.id, **mark}}
         return _Property(name, inlined, choice)
-    marked = {**_with_target(resolved, target), WIDGET_MARK: {"id": widget.id, "total": len(options)}}
-    return _Property(name, marked, choice)
+    total = {"id": widget.id, "total": len(choice.options), **mark}
+    return _Property(name, {**_with_target(prop, target), WIDGET_MARK: total}, choice)
 
 
 __all__ = ["EnrichedPage", "LongList", "enrich"]

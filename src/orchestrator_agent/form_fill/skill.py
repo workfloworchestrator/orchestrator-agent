@@ -216,13 +216,30 @@ def _offer(field: AskField, outcome: Resolution | None) -> AskField:
 
 
 def _record(session: FormFillSession, name: str, choice: LongList, outcome: Resolution) -> None:
-    """Keep what the words resolved to in place of the words; drop words that did not resolve (core never sees them)."""
+    """Keep what the words resolved to in place of the words; drop words that did not resolve (core never sees them).
+
+    The answer to a cascade field's step is that step's choice, kept with the field's steps: the field has no
+    value yet, and the next walk asks its next step or its value.
+    """
+    if choice.step is not None:
+        session.values.pop(name, None)
+        if outcome.resolved:
+            session.steps.setdefault(name, {})[choice.step] = outcome.value
+        return
     if outcome.resolved:
         session.values[name] = outcome.value
         session.resolved[name] = {"value": outcome.value, "label": shown_as(choice, outcome.value)}
     else:
         session.values.pop(name, None)
         session.resolved.pop(name, None)
+
+
+def _stepped(widget_choices: Mapping[str, LongList], session: FormFillSession) -> bool:
+    """Whether a cascade field asked for a step now has that step chosen (so the page asks what comes next)."""
+    return any(
+        choice.step is not None and choice.step in session.steps.get(name, {})
+        for name, choice in widget_choices.items()
+    )
 
 
 def _given(session: FormFillSession) -> dict[str, Any]:
@@ -362,10 +379,13 @@ class FormFillSkill:
                 return self._summary(session)
 
             ctx = self._widget_context(session, call_tool, pages)
-            enriched = await enrich(page.schema_ or {}, self.widgets, ctx)
+            enriched = await enrich(page.schema_ or {}, self.widgets, ctx, session.steps)
+            unresolved = await self._resolve(session, enriched.choices, ctx)
+            if _stepped(enriched.choices, session):  # a step was chosen: the page is asked for what comes next
+                enriched = await enrich(page.schema_ or {}, self.widgets, ctx, session.steps)
+                unresolved = {**unresolved, **await self._resolve(session, enriched.choices, ctx)}
             session.pages.append(enriched.schema)
             model = page_model(enriched.schema)
-            unresolved = await self._resolve(session, enriched.choices, ctx)
             values = self._see_page(session, model, pages)
             if unresolved:  # words that are no option: the page is asked again, never submitted with them
                 return offered(self._page_stop(session, [*pages, values]), unresolved)

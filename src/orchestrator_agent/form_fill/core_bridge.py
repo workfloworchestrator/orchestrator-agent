@@ -168,8 +168,8 @@ def _labels(prop: Mapping[str, Any], defs: Mapping[str, Any]) -> dict[str, str] 
         return _labels(resolve_property(prop.get("items") or {}, defs), defs)
     if not isinstance(prop.get("enum"), list):
         return None
-    options = prop.get("options") or {}
-    labels = {str(value): str(options.get(value, value)) for value in prop["enum"]}
+    options = prop.get("options") or {}  # JSON object keys: a number value is labelled under its string
+    labels = {str(value): str(options.get(value, options.get(str(value), value))) for value in prop["enum"]}
     return labels if any(value != text for value, text in labels.items()) else None
 
 

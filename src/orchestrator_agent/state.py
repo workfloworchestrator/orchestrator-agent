@@ -156,6 +156,8 @@ class FormFillSession(BaseModel):
     interpreted: dict[str, str] = Field(default_factory=dict)  # field -> the person's words already interpreted
     # widget field -> what the person's words resolved to: {"value": <option value>, "label": <its label>}
     resolved: dict[str, dict[str, Any]] = Field(default_factory=dict)
+    # cascade widget field -> the steps chosen before its value ({"node": <node>}): never sent to core
+    steps: dict[str, dict[str, Any]] = Field(default_factory=dict)
     pending: dict[str, Any] | None = None  # the stop the transport sent as a pause, to map the response back
     # The pending stop answered a response rather than a message: a parent runtime that pauses once per call
     # has not shown it yet, and its next message asks for it again.
