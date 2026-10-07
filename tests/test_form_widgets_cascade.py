@@ -20,16 +20,15 @@ from .test_form_fill import FakeCore, open_form, rejection, turn
 
 KEY = "create_port"
 BACK = "Choose another node"  # offered with the ports: back to the node step
+PORT_ID: dict[str, Any] = {
+    "format": "imsPortId",
+    "title": "Port Id",
+    "type": "integer",
+    "uniforms": {"interfaceSpeed": 10000, "imsPortMode": "patched"},
+}
+PORT_MODE: dict[str, Any] = {"enum": ["tagged", "untagged"], "title": "Port Mode", "type": "string"}
 PAGE = {
-    "properties": {
-        "port_id": {
-            "format": "imsPortId",
-            "title": "Port Id",
-            "type": "integer",
-            "uniforms": {"interfaceSpeed": 10000, "imsPortMode": "patched"},
-        },
-        "port_mode": {"enum": ["tagged", "untagged"], "title": "Port Mode", "type": "string"},
-    },
+    "properties": {"port_id": PORT_ID, "port_mode": PORT_MODE},
     "required": ["port_id", "port_mode"],
     "title": "Service Port 10G",
     "type": "object",
@@ -257,3 +256,51 @@ async def test_a_picked_port_core_rejects_keeps_the_form_open_with_another_node_
     assert port.values == (101, BACK)
     back = await turn(skill, core, state, {"port_id": BACK})
     assert back.status == "gathering" and back.question("port_id").title == "Port Id — Node"
+
+
+SERVICE_PAGE = {
+    "properties": {
+        "ticket_id": {"default": "", "title": "Ticket Id", "type": "string"},
+        "port_id": PORT_ID,
+        "port_mode": PORT_MODE,
+        "lldp": {"default": False, "title": "Lldp", "type": "boolean"},
+    },
+    "required": ["port_id", "port_mode"],
+    "title": "Service Port 10G",
+    "type": "object",
+}
+
+
+class ServiceCore(PortCore):
+    """Core's form tools for the service-port page: a ticket before the port, its mode and LLDP after it."""
+
+    async def __call__(self, name: str, args: dict[str, Any]) -> Any:
+        if name != "get_workflow_form":
+            return await super().__call__(name, args)
+        inputs = args["page_inputs"]
+        self.submitted.extend(inputs)
+        if not inputs:
+            return {"page": 0, "complete": False, "schema": SERVICE_PAGE}
+        FakeCore.require(SERVICE_PAGE, inputs[0])
+        return {"page": 1, "complete": True, "schema": None}
+
+
+async def test_the_node_ends_its_stop_and_the_port_comes_with_what_follows_it():
+    core, state = ServiceCore(), SearchState()
+    skill = FormFillSkill(widgets=[NodePorts()], choose=NoFit())
+    first = await open_form(skill, core, state, KEY)
+    assert set(first.asked) == {"ticket_id", "port_id"}  # up to the node: what follows it depends on the node
+    second = await turn(skill, core, state, {"port_id": "n-asd"})  # the ticket left at its default
+    assert set(second.asked) == {"port_id", "port_mode", "lldp"} and second.question("port_id").title == "Port Id"
+    done = await turn(skill, core, state, {"port_id": 101, "port_mode": "tagged"})  # LLDP left at its default
+    assert done.status == "confirming" and done.values == {"port_id": 101, "port_mode": "tagged"}
+
+
+async def test_a_field_left_at_its_default_is_not_asked_again():
+    core, state = ServiceCore(), SearchState()
+    skill = FormFillSkill(widgets=[NodePorts()], choose=NoFit())
+    await open_form(skill, core, state, KEY)
+    await turn(skill, core, state, {"port_id": "n-asd"})
+    # The port is answered with words that are no port: only the port is asked again, not the defaults.
+    again = await turn(skill, core, state, {"port_id": "nowhere", "port_mode": "tagged"})
+    assert again.asked == ["port_id"] and "nowhere" in again.question("port_id").hint

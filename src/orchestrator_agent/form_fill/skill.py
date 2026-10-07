@@ -48,7 +48,7 @@ from __future__ import annotations
 import hashlib
 import json
 import time
-from collections.abc import Mapping, Sequence
+from collections.abc import Collection, Mapping, Sequence
 from dataclasses import dataclass, replace
 from dataclasses import field as dc_field
 from typing import Any, Literal, Protocol
@@ -148,6 +148,7 @@ def questions(
     reason: str | None = None,
     *,
     untouched: bool = True,
+    asked: Collection[str] = (),
 ) -> list[AskField]:
     """The stop as questions for the human: the fields core rejected, with its message, then the unanswered ones.
 
@@ -156,11 +157,22 @@ def questions(
     is no form verdict at all (``reason``) — is asked again in full, the first question with what core said.
     A field waiting for another value (``later``) is left out while anything else is asked; when nothing else
     is, it is asked as typed text, like a field without its widget, so it never leaves a stop with no question.
+    An optional field the person was ``asked`` and left at its default is not asked again. A field asked for a
+    step that comes before its value (a node, before the port) ends the stop: what follows it on the page may
+    depend on that choice, so it is asked with the value, on the next stop.
     """
     waiting = {name for name, info in model.model_fields.items() if _waits(info)}
-    return _questions(model, values, errors, reason, untouched, waiting) or _questions(
-        model, values, errors, reason, untouched, set()
+    found = _questions(model, values, errors, reason, untouched, waiting, asked) or _questions(
+        model, values, errors, reason, untouched, set(), asked
     )
+    return _up_to_a_step(model, found)
+
+
+def _up_to_a_step(model: type[BaseModel], found: list[AskField]) -> list[AskField]:
+    """The questions up to the first one asked for a step (in page order); all of them when none is."""
+    order = {name: index for index, name in enumerate(model.model_fields)}
+    steps = [order[field.name] for field in found if (widget_mark(model.model_fields[field.name]) or {}).get("step")]
+    return [field for field in found if order[field.name] <= min(steps)] if steps else found
 
 
 def _questions(
@@ -170,6 +182,7 @@ def _questions(
     reason: str | None,
     untouched: bool,
     waiting: set[str],
+    asked: Collection[str],
 ) -> list[AskField]:
     """``questions``, leaving out the ``waiting`` fields and core's errors on them."""
     fields = {name: info for name, info in model.model_fields.items() if name not in waiting}
@@ -181,10 +194,11 @@ def _questions(
     if (errors or reason) and not problems and untouched:
         said = "; ".join(str(error["msg"]) for error in errors) or str(reason)
         problems = {name: said if index == 0 else "" for index, name in enumerate(fields)}
-    asked = [question(name, fields[name], problem) for name, problem in problems.items()]
+    found = [question(name, fields[name], problem) for name, problem in problems.items()]
     if untouched:
-        asked += [question(name, info) for name, info in fields.items() if name not in problems and name not in values]
-    return asked
+        open_ = {name: info for name, info in fields.items() if name not in problems and name not in values}
+        found += [question(name, info) for name, info in open_.items() if info.is_required() or name not in asked]
+    return found
 
 
 def question(name: str, info: FieldInfo, problem: str = "") -> AskField:
@@ -500,13 +514,14 @@ class FormFillSkill:
     def _page_stop(self, session: FormFillSession, pages: list[dict[str, Any]], error: str | None = None) -> Reply:
         """The stop at the last of ``pages``: its fields as questions, with core's verdict on it (none when it was never submitted).
 
-        The pages before it are the validated ones; its fields count as asked.
+        The pages before it are the validated ones; the fields it asks count as asked.
         """
         schema = session.pages[-1]
         model = page_model(schema)
         self._stop(session, pages[:-1], "gathering")
-        session.asked.extend(name for name in model.model_fields if name not in session.asked)
-        return self._gathering(session, model, pages[-1], error, page=len(pages) - 1, title=schema.get("title"))
+        reply = self._gathering(session, model, pages[-1], error, page=len(pages) - 1, title=schema.get("title"))
+        session.asked.extend(field.name for field in reply.ask or () if field.name not in session.asked)
+        return reply
 
     def _gathering(
         self,
@@ -529,7 +544,7 @@ class FormFillSkill:
         reason = error if error and not errors else None  # a refusal that is not a form body, as it came
         rejected = {str(e["loc"][0]) for e in errors if e["loc"]}
         values = {**_given(session), **{name: value for name, value in submitted.items() if name not in rejected}}
-        ask = questions(model, values, errors, reason, untouched=page is not None)
+        ask = questions(model, values, errors, reason, untouched=page is not None, asked=session.asked)
         if not ask:
             session.status = "done"
             return self._reply(session, "failed", reason=error or "the form asks for nothing a person can answer")
