@@ -42,6 +42,33 @@ jobs:
           token: ${{ secrets.CODECOV_TOKEN }}
           fail_ci_if_error: false
 
+  integration:
+    name: Integration tests (orchestrator-core)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Install uv and set the python version
+        uses: astral-sh/setup-uv@v7
+        with:
+          version: "0.10.8"
+          python-version: "3.13"
+
+      - name: Install the project
+        run: uv sync --dev
+
+      - name: Start orchestrator-core
+        run: docker compose -f tests/integration/docker-compose.yml up -d --wait --wait-timeout 300
+
+      - name: Run integration tests
+        env:
+          WFO_INTEGRATION_CORE_URL: http://localhost:8087
+        run: uv run pytest tests/integration -m integration -v
+
+      - name: Core logs
+        if: failure()
+        run: docker compose -f tests/integration/docker-compose.yml logs --tail 200
+
   build:
     name: Build container image (${{ matrix.variant }})
     needs: test
