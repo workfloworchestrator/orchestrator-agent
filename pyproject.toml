@@ -91,6 +91,7 @@ known-first-party = ["orchestrator_agent"]
 norecursedirs = ".git build dist *.egg __pycache__ .cache .venv"
 testpaths = ["tests"]
 asyncio_mode = "auto"
+markers = ["integration: needs the orchestrator-core stack of tests/integration (WFO_INTEGRATION_CORE_URL)"]
 
 [tool.mypy]
 exclude = "(venv|.venv|demos)"
