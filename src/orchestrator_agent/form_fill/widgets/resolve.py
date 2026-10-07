@@ -26,6 +26,7 @@ from typing import Any
 
 from orchestrator_agent.form_fill.interpret import Chooser
 from orchestrator_agent.form_fill.widgets.base import (
+    MAX_CANDIDATES,
     MAX_FULL_READ,
     MAX_INLINE,
     Option,
@@ -53,14 +54,19 @@ def exact_options(options: Sequence[Option], words: str) -> list[Option]:
 
 
 async def _candidates(long_list: LongList, words: str, ctx: WidgetContext, *, full: bool) -> tuple[Option, ...]:
-    """What the words are read against: a short enough list in ``full``, else the options a search finds."""
+    """What the words are read against: a short enough list in ``full``, else the first options a search finds."""
     if len(long_list.options) <= MAX_FULL_READ:
         return long_list.options if full else tuple(narrow_options(long_list.options, words))
-    return tuple(await long_list.widget.options(long_list.field, ctx, search=words) or ())
+    return tuple(await long_list.widget.options(long_list.field, ctx, search=words) or ())[:MAX_CANDIDATES]
 
 
 async def resolve_words(long_list: LongList, words: str, ctx: WidgetContext, chooser: Chooser | None) -> Resolution:
-    """One item's words: an exact name, else what the chooser says the words fit among the candidates."""
+    """One item's words: an exact name, else what the chooser says the words fit among the candidates.
+
+    Blank words fit nothing: no search is made and no model is asked.
+    """
+    if not words.strip():
+        return Resolution(unmatched=(words,))
     exact = exact_options(long_list.options, words)
     if len(exact) == 1:
         return Resolution(value=exact[0].value, resolved=True)

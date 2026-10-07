@@ -34,6 +34,7 @@ CUSTOMERS = (
     Option("c-x2", "SURF (SURF2)", aliases=("SURF", "SURF2")),
     *(Option(f"c-{n}", f"Customer {n:02d}") for n in range(20)),
 )
+MANY = tuple(Option(f"c-{n}", f"Customer {n:03d}") for n in range(250))  # longer than the full read
 CTX = WidgetContext(call_tool=no_tool, graphql=no_graphql)
 
 
@@ -119,12 +120,40 @@ async def test_a_chosen_value_outside_the_candidates_is_ignored():
 
 
 async def test_a_list_longer_than_the_full_read_is_searched_first():
-    many = tuple(Option(f"c-{n}", f"Customer {n:03d}") for n in range(250))
-    widget = Searchable(many)
+    widget = Searchable(MANY)
     chooser = FakeChooser(["c-7"])
-    resolution = await resolve_words(long_list(many, widget=widget), "customer 7", CTX, chooser)
+    resolution = await resolve_words(long_list(MANY, widget=widget), "customer 7", CTX, chooser)
     assert resolution == Resolution(value="c-7", resolved=True)
     assert widget.searches == ["customer 7"] and len(chooser.calls[0][1]) == 50  # the widget's search, capped
+
+
+@pytest.mark.parametrize(
+    "words,options",
+    [
+        pytest.param("", CUSTOMERS, id="empty-short-list"),
+        pytest.param("   ", CUSTOMERS, id="spaces-short-list"),
+        pytest.param("", MANY, id="empty-searched-list"),
+        pytest.param(" \t", MANY, id="spaces-searched-list"),
+    ],
+)
+async def test_blank_words_match_nothing_without_a_search_or_a_model(words, options):
+    widget = Searchable(options)
+    resolution = await resolve_words(long_list(options, widget=widget), words, CTX, Refuses())
+    assert resolution == Resolution(unmatched=(words,)) and widget.searches == []
+
+
+class Unbounded(Searchable):
+    """A widget whose search ignores the cap and returns every option."""
+
+    async def options(self, field, ctx, search=None):
+        self.searches.append(search)
+        return self._options
+
+
+async def test_a_search_returning_more_than_the_cap_is_cut_to_it():
+    chooser = FakeChooser(["c-7"])
+    resolution = await resolve_words(long_list(MANY, widget=Unbounded(MANY)), "customer 7", CTX, chooser)
+    assert resolution == Resolution(value="c-7", resolved=True) and len(chooser.calls[0][1]) == 50
 
 
 @pytest.mark.parametrize(
