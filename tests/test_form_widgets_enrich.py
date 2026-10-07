@@ -104,7 +104,7 @@ async def test_the_inline_threshold(count, inlined):
 
 async def test_options_that_wait_for_another_value_mark_the_field():
     page = await enrich(PAGE, [Customers(None)], CTX)
-    assert page_model(page.schema).model_fields["customer_id"].json_schema_extra["x-widget"] == {  # type: ignore[index]
+    assert page_model(page.schema).model_fields["customer_id"].json_schema_extra["x-widget"] == {
         "id": "customerId",
         "later": True,
     }

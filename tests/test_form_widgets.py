@@ -149,7 +149,7 @@ class TestRegistry:
 
     def test_an_extender_must_return_widgets(self):
         with pytest.raises(ValueError, match="FORM_WIDGET_EXTENDER"):
-            build_widgets([FormatWidget("customer", "customerId")], lambda widgets: None)  # type: ignore[arg-type,return-value]
+            build_widgets([FormatWidget("customer", "customerId")], lambda widgets: None)
 
     @pytest.mark.parametrize(
         "prop,matched",
@@ -178,7 +178,7 @@ class TestLoadExtender:
 
     def test_a_module_callable(self, monkeypatch):
         module = types.ModuleType("fake_widgets")
-        module.extend = lambda widgets: widgets  # type: ignore[attr-defined]
+        module.extend = lambda widgets: widgets
         monkeypatch.setitem(sys.modules, "fake_widgets", module)
         assert load_extender("fake_widgets:extend") is module.extend
 
@@ -193,7 +193,7 @@ class TestLoadExtender:
     )
     def test_a_bad_path_fails_loudly(self, monkeypatch, path):
         module = types.ModuleType("fake_widgets")
-        module.not_callable = 42  # type: ignore[attr-defined]
+        module.not_callable = 42
         monkeypatch.setitem(sys.modules, "fake_widgets", module)
         with pytest.raises(ValueError, match="FORM_WIDGET_EXTENDER"):
             load_extender(path)

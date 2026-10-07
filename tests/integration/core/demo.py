@@ -15,6 +15,7 @@ from orchestrator.core.graphql.utils.to_graphql_result_page import to_graphql_re
 from orchestrator.core.targets import Target
 from orchestrator.core.workflow import StepList, done, init, step, workflow
 from orchestrator.core.workflows import LazyWorkflowInstance
+from pydantic_forms.types import FormGenerator
 
 P1 = UUID("d8a3f9b0-1111-4000-8000-000000000001")
 P2 = UUID("d8a3f9b0-1111-4000-8000-000000000002")
@@ -45,7 +46,7 @@ class DemoQuery(Query):
     customers: Connection[CustomerType] = authenticated_field(resolver=resolve_customers, description="Customers")
 
 
-def widget_demo_form() -> object:
+def widget_demo_form() -> FormGenerator:
     class WidgetDemoPage(FormPage):
         customer_id: CustomerId
         product_id: product_id([P1, P2])  # type: ignore[valid-type]

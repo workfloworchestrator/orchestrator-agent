@@ -398,9 +398,5 @@ core's MCP tools, and `orchestrator_agent.form_fill.widgets.core_auth()` authent
 
 - **orchestrator-core >= 5.4.0 is required.** The agent's startup tool-contract check (`verify_tool_contract`)
   now includes core's `list_products` tool, which the `productId` widget reads its options from.
-- **Run with incoming OAuth2 off? Set `OAUTH2_OUTBOUND_ACTIVE=false` too.** Unset, outbound auth follows
-  `OAUTH2_ACTIVE`; a deployment that does not set it looks for a client-credentials token for its calls to
-  core, the widgets cannot fetch their options, and widget fields fall back to free text (only a warning is
-  logged).
 
 The **A2A adapter** uses [a2a-sdk](https://github.com/google/a2a-sdk) server primitives (`AgentExecutor`, `DefaultRequestHandler`, and the route factories). The SDK handles JSON-RPC routing, SSE streaming, task lifecycle, and agent card serving. The adapter implements a single `WFOAgentExecutor.execute()` method that drives the pydantic-ai event stream and publishes A2A events via `TaskUpdater`. The `AgentCard.skills` list is projected from the advertised capability specs (`skills_from_specs`), keeping the advertised skills in sync with the configured capabilities.
