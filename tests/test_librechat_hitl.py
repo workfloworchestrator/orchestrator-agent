@@ -223,6 +223,29 @@ class TestRead:
         assert isinstance(values, FormInput) and values.values is not None
         assert values.values["ports"] == ["b", "the spare one, in Zwolle"]
 
+    def test_two_options_with_one_label_are_two_choices(self):
+        # Labels are descriptions, and descriptions coincide; what is picked is the option, not its label.
+        twins = AskField(
+            name="nodes",
+            question="Nodes",
+            choices=["Node X", "Node X", "Node Y"],
+            values=["id-1", "id-2", "id-3"],
+            multiple=True,
+        )
+        session, pending = _paused([twins])
+        options = _question(session, 0)["options"]
+        both = _answer(pending, 0, {"q0": f"{options[0]['value']}, {options[1]['value']}"})
+        assert _read(session, [both]) == FormInput(values={"nodes": ["id-1", "id-2"]})
+        assert _read(session, [_answer(pending, 0, {"q0": options[0]["value"]})]) == FormInput(
+            values={"nodes": ["id-1"]}
+        )
+        assert _read(session, [_answer(pending, 0, {"q0": options[1]["value"]})]) == FormInput(
+            values={"nodes": ["id-2"]}
+        )
+        # Typed, the shared label names no one option: it travels as typed, for core to judge.
+        assert _read(session, [_answer(pending, 0, {"q0": "Node X"})]) == FormInput(values={"nodes": ["Node X"]})
+        assert _read(session, [_answer(pending, 0, {"q0": "node y"})]) == FormInput(values={"nodes": ["id-3"]})
+
     def test_a_typed_answer_that_names_one_choice_is_that_choice(self):
         session, pending = _paused()
         typed = self._first(session, pending, q0="sn8 1g", q1="T-1")

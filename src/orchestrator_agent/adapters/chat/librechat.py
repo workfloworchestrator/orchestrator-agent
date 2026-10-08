@@ -50,7 +50,14 @@ from openai.types.chat.chat_completion_message_function_tool_call import Functio
 from pydantic import BaseModel, ValidationError
 
 from orchestrator_agent.adapters.chat.request import ChatRequest
-from orchestrator_agent.form_fill.pending import PendingAsk, answered_values, pending_approval, pending_ask, pending_of
+from orchestrator_agent.form_fill.pending import (
+    PendingAsk,
+    Pick,
+    answered_values,
+    pending_approval,
+    pending_ask,
+    pending_of,
+)
 from orchestrator_agent.state import (
     Approval,
     AskField,
@@ -253,7 +260,7 @@ def _page_answers(
 ) -> FormInput | ChatCompletionMessage:
     """The answers to the ``answered`` cards of a page: its fields' values once all cards are in, else the next card."""
     asked = pending.questions[: answered * MAX_QUESTIONS]
-    picks: list[list[str]] = []
+    picks: list[list[Pick]] = []
     for index, field in enumerate(asked):
         answer = answers.get(f"q{index}", SKIPPED)
         if answer == SKIPPED:
@@ -293,23 +300,25 @@ def _answers(content: str) -> dict[str, str] | None:
         return None
 
 
-def _picks(answer: str, request_id: str, index: int, field: AskField) -> list[str]:
-    """One answer as the choices picked and what was typed.
+def _picks(answer: str, request_id: str, index: int, field: AskField) -> list[Pick]:
+    """One answer as the options picked, each by its position, and what was typed.
 
     LibreChat joins the values of the picked options with ", " and puts typed text after them; an option
-    value is a token of this stop, so the first part that is not one starts the typed text. A typed answer
-    that is one choice but for its case is that choice. "Keep default" stands for no answer.
+    value is a token of this stop that names the option's position, so the first part that is not one
+    starts the typed text. A pick is kept as that position, not as the option's label: two options can
+    share a label (a description) and still be two choices. A typed answer that is one choice but for its
+    case is that choice. "Keep default" stands for no answer.
     """
-    choices = dict(_option_values(request_id, index, field))
+    positions = {token: position for position, (token, _) in enumerate(_option_values(request_id, index, field))}
     keep = _token(request_id, f"{index}.keep")
-    picked: list[str] = []
+    picked: list[Pick] = []
     rest = answer.strip()
     while rest:
         head, _, tail = rest.partition(", ")
         if head == keep:
             rest = tail
-        elif head in choices:
-            picked.append(choices[head])
+        elif head in positions:
+            picked.append(positions[head])
             rest = tail
         else:
             picked.append(_as_choice(rest, field.choices))

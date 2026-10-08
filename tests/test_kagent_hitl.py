@@ -155,6 +155,24 @@ def test_multiple_answers_stay_a_list_and_survive_commas_in_labels():
     assert answers_as_values(pending, AskUserResponse(id="r", answers=[])) is None
 
 
+def test_chips_that_share_a_label_are_told_apart_and_map_to_their_ids():
+    # kagent answers with chip text, and core takes ids, never labels. Where two options carry the same
+    # label (descriptions are not unique) the skill's chips carry the value too (``unique_choices``), so a
+    # pick always names one option; only text that is no chip travels as typed, for core to judge.
+    twins = AskField(
+        name="nodes",
+        question="Nodes?",
+        multiple=True,
+        choices=["Node X (id-1)", "Node X (id-2)", "Node Y"],
+        values=["id-1", "id-2", "id-3"],
+    )
+    pending = PendingAsk(id="r", kind="ask", questions=[twins])
+    picked = AskUserResponse(id="r", answers=[AskUserAnswer(answer=["Node X (id-2)", "Node Y"])])
+    assert answers_as_values(pending, picked) == {"nodes": ["id-2", "id-3"]}
+    typed = AskUserResponse(id="r", answers=[AskUserAnswer(answer=["Node X"])])
+    assert answers_as_values(pending, typed) == {"nodes": ["Node X"]}
+
+
 def test_approval_decision_is_matched_by_id():
     pending = PendingAsk(id="r", kind="approval")
     response = ToolApprovalResponse(

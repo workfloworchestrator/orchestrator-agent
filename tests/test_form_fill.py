@@ -434,6 +434,19 @@ class TestQuestions:
         assert nodes.multiple and nodes.choices == ("Node A", "Node B") and nodes.values == ("a", "b")
         assert confirm.choices == ("ACCEPTED",) and confirm.values == ("ACCEPTED",)
 
+    def test_options_that_share_a_label_are_told_apart_by_their_value(self):
+        # Labels are descriptions and descriptions coincide. A chip's text is all a transport gets back from
+        # a pick, so each option must read differently to map back to its id: core takes ids, never labels.
+        node = {"enum": ["id-1", "id-2", "id-3"], "options": {"id-1": "Node X", "id-2": "Node X", "id-3": "Node Y"}}
+        twins = {
+            "$defs": {"Node": {**node, "type": "string"}},
+            "properties": {"nodes": {"items": {"$ref": "#/$defs/Node"}, "type": "array"}},
+            "required": ["nodes"],
+        }
+        (nodes,) = questions(page_model(twins), {}, [])
+        assert nodes.choices == ("Node X (id-1)", "Node X (id-2)", "Node Y")
+        assert nodes.values == ("id-1", "id-2", "id-3")
+
     def test_only_what_is_rejected_or_unanswered_is_asked(self):
         model = page_model(LIGHTPATH_PAGE)
         errors = form_errors(rejection({"speed": "Input should be '1000', '10000' or '100000'"}))
