@@ -31,9 +31,9 @@ words fit, and the field is taken only when that is exactly one (``reading_type`
 from __future__ import annotations
 
 import json
-from collections.abc import Iterable, Mapping
+from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass
-from typing import Any, Protocol
+from typing import Any, Literal, Protocol
 
 import structlog
 from pydantic import BaseModel, ConfigDict, Field, create_model
@@ -65,6 +65,20 @@ class Interpreter(Protocol):
     """
 
     async def answers(self, form: type[BaseModel], words: Mapping[str, str]) -> Mapping[str, Any]: ...
+
+
+class Chooser(Protocol):
+    """Which of a field's options a person's words fit: every value they fit, so the caller sees when several do."""
+
+    async def choose(self, title: str, options: Sequence[tuple[Any, str]], words: str) -> list[Any]: ...
+
+
+CHOOSE_INSTRUCTIONS = (
+    "A person answered a form field in their own words. The field's options are given as values with how they are "
+    "shown to people. Give every option value the words fit — a name, a short name, a description or a part of "
+    "one — so more than one when the words do not tell the options apart, and none when they fit none. Never give "
+    "a value that is not one of the options."
+)
 
 
 def fields_model(form: type[BaseModel], names: Iterable[str]) -> type[BaseModel]:
@@ -130,6 +144,18 @@ class ModelInterpreter:
         logger.info("Form-fill answers interpreted", asked=list(asked.model_fields), values=values)
         return values
 
+    async def choose(self, title: str, options: Sequence[tuple[Any, str]], words: str) -> list[Any]:
+        values = tuple(value for value, _ in options)
+        if not values:
+            return []
+        reading = create_model("Choice", values=(list[Literal.__getitem__(values)], Field(default_factory=list)))  # type: ignore[misc]
+        agent: Agent[None, Any] = Agent(self.model, output_type=reading, instructions=CHOOSE_INSTRUCTIONS)
+        listed = "\n".join(f"- {json.dumps(value)}: {label}" for value, label in options)
+        prompt = f"Field: {title}\nOptions (value: shown as):\n{listed}\nAnswer: {words}"
+        chosen = list((await agent.run(prompt)).output.values)
+        logger.info("Form-fill option chosen", field=title, words=words, chosen=chosen)
+        return chosen
+
 
 def _values(output: BaseModel, form: type[BaseModel]) -> dict[str, Any]:
     """The fields the reading gave a value, as plain data (a nested model is its object); nulls are left out.
@@ -149,4 +175,12 @@ def _values(output: BaseModel, form: type[BaseModel]) -> dict[str, Any]:
     return values
 
 
-__all__ = ["INSTRUCTIONS", "Interpreter", "ModelInterpreter", "fields_model", "reading_type"]
+__all__ = [
+    "CHOOSE_INSTRUCTIONS",
+    "INSTRUCTIONS",
+    "Chooser",
+    "Interpreter",
+    "ModelInterpreter",
+    "fields_model",
+    "reading_type",
+]

@@ -58,6 +58,8 @@ uv run demos/mcp_client.py search "active subscriptions"
 | --- | --- | --- |
 | `DATABASE_URI` | *(required)* | PostgreSQL connection URI for the WFO database |
 | `WFO_CORE_MCP_URL` | `http://localhost:8080/mcp` | URL of orchestrator-core's MCP server (serves the domain tools the agent calls) |
+| `WFO_CORE_GRAPHQL_URL` | *(derived)* | URL of orchestrator-core's GraphQL API, which form-fill widgets read options from (customers). Unset: `WFO_CORE_MCP_URL` with `/mcp` replaced by `/api/graphql` |
+| `FORM_WIDGET_EXTENDER` | *(unset)* | `package.module:callable` that receives the form-fill widgets and returns the list to use (a deployment's own formats first). Unset: the built-ins (`customerId`, `productId`) |
 | `BASE_URL` | `http://localhost:8080` | Public URL of this agent service |
 | `AGENT_MODEL` | `openai:gpt-4o` | LLM model in `provider:model` format |
 | `AGENT_API_BASE` | *(none)* | Custom base URL for the LLM provider (OpenAI-compatible) or Azure endpoint |
@@ -356,5 +358,45 @@ modelSpecs:
 
 A pending card survives a browser reload; it survives a LibreChat restart only when LibreChat runs with
 Redis (`USE_REDIS=true`).
+
+**Form field widgets.** Some form fields carry no options in core's schema: core's `CustomerId` is a string
+with `format: customerId`, and the WFO frontend's customer select fetches the customers itself. The agent does
+the same through *widgets*, its counterpart of pydantic-forms' component matchers. Before a page is asked, each
+field a widget matches gets its options from core (GraphQL or MCP, as the person asking): up to ten are asked
+as options to pick; a longer list is typed, and what is typed is resolved to one of its options — an exact name
+directly, otherwise the agent's model reads the words over the candidates — before core sees it. Words that fit
+several options are asked again as those options; words that fit none are asked again. Typed text is never sent
+to core for such a field.
+
+The agent ships widgets for the formats orchestrator-core defines (`customerId`, `productId`). A deployment adds
+its own formats — subscriptions, ports, contacts — from its own package, like the frontend's
+`componentMatcherExtender`:
+
+```python
+# my_widgets.py — FORM_WIDGET_EXTENDER=my_widgets:extend
+from orchestrator_agent.form_fill.widgets import Option, Widget
+
+
+class LocationWidget(Widget):
+    id = "locationCode"
+
+    def matches(self, field):
+        return field.get("format") == "locationCode"
+
+    async def fetch(self, field, ctx):
+        data = await ctx.graphql("query { locations { code name } }")
+        return [Option(row["code"], row["name"]) for row in data["locations"]]
+
+
+def extend(widgets):
+    return [LocationWidget(), *widgets]  # the first widget that matches a field is its widget
+```
+
+`ctx.values` holds the form values known so far (a field that depends on another), `ctx.call_tool` calls
+core's MCP tools, and `orchestrator_agent.form_fill.widgets.core_auth()` authenticates a widget's own
+`httpx` client to core's REST endpoints. A widget whose source fails leaves its field typed, as without it.
+
+- **orchestrator-core >= 5.4.0 is required.** The agent's startup tool-contract check (`verify_tool_contract`)
+  now includes core's `list_products` tool, which the `productId` widget reads its options from.
 
 The **A2A adapter** uses [a2a-sdk](https://github.com/google/a2a-sdk) server primitives (`AgentExecutor`, `DefaultRequestHandler`, and the route factories). The SDK handles JSON-RPC routing, SSE streaming, task lifecycle, and agent card serving. The adapter implements a single `WFOAgentExecutor.execute()` method that drives the pydantic-ai event stream and publishes A2A events via `TaskUpdater`. The `AgentCard.skills` list is projected from the advertised capability specs (`skills_from_specs`), keeping the advertised skills in sync with the configured capabilities.

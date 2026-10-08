@@ -110,9 +110,14 @@ _RESPONSE: TypeAdapter[HITLResponse] = TypeAdapter(Annotated[HITLResponse, Field
 # --- outbound: a skill stop -> the extension payload ------------------------------------------------
 
 
+def _worded(field: AskField) -> str:
+    """The question as kagent shows it: its card has no description, so a hint follows the question."""
+    return f"{field.question} — {field.hint}" if field.hint else field.question
+
+
 def ask_request(request_id: str, ask: Sequence[AskField]) -> tuple[AskUserRequest, PendingAsk]:
     """An ``ask_user_request`` for the skill's ``AskField``s, plus what to remember for the answer."""
-    questions = [HITLQuestion(question=f.question, choices=list(f.choices), multiple=f.multiple) for f in ask]
+    questions = [HITLQuestion(question=_worded(f), choices=list(f.choices), multiple=f.multiple) for f in ask]
     return AskUserRequest(id=request_id, questions=questions), pending_ask(request_id, ask)
 
 

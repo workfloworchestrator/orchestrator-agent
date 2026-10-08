@@ -32,6 +32,11 @@ class AgentSettings(BaseSettings):
         description="URL of orchestrator-core's MCP server that serves the domain tools "
         "(search, aggregate, entity lookup, export). The agent is a thin MCP client of this endpoint.",
     )
+    WFO_CORE_GRAPHQL_URL: str | None = Field(
+        default=None,
+        description="URL of orchestrator-core's GraphQL API, which form-fill widgets read options from (customers). "
+        "Unset: derived from WFO_CORE_MCP_URL ('…/mcp' -> '…/api/graphql').",
+    )
     AGENT_MODEL: str = Field(default="openai:gpt-4o", description="LLM model for the agent")
     AGENT_API_BASE: str | None = Field(
         default=None, description="Custom base URL for the LLM provider (OpenAI-compatible or Azure endpoint)"
@@ -44,6 +49,11 @@ class AgentSettings(BaseSettings):
         default="",
         description="Optional operator-supplied domain knowledge appended to the agent system prompt "
         "(e.g. identifier conventions and their filter fields). Empty disables the section.",
+    )
+    FORM_WIDGET_EXTENDER: str | None = Field(
+        default=None,
+        description="Optional 'package.module:callable' that receives the form-fill widgets and returns the list "
+        "to use (a deployment's own formats first). Unset uses the built-ins (customerId, productId).",
     )
     OAUTH2_OUTBOUND_ACTIVE: bool | None = Field(
         default=None,
