@@ -6,6 +6,7 @@ import json
 from typing import Any
 
 from openai.types.chat import ChatCompletionMessage
+from orchestrator.core.schemas.mcp_tools import WorkflowFormPage
 
 from orchestrator_agent.adapters.chat.librechat import (
     APPROVE_LABEL,
@@ -63,7 +64,8 @@ def _paused(
     ask: list[AskField] | None = None, reply: Reply | None = None, title: str = "Port details"
 ) -> tuple[FormFillSession, PendingAsk]:
     """A session paused at a stop, as the skill leaves it: the page being asked is the last one walked."""
-    session = FormFillSession(workflow_key="create_port", status="gathering", unseen=True, pages=[{"title": title}])
+    page = WorkflowFormPage(page=0, complete=False, status="next", title=title)
+    session = FormFillSession(workflow_key="create_port", status="gathering", unseen=True, pages=[page])
     pending = pause(reply or Reply(GATHERING, ask=PAGE if ask is None else ask), session)
     assert pending is not None
     return session, pending
@@ -125,7 +127,7 @@ class TestCards:
         # Core's message on a rejected field is the description.
         assert _question(session, 3)["description"] == "List should have at least 2 items"
         # A page the form gave no title is headed by its workflow.
-        untitled, _ = _paused(title="unknown")
+        untitled, _ = _paused(title=None)
         assert _question(untitled, 0)["header"] == "create_port"
 
     def test_options_carry_values_only_this_stop_knows(self):
@@ -310,7 +312,7 @@ class TestApproval:
 class TestShown:
     def test_a_page_stop_is_a_line_above_its_card(self):
         assert shown(Reply(GATHERING, ask=PAGE)) == "**Workflow form `create_port`** — Port details"
-        untitled = Reply('{"workflow_key":"create_port","status":"gathering","title":"unknown"}', ask=PAGE[:1])
+        untitled = Reply('{"workflow_key":"create_port","status":"gathering"}', ask=PAGE[:1])
         assert shown(untitled) == "**Workflow form `create_port`**"
 
     def test_the_approval_shows_what_will_be_submitted(self):

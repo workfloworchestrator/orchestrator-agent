@@ -261,15 +261,15 @@ is filled only when that is exactly one — otherwise the person is asked again.
 before anything starts, at the approval. The interpreter is one protocol attribute of the skill, so
 another engine drops in behind the same protocol.
 
-**One pydantic model per page.** `form_fill/core_bridge.py` builds a pydantic model from each page core
-returns (`page_model`: display-only fields left out, an enum as a `Literal` carrying its labels, a
-structured field as a nested model, required / default / description / format kept), and that one artifact
-is what every stop works from: the questions and chips a person gets, the interpreter's output type, the
-labels at the approval. The session persists each walked page's schema and the models are rebuilt from it
-(a dynamic model cannot be persisted). Core's tool results are validated with core's own response models
-and its tool arguments are built from core's request models (the agent depends on orchestrator-core), so
-the skill never picks keys out of a dict; only the page schema itself, written for a browser form, is
-read here, and that half of the bridge goes once core's form tool returns a field spec.
+**A page as core describes it.** Core's form tool (`get_workflow_form`, orchestrator-core ≥ 5.5) describes
+each page as data — one `FormField` per field: its kind, whether it is required, its default, the options
+with their labels, the limits it is validated against, nested fields, and whether it is only shown — and,
+asked for a verdict (`verdict="result"`), a rejected page as a result with core's errors. Every stop reads
+that data as it is: the questions and chips a person gets, the labels at the approval, the defaults that
+apply. The one pydantic model left is the interpreter's output type, built from the fields
+(`form_fill/model.py`). Core's tool results are validated with core's own response models and its tool
+arguments are built from core's request models (the agent depends on orchestrator-core), so nothing here
+reads a browser form schema or a tool error's text.
 
 In the agent the skill runs in (A2A) the model never sees core's write tools (`WriteToolGate` hides
 `create_workflow` / `resume_workflow_process` / `abort_workflow_process`), so writes only ever go through
