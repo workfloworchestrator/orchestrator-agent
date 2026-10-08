@@ -59,8 +59,8 @@ def pending_of(session: FormFillSession | None) -> PendingAsk | None:
         return None
 
 
+# One answer to a question: a picked choice, by its position among the question's choices, or typed text.
 Pick = int | str
-"""One answer to a question: a picked choice, by its position among the question's choices, or typed text."""
 
 
 def answered_values(pending: PendingAsk, answers: Sequence[Sequence[Pick]]) -> dict[str, Any] | None:
