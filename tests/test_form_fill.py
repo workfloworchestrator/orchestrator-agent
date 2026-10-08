@@ -496,7 +496,7 @@ class TestWalk:
         # 2. The human answers two of them; core still misses the name, and only that is asked again.
         reply = await turn(skill, core, state, self.VALUES)
         assert reply.asked == ["customer_name"] and reply.question("customer_name").choices == ()
-        assert reply.question("customer_name").question == "Customer Name * — Field required"
+        assert reply.question("customer_name").question == "Customer Name *"  # the "*" says it is missing
         assert reply.values == {"product": PRODUCT, "speed": "10000", "speed_policer": True}
         # 3. Page 2 (10 Gbit/s -> redundancy): a choice shown by label, and the optional ticket offered along.
         reply = await turn(skill, core, state, {"customer_name": "Universiteit Twente"})

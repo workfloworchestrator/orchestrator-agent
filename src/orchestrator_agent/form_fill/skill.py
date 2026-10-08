@@ -119,6 +119,13 @@ _WORKFLOWS_TTL = 300.0  # seconds the workflow catalogue is cached per skill ins
 
 
 _MISSING = "missing"  # pydantic's error type for a required field without a value: the question says so already
+_FIELD_REQUIRED = "Field required"  # its message, as core relays it (pydantic-forms' error body keeps no type)
+
+
+def _missing(error: FormError) -> bool:
+    """Whether core's error only says the field has no value yet: the question's ``*`` says that already."""
+    return error["type"] == _MISSING or error["msg"] == _FIELD_REQUIRED
+
 
 # What a stop says about a widget field (``AskField.hint``): the size of a long list, what typed words matched.
 LONG_LIST_HINT = "Type to search {total} options."
@@ -194,7 +201,7 @@ def _questions(
     problems: dict[str, str] = {}
     for error in errors:
         if error["loc"] and (name := str(error["loc"][0])) in fields:
-            problems.setdefault(name, "" if error["type"] == _MISSING else str(error["msg"]))
+            problems.setdefault(name, "" if _missing(error) else str(error["msg"]))
     if (errors or reason) and not problems and untouched:
         said = "; ".join(str(error["msg"]) for error in errors) or str(reason)
         problems = {name: said if index == 0 else "" for index, name in enumerate(fields)}
@@ -230,9 +237,8 @@ def question(name: str, info: FieldInfo, problem: str = "", names: FieldLabels =
     hint = LONG_LIST_HINT.format(total=mark["total"]) if mark.get("total") else ""
     if "total" in mark and not mark["total"]:  # a widget field whose source has nothing to offer
         hint = NO_OPTIONS.format(title=title)
-    if not mark.get("total") and (
-        info_text := names.info(name)
-    ):  # the frontend's help text, where nothing else is said
+    # The frontend's help text, where nothing else is said — a step's question asks for the step, not the field.
+    if not mark.get("total") and not mark.get("step") and (info_text := names.info(name)):
         hint = " ".join(filter(None, (hint, info_text)))
     if stepped := mark.get("stepped"):  # its options follow from steps chosen first: offer to choose again
         change = CHANGE_STEP.format(step=" / ".join(stepped))
