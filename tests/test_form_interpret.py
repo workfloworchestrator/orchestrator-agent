@@ -8,18 +8,28 @@ os.environ.setdefault("DATABASE_URI", "postgresql://test:test@localhost:5432/tes
 
 import pytest
 from pydantic import ValidationError
-from pydantic_ai import ModelRetry
 from pydantic_ai.messages import ModelResponse, ToolCallPart
 from pydantic_ai.models.function import AgentInfo, FunctionModel
 
 from orchestrator_agent.form_fill import FormFillSkill, ModelInterpreter
-from orchestrator_agent.form_fill.core_bridge import page_model
 from orchestrator_agent.form_fill.interpret import fields_model, reading_type
+from orchestrator_agent.form_fill.model import page_model
 from orchestrator_agent.state import SearchState
 
-from .test_form_fill import LIGHTPATH_PAGE, SPEED, FakeCore, open_form, rejected, rejection, turn
+from .test_form_fill import (
+    LIGHTPATH_FIELDS,
+    SPEED,
+    FakeCore,
+    choice_list,
+    errors,
+    field,
+    open_form,
+    page,
+    rejected,
+    turn,
+)
 
-LIGHTPATH = page_model(LIGHTPATH_PAGE)  # customer_name, speed (labelled options), speed_policer
+LIGHTPATH = page_model(LIGHTPATH_FIELDS)  # customer_name, speed (labelled options), speed_policer
 
 
 class PickyCore(FakeCore):
@@ -27,14 +37,14 @@ class PickyCore(FakeCore):
 
     async def __call__(self, name, args):
         if name == "get_workflow_form" and len(args["page_inputs"]) >= 2:
-            page = args["page_inputs"][1]
+            submitted = args["page_inputs"][1]
             problems = {}
-            if page.get("speed") not in SPEED["enum"]:
+            if submitted.get("speed") not in SPEED:
                 problems["speed"] = "Input should be '1000', '10000' or '100000'"
-            if not isinstance(page.get("speed_policer", False), bool):
+            if not isinstance(submitted.get("speed_policer", False), bool):
                 problems["speed_policer"] = "Input should be a valid boolean"
             if problems:
-                raise ModelRetry(rejection(problems))
+                return page(1, "Demo Lightpath", LIGHTPATH_FIELDS, errors(problems))
         return await super().__call__(name, args)
 
 
@@ -62,7 +72,7 @@ class TestSkillReinterpretsRejectedAnswers:
     async def test_without_an_interpreter_the_rejection_is_the_reply(self):
         core, state = PickyCore(), SearchState()
         reply = await open_form(FormFillSkill(), core, state, "create_demo_lightpath", REQUEST)
-        assert rejected(reply) == ["speed", "speed_policer"] and reply.rejected[0]["msg"].startswith("Input should be")
+        assert rejected(reply) == ["speed", "speed_policer"] and reply.rejected[0].msg.startswith("Input should be")
         # The rejected fields are asked again as questions with their options, and core's reason on each.
         speed, policer = reply.question("speed"), reply.question("speed_policer")
         assert reply.asked == ["speed", "speed_policer"] and "— Input should be" in speed.question
@@ -97,39 +107,24 @@ class TestReadingType:
 
     def test_a_choice_between_several_options_is_read_as_every_option_the_words_fit(self):
         page = page_model(
-            {
-                "properties": {
-                    "speed": SPEED,
-                    "only": {"enum": ["x"], "type": "string"},
-                    "many": {"items": {"enum": ["a", "b"], "type": "string"}, "type": "array"},
-                    "confirm": {"enum": ["ACCEPTED", "INCOMPLETE"], "format": "accept", "type": "string"},
-                }
-            }
+            [
+                field("speed", options=SPEED),
+                field("only", options={"x": "x"}),
+                choice_list("many", {"a": "a", "b": "b"}),
+                field("confirm", format="accept", options={"ACCEPTED": "ACCEPTED"}),
+            ]
         )
         properties = reading_type(page).model_json_schema()["properties"]
-        assert properties["speed"]["anyOf"][0] == {"items": {"enum": SPEED["enum"], "type": "string"}, "type": "array"}
-        assert properties["speed"]["labels"] == SPEED["options"]  # still shown with what people call the options
+        assert properties["speed"]["anyOf"][0] == {"items": {"enum": list(SPEED), "type": "string"}, "type": "array"}
+        assert properties["speed"]["labels"] == SPEED  # still shown with what people call the options
         # One option, a list of options and consent are read as the value itself: there is nothing to tell apart.
         assert properties["only"]["anyOf"][0] == {"const": "x", "type": "string"}
         assert properties["many"]["anyOf"][0]["items"] == {"enum": ["a", "b"], "type": "string"}
         assert properties["confirm"]["anyOf"][0] == {"const": "ACCEPTED", "type": "string"}
 
     def test_types_follow_the_schema(self):
-        page = page_model(
-            {
-                "properties": {
-                    "n": {"type": "integer"},
-                    "p": {
-                        "items": {
-                            "properties": {"subscription_id": {"type": "string"}},
-                            "required": ["subscription_id"],
-                        },
-                        "type": "array",
-                    },
-                },
-                "required": ["n", "p"],
-            }
-        )
+        port = field("", "object", required=False, fields=[field("subscription_id")])
+        page = page_model([field("n", "integer"), field("p", "list", item=port)])
         reading = reading_type(page)
         assert reading(n="12").n == 12
         ports = reading(p=[{"subscription_id": "p-1"}])
@@ -160,13 +155,10 @@ class TestModelInterpreter:
     async def test_a_single_select_list_stays_a_list_and_nulls_are_left_out(self):
         model, _ = _scripted({"n": ["b"], "m": None})
         page = page_model(
-            {
-                "properties": {
-                    "n": {"items": {"enum": ["a", "b"], "type": "string"}, "maxItems": 1, "type": "array"},
-                    "m": {"type": "integer"},
-                },
-                "required": ["n"],
-            }
+            [
+                choice_list("n", {"a": "a", "b": "b"}, constraints={"max_length": 1}),
+                field("m", "integer", required=False, nullable=True),
+            ]
         )
         assert await ModelInterpreter(model).answers(page, {"n": "the second", "m": "no idea"}) == {"n": ["b"]}
 

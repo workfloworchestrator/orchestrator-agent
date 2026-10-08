@@ -2,124 +2,107 @@
 
 from __future__ import annotations
 
+import json
 import os
+from pathlib import Path
+from typing import Literal
 
 os.environ.setdefault("DATABASE_URI", "postgresql://test:test@localhost:5432/test")
 
 import pytest
+from orchestrator.core.schemas.mcp_tools import FormField, FormFieldError, FormFieldOption, WorkflowFormPage
 from pydantic_ai import ModelRetry
 
-from orchestrator_agent.form_fill.core_bridge import (
-    choices,
-    form_errors,
-    is_accept,
-    is_list,
-    is_single_pick,
-    item_bounds,
-    item_type,
-    labels,
-    page_model,
-    summaries,
-)
+from orchestrator_agent.form_fill.model import askable, page_model
 from orchestrator_agent.form_fill.skill import FormFillSkill, questions
 from orchestrator_agent.state import AskField, Decision, FormFillSession, FormInput, FormReply, Reply, SearchState
 
 PRODUCT = "a19904e6-fa9f-4dd3-90c1-08dbd6d0821e"
-SPEED = {
-    "enum": ["1000", "10000", "100000"],
-    "options": {"1000": "1 Gbit/s", "10000": "10 Gbit/s", "100000": "100 Gbit/s"},
-    "type": "string",
-}
-REDUNDANCY = {
-    "enum": ["protected", "unprotected"],
-    "options": {"protected": "Protected", "unprotected": "Unprotected"},
-    "type": "string",
-}
 
-PRODUCT_PAGE = {
-    "$defs": {"ProductChoice": {"enum": [PRODUCT], "options": {PRODUCT: "Demo Lightpath"}, "type": "string"}},
-    "properties": {"product": {"$ref": "#/$defs/ProductChoice", "format": "productId"}},
-    "required": ["product"],
-    "title": "unknown",
-}
-LIGHTPATH_PAGE = {
-    "$defs": {"Speed": SPEED},
-    "properties": {
-        "header": {"format": "label", "default": "Details", "type": "string"},
-        "locked": {
-            "const": "fixed",
-            "enum": ["fixed"],
-            "default": "fixed",
-            "uniforms": {"disabled": True},
-            "type": "string",
-        },
-        "customer_name": {"title": "Customer Name", "type": "string"},
-        "speed": {"$ref": "#/$defs/Speed"},
-        "speed_policer": {"default": False, "title": "Speed Policer", "type": "boolean"},
-    },
-    "required": ["customer_name", "speed"],
-    "title": "Demo Lightpath",
-}
-REDUNDANCY_PAGE = {
-    "$defs": {"Redundancy": REDUNDANCY},
-    "properties": {"redundancy": {"$ref": "#/$defs/Redundancy"}, "ticket_id": {"default": "", "type": "string"}},
-    "required": ["redundancy"],
-    "title": "Redundancy and ticket",
-}
-TICKET_PAGE = {"properties": {"ticket_id": {"default": "", "type": "string"}}, "required": [], "title": "Ticket"}
-ACCEPT_PAGE = {
-    "properties": {"confirm": {"enum": ["ACCEPTED", "INCOMPLETE"], "format": "accept", "type": "string"}},
-    "required": ["confirm"],
-    "title": "Dry run",
-}
-# The last page of a form that ends in core's summary form (``base_summary``), as core 5.4 renders it: tables to
-# show, nothing to fill.
+
+# --- pages as core's form tool describes them -------------------------------------------------------------
+
+
+def field(name, kind="string", *, title=None, required=True, default=None, options=None, **extra) -> FormField:
+    """A field of a page; ``options`` as ``{value: label}``, the rest as core's ``FormField`` has it."""
+    listed = [FormFieldOption(value=v, label=label) for v, label in options.items()] if options is not None else None
+    title = title or name.title().replace("_", " ")
+    return FormField(name=name, title=title, kind=kind, required=required, default=default, options=listed, **extra)
+
+
+def choice_list(name, options, **extra) -> FormField:
+    """A multi-select of ``options`` (core puts the options on the list's item)."""
+    return field(name, "list", item=field("", required=False, options=options), **extra)
+
+
+def errors(problems: dict[str, str], type_="value_error") -> list[FormFieldError]:
+    """Core's verdict on a page: one error per field, in core's words."""
+    return [FormFieldError(loc=[name], msg=msg, type=type_) for name, msg in problems.items()]
+
+
+def page(index: int, title, fields, verdict=()) -> dict:
+    """A page as the tool returns it: the next one to fill, or with ``verdict`` the page core rejected."""
+    status: Literal["next", "rejected"] = "rejected" if verdict else "next"
+    result = WorkflowFormPage(
+        page=index, complete=False, status=status, title=title, fields=fields, errors=list(verdict)
+    )
+    return result.model_dump(mode="json", by_alias=True)
+
+
+def complete(index: int) -> dict:
+    return WorkflowFormPage(page=index, complete=True, status="complete").model_dump(mode="json", by_alias=True)
+
+
+def rejection(problems: dict[str, str]) -> str:
+    """The tool error text fastmcp builds from core's 400 on ``create_workflow``."""
+    listed = [{"loc": (name,), "msg": msg, "type": "value_error"} for name, msg in problems.items()]
+    return f"HTTP error 400: Bad Request - {{'type': 'FormValidationError', 'validation_errors': {listed!r}, 'status': 400}}"
+
+
+SPEED = {"1000": "1 Gbit/s", "10000": "10 Gbit/s", "100000": "100 Gbit/s"}
+REDUNDANCY = {"protected": "Protected", "unprotected": "Unprotected"}
+PRODUCT_PAGE = (None, [field("product", options={PRODUCT: "Demo Lightpath"}, format="productId")])
+LIGHTPATH_FIELDS = [
+    field("header", required=False, default="Details", format="label", display_only=True),
+    field("locked", required=False, default="fixed", read_only=True),
+    field("customer_name"),
+    field("speed", options=SPEED),
+    field("speed_policer", "boolean", required=False, default=False),
+]
+LIGHTPATH_PAGE = ("Demo Lightpath", LIGHTPATH_FIELDS)
+REDUNDANCY_PAGE = (
+    "Redundancy and ticket",
+    [field("redundancy", options=REDUNDANCY), field("ticket_id", required=False, default="")],
+)
+TICKET_PAGE = ("Ticket", [field("ticket_id", required=False, default="")])
+ACCEPT = field("confirm", format="accept", options={"ACCEPTED": "ACCEPTED"})
+ACCEPT_PAGE = ("Dry run", [ACCEPT])
+# The last page of a form that ends in core's summary form (``base_summary``): tables to show, nothing to fill.
 SUMMARY_TABLE = {
     "columns": [["SURF", "10 Gbit/s", "Protected"]],
     "headers": [],
     "labels": ["customer_name", "speed", "redundancy"],
 }
-SUMMARY_PAGE = {
-    "$defs": {"MigrationSummaryValue": {"properties": {}, "title": "MigrationSummaryValue", "type": "object"}},
-    "additionalProperties": False,
-    "properties": {
-        "divider_1": {
-            "anyOf": [{"type": "string"}, {"type": "null"}],
-            "default": None,
-            "format": "divider",
-            "title": "Divider 1",
-            "type": "string",
-        },
-        "product_summary": {
-            "$ref": "#/$defs/MigrationSummaryValue",
-            "default": None,
-            "extraProperties": {"data": SUMMARY_TABLE},
-            "format": "summary",
-            "type": "string",
-            "uniforms": {"data": SUMMARY_TABLE},
-        },
-    },
-    "title": "Demo Lightpath Summary",
-    "type": "object",
-}
-
-
-def rejection(problems: dict[str, str]) -> str:
-    """The tool error text fastmcp builds from core's 400 body, naming each rejected field."""
-    errors = ", ".join(
-        f"{{'loc': ('{name}',), 'msg': \"{msg}\", 'type': 'value_error'}}" for name, msg in problems.items()
-    )
-    return f"HTTP error 400: Bad Request - {{'type': 'FormValidationError', 'validation_errors': [{errors}], 'status': 400}}"
+SUMMARY_PAGE = (
+    "Demo Lightpath Summary",
+    [
+        field("divider_1", required=False, nullable=True, format="divider", display_only=True),
+        field("product_summary", "any", required=False, format="summary", display_only=True, data=SUMMARY_TABLE),
+    ],
+)
 
 
 class FakeCore:
     """Core's three form tools, with the demo lightpath's dynamic generator: 10 Gbit/s+ adds a redundancy page.
 
-    Like core, it does not accept a submitted page that lacks a required field (``Field required`` per field).
+    Like core, it does not accept a submitted page that lacks a required field (``Field required`` per field),
+    and it answers a rejected page as a result with its verdict (the skill asks for that: ``verdict="result"``).
     """
 
     def __init__(self, reject=None, accept_page=False, summary_page=False):
-        self.reject = reject  # (page_index, message): raise when that page's inputs are submitted
+        # (n_pages, verdict): once n pages are submitted, reject the last with the verdict (a ``{field: message}``),
+        # or raise the text as a tool error when the verdict is a string (a failure that is no verdict at all).
+        self.reject = reject
         self.accept_page = accept_page
         self.summary_page = summary_page  # the form ends in the workflow's own summary (core's summary form)
         self.created: list[dict] = []
@@ -153,48 +136,30 @@ class FakeCore:
     SUB = "9df1beb7-0183-4fb9-8d66-504dfbe85a25"
     OUT_OF_SYNC = "00000000-0000-4000-8000-00000000beef"  # a subscription core will not run a modify on
     NOT_IN_SYNC = "This workflow cannot be started: related subscriptions are not insync"  # core's own message
-    SUBSCRIPTION_PAGE = {
-        "properties": {
-            "subscription_id": {"format": "uuid", "type": "string"},
-            "version": {"anyOf": [{"type": "integer"}, {"type": "null"}], "default": None},
-        },
-        "required": ["subscription_id"],
-        "title": "unknown",
-    }
-    NOTE_PAGE = {
-        "properties": {"note": {"anyOf": [{"type": "string"}, {"type": "null"}], "default": None, "format": "long"}},
-        "required": [],
-        "title": "Modify note",
-    }
+    SUBSCRIPTION_PAGE = (
+        None,
+        [field("subscription_id", format="uuid"), field("version", "integer", required=False, nullable=True)],
+    )
+    NOTE_PAGE = ("Modify note", [field("note", required=False, nullable=True, format="long")])
 
     @staticmethod
-    def require(schema: dict, submitted: dict) -> None:
-        """Reject a submitted page the way pydantic-forms does when a required field is missing."""
-        if missing := [name for name in schema.get("required") or [] if name not in submitted]:
-            raise ModelRetry(rejection(dict.fromkeys(missing, "Field required")))
+    def missing(fields, submitted: dict) -> list[FormFieldError]:
+        """Core's verdict on a submitted page that lacks a required field."""
+        lacking = {f.name: "Field required" for f in fields if askable(f) and f.required and f.name not in submitted}
+        return errors(lacking, "missing")
 
-    async def __call__(self, name, args):  # noqa: C901 - a scripted stand-in for four core tools
-        if name == "list_workflows":
-            return self.WORKFLOWS
-        if name == "get_workflow_form" and args["workflow_key"] not in {wf["name"] for wf in self.WORKFLOWS}:
-            raise ModelRetry(f"Workflow {args['workflow_key']!r} not found")
-        if name == "get_workflow_form" and args["workflow_key"] == "modify_demo_lightpath":
-            inputs = args["page_inputs"]
-            pages = [self.SUBSCRIPTION_PAGE, self.NOTE_PAGE]
-            if inputs:
-                self.require(pages[len(inputs) - 1], inputs[-1])
-            if inputs and inputs[0].get("subscription_id") == self.OUT_OF_SYNC:  # core's subscription page validator
-                raise ModelRetry(rejection({"subscription_id": self.NOT_IN_SYNC}))
-            if len(inputs) >= len(pages):
-                return {"page": len(inputs), "complete": True, "schema": None}
-            return {"page": len(inputs), "complete": False, "schema": pages[len(inputs)]}
-        if name == "create_workflow":
-            self.created.append(args)
-            return {"id": self.PROCESS_ID}  # ``ProcessIdSchema``
-        assert name == "get_workflow_form"
-        inputs = args["page_inputs"]
-        if self.reject and len(inputs) >= self.reject[0]:  # (n_pages, message): reject when n pages are submitted
-            raise ModelRetry(self.reject[1])
+    def walk(self, pages: list[tuple], inputs: list[dict]) -> dict:
+        """The form tool over ``pages``: the page ``inputs`` reach, or the last one rejected for what it lacks."""
+        if inputs:
+            title, fields = pages[len(inputs) - 1]
+            if verdict := self.missing(fields, inputs[-1]):
+                return page(len(inputs) - 1, title, fields, verdict)
+        if len(inputs) >= len(pages):
+            return complete(len(inputs))
+        title, fields = pages[len(inputs)]
+        return page(len(inputs), title, fields)
+
+    def pages(self, inputs: list[dict]) -> list[tuple]:
         pages = [PRODUCT_PAGE, LIGHTPATH_PAGE]
         if len(inputs) >= 2:
             pages.append(REDUNDANCY_PAGE if inputs[1].get("speed") in ("10000", "100000") else TICKET_PAGE)
@@ -202,11 +167,30 @@ class FakeCore:
             pages.append(ACCEPT_PAGE)
         if self.summary_page:
             pages.append(SUMMARY_PAGE)
-        if inputs:
-            self.require(pages[len(inputs) - 1], inputs[-1])
-        if len(inputs) >= len(pages):
-            return {"page": len(inputs), "complete": True, "schema": None}
-        return {"page": len(inputs), "complete": False, "schema": pages[len(inputs)]}
+        return pages
+
+    async def __call__(self, name, args):
+        if name == "list_workflows":
+            return self.WORKFLOWS
+        if name == "create_workflow":
+            self.created.append(args)
+            return {"id": self.PROCESS_ID}  # ``ProcessIdSchema``
+        assert name == "get_workflow_form"
+        key, inputs = args["workflow_key"], args["page_inputs"]
+        if key not in {wf["name"] for wf in self.WORKFLOWS}:
+            raise ModelRetry(f"Workflow {key!r} not found")
+        if key == "modify_demo_lightpath":
+            if inputs and inputs[0].get("subscription_id") == self.OUT_OF_SYNC:  # core's subscription page validator
+                title, fields = self.SUBSCRIPTION_PAGE
+                return page(0, title, fields, errors({"subscription_id": self.NOT_IN_SYNC}))
+            return self.walk([self.SUBSCRIPTION_PAGE, self.NOTE_PAGE], inputs)
+        if self.reject and len(inputs) >= self.reject[0]:
+            n, verdict = self.reject
+            if isinstance(verdict, str):
+                raise ModelRetry(verdict)
+            title, fields = self.pages(inputs)[n - 1]
+            return page(n - 1, title, fields, errors(verdict))
+        return self.walk(self.pages(inputs), inputs)
 
 
 APPROVE, REJECT = Decision.START, Decision.CANCEL  # the human's decision on the start, as the transport hands it over
@@ -245,7 +229,12 @@ def data(reply: Reply | None) -> Stop | None:
 
 def rejected(reply: Stop) -> list[str]:
     """The fields core rejected, in core's order."""
-    return [str(error["loc"][0]) for error in reply.rejected if error["loc"]]
+    return [str(error.loc[0]) for error in reply.rejected if error.loc]
+
+
+def verdict(reply: Stop) -> list[tuple]:
+    """Core's errors on the reply as ``(field, message, type)``."""
+    return [(str(error.loc[0]) if error.loc else "", error.msg, error.type) for error in reply.rejected]
 
 
 async def turn(skill, core, state, given, *, hitl=True) -> Stop | None:
@@ -271,163 +260,47 @@ async def open_form(skill, core, state, key, values=None, subscription_id=None) 
     return await turn(skill, core, state, values) if values and state.form_fill is not None else reply
 
 
-# --- the page model ------------------------------------------------------------------------------------
-
-
-class TestPageModel:
-    """Core's browser-oriented page schema becomes one pydantic model per page: the artifact every reply works from."""
-
-    def test_types_required_defaults_and_display_only(self):
-        fields = page_model(LIGHTPATH_PAGE).model_fields
-        assert list(fields) == ["customer_name", "speed", "speed_policer"]  # display-only and read-only fields left out
-        assert fields["customer_name"].annotation is str and fields["customer_name"].is_required()
-        assert choices(fields["speed"]) == ("1000", "10000", "100000") and labels(fields["speed"]) == SPEED["options"]
-        assert fields["speed_policer"].annotation is bool and fields["speed_policer"].default is False
-        assert page_model(LIGHTPATH_PAGE) is page_model(dict(LIGHTPATH_PAGE))  # pure: one model per schema
-
-    def test_product_picker_and_accept(self):
-        (product,) = page_model(PRODUCT_PAGE).model_fields.values()
-        assert choices(product) == (PRODUCT,) and labels(product) == {PRODUCT: "Demo Lightpath"}
-        (confirm,) = page_model(ACCEPT_PAGE).model_fields.values()
-        assert is_accept(confirm) and choices(confirm) == ("ACCEPTED",)
-
-    def test_a_summary_page_has_nothing_to_fill_but_tables_to_show(self):
-        assert page_model(SUMMARY_PAGE).model_fields == {}
-        assert summaries(SUMMARY_PAGE) == [SUMMARY_TABLE]
-        assert summaries(LIGHTPATH_PAGE) == []  # labels and dividers are no summary
-
-    def test_single_select_list_is_a_list_of_one(self):
-        schema = {
-            "$defs": {"N": {"enum": ["a", "b"], "type": "string"}},
-            "properties": {"n": {"items": {"$ref": "#/$defs/N"}, "maxItems": 1, "type": "array"}},
-        }
-        (field,) = page_model(schema).model_fields.values()
-        assert is_list(field) and item_bounds(field) == (None, 1) and choices(field) == ("a", "b")
-        assert is_single_pick(field)
-
-    def test_a_choice_core_has_no_option_for_is_still_a_page(self):
-        # ``Literal`` cannot be empty; the field keeps its base type and the schema still says nothing is allowed.
-        schema = {
-            "$defs": {"Port": {"enum": [], "options": {}, "type": "string"}},
-            "properties": {
-                "port": {"$ref": "#/$defs/Port"},
-                "ports": {"items": {"$ref": "#/$defs/Port"}, "type": "array"},
-            },
-            "required": ["port"],
-        }
-        model = page_model(schema)
-        assert model.model_fields["port"].annotation is str and choices(model.model_fields["port"]) is None
-        properties = model.model_json_schema()["properties"]
-        assert properties["port"]["enum"] == [] and properties["ports"]["items"] == {"type": "string", "enum": []}
-
-    def test_a_field_with_one_allowed_value_is_a_field_core_still_requires(self):
-        schema = {
-            "properties": {"kind": {"const": "port", "type": "string"}, "amount": {"const": 2, "type": "integer"}},
-            "required": ["kind", "amount"],
-        }
-        fields = page_model(schema).model_fields
-        assert choices(fields["kind"]) == ("port",) and choices(fields["amount"]) == (2,)  # as core gave them
-        assert fields["kind"].is_required() and is_single_pick(fields["kind"])
-
-
-FIELDS_PAGE = {
-    "$defs": {"Speed": SPEED},
-    "properties": {
-        "speed": {"$ref": "#/$defs/Speed"},
-        "speed_policer": {"type": "boolean"},
-        "customer_name": {"type": "string"},
-        "vlan": {"type": "integer"},
-        "nodes": {
-            "items": {"enum": ["a", "b"], "options": {"a": "Node A", "b": "Node B"}, "type": "string"},
-            "type": "array",
-        },
-        "confirm": {"enum": ["ACCEPTED", "INCOMPLETE"], "format": "accept", "type": "string"},
-        "header": {"format": "label", "type": "string"},
-    },
-    "required": ["speed", "customer_name"],
-}
-
-
-class TestCoreErrors:
-    def test_cores_errors_are_read_out_of_the_tool_error_text_as_they_are(self):
-        raw = (
-            "Error calling tool 'get_workflow_form': HTTP error 400: Bad Request - {'type': 'FormValidationError', "
-            "'detail': '1 validation error for ModifySubscriptionPage', 'validation_errors': [{'type': 'value_error', "
-            "'loc': ['subscription_id'], 'msg': 'This workflow cannot be started: related subscriptions are not insync'}], 'status': 400}"
-        )
-        (error,) = form_errors(raw)
-        assert error["loc"] == ("subscription_id",) and error["type"] == "value_error"
-        assert error["msg"] == "This workflow cannot be started: related subscriptions are not insync"
-        assert form_errors("plain failure") == []
+FIELDS = [
+    field("speed", options=SPEED),
+    field("speed_policer", "boolean"),
+    field("customer_name"),
+    field("vlan", "integer", required=False, nullable=True),
+    choice_list("nodes", {"a": "Node A", "b": "Node B"}, required=False),
+    ACCEPT,
+    field("header", required=False, format="label", display_only=True),
+]
 
 
 class TestQuestions:
     """A stop is questions a person can answer: one per field, options as chips, core's message where it rejected."""
 
-    def test_structured_fields_are_nested_models_and_asked_as_one_question_each(self):
-        schema = {
-            "$defs": {
-                "PortChoice": {
-                    "enum": ["p-1", "p-2"],
-                    "options": {"p-1": "ACE SP DT010A", "p-2": "ACE SP ASD002A"},
-                    "type": "string",
-                },
-                "ServicePort": {
-                    "properties": {
-                        "subscription_id": {"$ref": "#/$defs/PortChoice"},
-                        "vlan": {"default": "0", "type": "string"},
-                    },
-                    "required": ["subscription_id"],
-                    "type": "object",
-                },
-            },
-            "properties": {
-                "service_ports": {
-                    "items": {"$ref": "#/$defs/ServicePort"},
-                    "minItems": 2,
-                    "maxItems": 2,
-                    "type": "array",
-                },
-                "subscription_id": {"format": "uuid", "type": "string"},
-                "note": {"format": "long", "type": "string"},
-            },
-            "required": ["service_ports", "subscription_id"],
-        }
-        model = page_model(schema)
-        ports = model.model_fields["service_ports"]
-        assert is_list(ports) and item_bounds(ports) == (2, 2)
-        port = item_type(ports).model_fields
-        assert choices(port["subscription_id"]) == ("p-1", "p-2") and port["vlan"].default == "0"
-        # The model's JSON schema is what the interpreter reads: nested shapes, counts, labels and formats as data.
-        json_schema = model.model_json_schema()
-        assert json_schema["required"] == ["service_ports", "subscription_id"]
-        assert json_schema["properties"]["service_ports"] == {
-            "items": {"$ref": "#/$defs/ServicePort"},
-            "maxItems": 2,
-            "minItems": 2,
-            "title": "service_ports",
-            "type": "array",
-        }
-        assert json_schema["$defs"]["ServicePort"]["properties"]["subscription_id"]["labels"] == {
-            "p-1": "ACE SP DT010A",
-            "p-2": "ACE SP ASD002A",
-        }
-        assert json_schema["properties"]["subscription_id"]["format"] == "uuid"
-        assert (
-            json_schema["properties"]["note"]["format"] == "long"
-            and json_schema["properties"]["note"]["default"] is None
+    def test_structured_fields_are_asked_as_one_question_each(self):
+        port = field(
+            "",
+            "object",
+            required=False,
+            fields=[
+                field("subscription_id", options={"p-1": "ACE SP DT010A", "p-2": "ACE SP ASD002A"}),
+                field("vlan", required=False, default="0"),
+            ],
         )
-        # One question per field: its title and whether it is required; a missing value needs no message.
-        errors = form_errors(rejection({"service_ports": "Field required", "note": "Too long"}))
-        errors[0]["type"] = "missing"
-        assert [q.question for q in questions(model, {}, errors)] == [
-            "service_ports (`service_ports`, required)",
-            "note (`note`, optional — leave empty to keep the default) — Too long",
-            "subscription_id (`subscription_id`, required)",
+        fields = [
+            field("service_ports", "list", item=port, constraints={"min_length": 2, "max_length": 2}),
+            field("subscription_id", format="uuid"),
+            field("note", required=False, nullable=True, format="long"),
         ]
+        # One question per field: its title and whether it is required; a missing value needs no message.
+        verdicts = errors({"service_ports": "Field required"}, "missing") + errors({"note": "Too long"})
+        assert [q.question for q in questions(fields, {}, verdicts)] == [
+            "Service Ports (`service_ports`, required)",
+            "Note (`note`, optional — leave empty to keep the default) — Too long",
+            "Subscription Id (`subscription_id`, required)",
+        ]
+        ports = questions(fields, {}, [])[0]
+        assert ports.multiple and ports.choices == ()  # a list of objects is typed, and interpreted
 
     def test_options_are_chips_shown_by_label_and_a_boolean_is_two_chips(self):
-        speed, policer, name, _vlan, nodes, confirm = questions(page_model(FIELDS_PAGE), {}, [])
+        speed, policer, name, _vlan, nodes, confirm = questions(FIELDS, {}, [])  # the label is no question
         assert speed.choices == ("1 Gbit/s", "10 Gbit/s", "100 Gbit/s") and speed.values == ("1000", "10000", "100000")
         assert policer.choices == ("True", "False") and policer.values == (True, False)  # the value is a boolean
         assert name.choices == () and not name.multiple  # free: a person types
@@ -437,35 +310,64 @@ class TestQuestions:
     def test_options_that_share_a_label_are_told_apart_by_their_value(self):
         # Labels are descriptions and descriptions coincide. A chip's text is all a transport gets back from
         # a pick, so each option must read differently to map back to its id: core takes ids, never labels.
-        node = {"enum": ["id-1", "id-2", "id-3"], "options": {"id-1": "Node X", "id-2": "Node X", "id-3": "Node Y"}}
-        twins = {
-            "$defs": {"Node": {**node, "type": "string"}},
-            "properties": {"nodes": {"items": {"$ref": "#/$defs/Node"}, "type": "array"}},
-            "required": ["nodes"],
-        }
-        (nodes,) = questions(page_model(twins), {}, [])
+        (nodes,) = questions([choice_list("nodes", {"id-1": "Node X", "id-2": "Node X", "id-3": "Node Y"})], {}, [])
         assert nodes.choices == ("Node X (id-1)", "Node X (id-2)", "Node Y")
         assert nodes.values == ("id-1", "id-2", "id-3")
 
     def test_only_what_is_rejected_or_unanswered_is_asked(self):
-        model = page_model(LIGHTPATH_PAGE)
-        errors = form_errors(rejection({"speed": "Input should be '1000', '10000' or '100000'"}))
-        asked = questions(model, {"customer_name": "UT"}, errors)
+        verdicts = errors({"speed": "Input should be '1000', '10000' or '100000'"})
+        asked = questions(LIGHTPATH_FIELDS, {"customer_name": "UT"}, verdicts)
         assert [q.name for q in asked] == ["speed", "speed_policer"]  # the name was accepted: not asked again
         assert asked[0].question.endswith("— Input should be '1000', '10000' or '100000'")
 
     def test_a_rejection_core_pins_on_no_field_asks_the_page_again_with_what_core_said(self):
-        error = "HTTP error 400: Bad Request - {'validation_errors': [{'loc': (), 'msg': 'ports must differ', 'type': 'value_error'}]}"
-        model = page_model(LIGHTPATH_PAGE)
-        asked = questions(model, {"customer_name": "UT", "speed": "1000"}, form_errors(error))
+        verdicts = [FormFieldError(loc=["__root__"], msg="ports must differ", type="value_error")]
+        asked = questions(LIGHTPATH_FIELDS, {"customer_name": "UT", "speed": "1000"}, verdicts)
         assert [q.name for q in asked] == ["customer_name", "speed", "speed_policer"]
         assert asked[0].question.endswith("— ports must differ") and "—" not in asked[1].question
         # A refusal that is no form verdict at all is asked the same way, with the refusal as it came.
-        asked = questions(model, {"customer_name": "UT", "speed": "1000"}, [], "HTTP error 502: Bad Gateway")
+        asked = questions(LIGHTPATH_FIELDS, {"customer_name": "UT", "speed": "1000"}, [], "HTTP error 502: Bad Gateway")
         assert [q.name for q in asked] == ["customer_name", "speed", "speed_policer"]
         assert asked[0].question.endswith("— HTTP error 502: Bad Gateway")
-        # On the whole form (core refused the start) there is no page to ask again: nothing is asked.
-        assert questions(model, {}, form_errors(error), untouched=False) == []
+
+
+class TestRecordedCorePage:
+    """Pages recorded from core's form tool (``create_sn8_service_port`` on a production clone): the contract, live."""
+
+    PAGES = json.loads((Path(__file__).parent / "core_pages.json").read_text())
+
+    def test_a_recorded_page_is_asked_as_core_describes_it(self):
+        page = WorkflowFormPage.model_validate(self.PAGES["page_2"])
+        asked = questions(page.fields, {}, [])
+        assert [q.name for q in asked] == [
+            "port",
+            "port_mode",
+            "admin_state",
+            "lldp",
+            "ignore_l3_incompletes",
+            "native_vlan",
+            "contact_persons",
+            "ticket_id",
+        ]
+        port, mode, state, lldp = asked[:4]
+        assert port.values[0] == "AH001A" and port.choices[0] == "AH001A (400 Gbit/s)"  # ids behind labels
+        assert mode.choices == ("Tagged", "Untagged", "Link member") and mode.values == (
+            "tagged",
+            "untagged",
+            "link_member",
+        )
+        assert not state.required and lldp.values == (True, False)
+        contacts = asked[6]
+        assert contacts.multiple and contacts.choices == ()  # a list of objects: typed, then interpreted
+        assert list(page_model(page.fields).model_fields) == [q.name for q in asked]
+
+    def test_cores_verdict_on_a_recorded_page_is_asked_in_its_words(self):
+        page = WorkflowFormPage.model_validate(self.PAGES["page_2_rejected"])
+        assert page.status == "rejected" and page.page == 2
+        asked = questions(page.fields, {"port_mode": "sideways"}, page.errors)
+        assert [q.name for q in asked][:2] == ["port", "port_mode"]
+        assert "—" not in asked[0].question  # missing: the question already says it is required
+        assert asked[1].question.endswith("— Input should be 'tagged', 'untagged' or 'link_member'")
 
 
 # --- the skill --------------------------------------------------------------------------------------------
@@ -484,7 +386,7 @@ class TestSeePage:
                 "ticket_id": "T-1",
             },
         )
-        page = FormFillSkill._see_page(session, page_model(FIELDS_PAGE), [])
+        page = FormFillSkill._see_page(session, [f for f in FIELDS if askable(f)], [])
         assert page == {
             "speed": "10 Gbit/s",
             "vlan": "",
@@ -504,12 +406,12 @@ class TestWalk:
         reply = await open_form(skill, core, state, "create_demo_lightpath")
         assert reply.status == "gathering" and reply.page == 1 and reply.title == "Demo Lightpath"
         assert reply.asked == ["customer_name", "speed", "speed_policer"] and reply.approval is None
-        assert rejected(reply) == ["customer_name", "speed"] and reply.rejected[0]["msg"] == "Field required"
+        assert rejected(reply) == ["customer_name", "speed"] and reply.rejected[0].msg == "Field required"
         assert reply.values == {"product": PRODUCT} and reply.labels == {"product": "Demo Lightpath"}
         # 2. The human answers two of them; core still misses the name, and only that is asked again.
         reply = await turn(skill, core, state, self.VALUES)
         assert reply.asked == ["customer_name"] and reply.question("customer_name").choices == ()
-        assert reply.question("customer_name").question == "Customer Name (`customer_name`, required) — Field required"
+        assert reply.question("customer_name").question == "Customer Name (`customer_name`, required)"
         assert reply.values == {"product": PRODUCT, "speed": "10000", "speed_policer": True}
         # 3. Page 2 (10 Gbit/s -> redundancy): a choice shown by label, and the optional ticket offered along.
         reply = await turn(skill, core, state, {"customer_name": "Universiteit Twente"})
@@ -613,22 +515,18 @@ class TestWalk:
         core, calls = FakeCore(), []
 
         async def counting(name, args):
-            calls.append(name)
+            calls.append((name, args))
             return await core(name, args)
 
         skill = make_skill()
         assert await skill.workflows(counting) == await skill.workflows(counting)
-        assert calls.count("list_workflows") == 2  # user-facing workflows and tasks: one call each, once
+        assert calls == [("list_workflows", {})]  # the whole catalogue, tasks included, in one call, once
 
     async def test_a_form_that_never_completes_fails_and_closes_instead_of_looping(self):
         class EndlessCore(FakeCore):
             async def __call__(self, name, args):
                 if name == "get_workflow_form":
-                    return {
-                        "page": len(args["page_inputs"]),
-                        "complete": False,
-                        "schema": {"properties": {}, "required": []},
-                    }
+                    return page(len(args["page_inputs"]), None, [])
                 return await super().__call__(name, args)
 
         state = SearchState()
@@ -637,11 +535,11 @@ class TestWalk:
 
     async def test_core_rejecting_a_page_is_asked_again_with_its_message_and_the_session_stays_open(self):
         message = "Input should be '1000', '10000' or '100000'"
-        core, state = FakeCore(reject=(2, rejection({"speed": message}))), SearchState()
+        core, state = FakeCore(reject=(2, {"speed": message})), SearchState()
         skill = make_skill()
         reply = await open_form(skill, core, state, "create_demo_lightpath", {**self.VALUES, "customer_name": "UT"})
         assert reply.status == "gathering" and reply.title == "Demo Lightpath" and reply.page == 1
-        assert reply.rejected == [{"loc": ("speed",), "msg": message, "type": "value_error"}] and reply.reason is None
+        assert verdict(reply) == [("speed", message, "value_error")] and reply.reason is None
         assert reply.asked == ["speed"] and reply.question("speed").question.endswith(f"— {message}")
         assert reply.values == {
             "product": PRODUCT,
@@ -782,7 +680,7 @@ class TestHandoff:
         await handoff(state, "modify_demo_lightpath", subscription_id=FakeCore.OUT_OF_SYNC, core=core)
         reply = data(await make_skill().open(state, core))
         assert reply.status == "gathering" and reply.page == 0 and rejected(reply) == ["subscription_id"]
-        assert reply.rejected[0]["msg"] == FakeCore.NOT_IN_SYNC and reply.values == {}
+        assert reply.rejected[0].msg == FakeCore.NOT_IN_SYNC and reply.values == {}
         assert reply.question("subscription_id").question.endswith(f"— {FakeCore.NOT_IN_SYNC}")
         assert state.form_fill.status == "gathering"  # the human may give another id, or reject
 
@@ -819,15 +717,15 @@ class TestHandoff:
         asked: list[dict] = []
 
         async def core(name, args):
-            if name == "list_workflows":  # like core: a call without a filter is not taken
+            if name == "list_workflows":  # core lists everything, tasks included, when nothing narrows it
                 asked.append(args)
-                return [task] if args["is_task"] else FakeCore.WORKFLOWS
+                return [*FakeCore.WORKFLOWS, task]
             return await FakeCore()(name, args)
 
         state = SearchState(user_input="validate the products")
         await handoff(state, "task_validate_products", core=core)
         assert state.form_fill.workflow_key == "task_validate_products"
-        assert asked == [{"is_task": False}, {"is_task": True}]  # the whole catalogue, in the two halves core takes
+        assert asked == [{}]
 
     async def test_a_new_handoff_replaces_an_open_form(self):
         core, state = FakeCore(), SearchState()
@@ -873,20 +771,17 @@ class TestReviewRegressions:
             async def __call__(self, name, args):
                 if name == "get_workflow_form" and args["workflow_key"] == "create_demo_lightpath":
                     inputs = args["page_inputs"]
-                    node = {"properties": {"node": {"enum": ["A", "B"], "type": "string"}}, "required": ["node"]}
+                    node = [field("node", options={"A": "A", "B": "B"})]
                     if not inputs:
-                        return {"page": 0, "complete": False, "schema": node}
-                    self.require(node, inputs[0])
+                        return page(0, None, node)
+                    if lacking := self.missing(node, inputs[0]):
+                        return page(0, None, node, lacking)
                     ports = ["A1", "A2"] if inputs[0]["node"] == "A" else ["B1", "B2"]
-                    port = {"properties": {"port": {"enum": ports, "type": "string"}}, "required": ["port"]}
+                    port = [field("port", options={p: p for p in ports})]
                     if len(inputs) >= 2 and inputs[1].get("port") not in ports:  # core validates the value
-                        raise ModelRetry(
-                            "HTTP error 400: Bad Request - {'validation_errors': [{'loc': ('port',), "
-                            f"'msg': \"Input should be {' or '.join(repr(p) for p in ports)}\", 'type': 'literal_error'}}]}}"
-                        )
-                    if len(inputs) == 1:
-                        return {"page": 1, "complete": False, "schema": port}
-                    return {"page": 2, "complete": True, "schema": {}}
+                        said = f"Input should be {' or '.join(repr(p) for p in ports)}"
+                        return page(1, None, port, errors({"port": said}, "literal_error"))
+                    return page(1, None, port) if len(inputs) == 1 else complete(2)
                 return await super().__call__(name, args)
 
         core, state = DependentCore(), SearchState()
@@ -895,23 +790,18 @@ class TestReviewRegressions:
         assert state.form_fill.status == "confirming"
         reply = await turn(skill, core, state, {"node": "B"})
         # The stale port goes to core as it was; core's own message names the new options, and they are the chips.
-        assert reply.rejected == [{"loc": ("port",), "msg": "Input should be 'B1' or 'B2'", "type": "literal_error"}]
+        assert verdict(reply) == [("port", "Input should be 'B1' or 'B2'", "literal_error")]
         assert reply.asked == ["port"] and reply.question("port").choices == ("B1", "B2")
         assert state.form_fill is not None and state.form_fill.status == "gathering"
 
     async def test_consent_is_given_per_page(self):
-        accept = {
-            "properties": {"confirm": {"enum": ["ACCEPTED", "INCOMPLETE"], "format": "accept", "type": "string"}},
-            "required": ["confirm"],
-        }
-
         class TwoConsents(FakeCore):
             async def __call__(self, name, args):
                 if name == "get_workflow_form" and args["workflow_key"] == "create_demo_lightpath":
                     n = len(args["page_inputs"])
-                    if n:
-                        self.require(accept, args["page_inputs"][-1])
-                    return {"page": n, "complete": n == 2, "schema": {**accept, "title": f"Step {n}"}}
+                    if n and (lacking := self.missing([ACCEPT], args["page_inputs"][-1])):
+                        return page(n - 1, f"Step {n - 1}", [ACCEPT], lacking)
+                    return complete(2) if n == 2 else page(n, f"Step {n}", [ACCEPT])
                 return await super().__call__(name, args)
 
         core, state = TwoConsents(), SearchState()
@@ -952,7 +842,9 @@ class TestReviewRegressions:
         reply = await turn(skill, timing_out, state, APPROVE)
         assert reply.status == "failed" and reply.reason == "no answer" and state.form_fill is None  # never retried
 
-    async def test_a_start_core_refuses_reopens_the_form_with_what_it_rejected(self):
+    async def test_a_start_core_refuses_reopens_the_form_at_the_page_it_rejects(self):
+        # The customer went away between the walk and the approval: the start is refused, and the form tool,
+        # asked again about the same pages, rejects the page that names the customer.
         core, state = FakeCore(), SearchState()
         skill = make_skill()
         await open_form(skill, core, state, "create_demo_lightpath", FULL)
@@ -960,29 +852,46 @@ class TestReviewRegressions:
         async def refusing(name, args):
             if name == "create_workflow":
                 raise ModelRetry(rejection({"customer_name": "Customer no longer exists"}))
+            if name == "get_workflow_form" and len(args["page_inputs"]) == 3:
+                return page(
+                    1, "Demo Lightpath", LIGHTPATH_FIELDS, errors({"customer_name": "Customer no longer exists"})
+                )
             return await core(name, args)
 
         reply = await turn(skill, refusing, state, APPROVE)
-        assert reply.status == "gathering" and reply.page is None and rejected(reply) == ["customer_name"]
-        assert reply.asked == ["customer_name"] and reply.values["speed"] == "10000"  # only what core rejected
+        assert reply.status == "gathering" and reply.page == 1 and rejected(reply) == ["customer_name"]
+        # The page is asked again: what core rejected, and what was left to its default along with it.
+        assert reply.asked == ["customer_name", "speed_policer"] and reply.values["speed"] == "10000"
         assert reply.question("customer_name").question.endswith("— Customer no longer exists")
-        assert state.form_fill.status == "gathering"
+        assert state.form_fill.status == "gathering" and not core.created
         reply = await turn(skill, core, state, {"customer_name": "ACE"})  # answered: the start to approve again
         assert reply.status == "confirming" and reply.values["customer_name"] == "ACE"
 
-    async def test_a_start_core_refuses_without_naming_a_field_closes_the_form(self):
+    async def test_a_start_core_refuses_without_naming_a_field_asks_that_page_again_with_its_words(self):
         core, state = FakeCore(), SearchState()
         skill = make_skill()
         await open_form(skill, core, state, "create_demo_lightpath", FULL)
-        error = "HTTP error 400: Bad Request - {'validation_errors': [{'loc': (), 'msg': 'no capacity', 'type': 'value_error'}]}"
+        no_capacity = FormFieldError(loc=["__root__"], msg="no capacity", type="value_error")
 
         async def refusing(name, args):
             if name == "create_workflow":
-                raise ModelRetry(error)
+                raise ModelRetry(
+                    "HTTP error 400: Bad Request - {'validation_errors': [{'loc': (), 'msg': 'no capacity'}]}"
+                )
+            if name == "get_workflow_form" and len(args["page_inputs"]) == 3:
+                return page(2, "Redundancy and ticket", REDUNDANCY_PAGE[1], [no_capacity])
             return await core(name, args)
 
         reply = await turn(skill, refusing, state, APPROVE)
-        assert reply.status == "failed" and "no capacity" in reply.reason and state.form_fill is None
+        assert (
+            reply.status == "gathering"
+            and reply.page == 2
+            and verdict(reply) == [("__root__", "no capacity", "value_error")]
+        )
+        assert reply.asked == ["redundancy", "ticket_id"] and reply.question("redundancy").question.endswith(
+            "— no capacity"
+        )
+        assert state.form_fill.status == "gathering" and not core.created  # the person corrects, or rejects
 
     async def test_a_start_refused_without_cores_verdict_on_the_pages_closes_the_form(self):
         # A tool error that is not core's validation of the pages says nothing about whether the process
@@ -1019,22 +928,21 @@ class TestReviewRegressions:
             async def __call__(self, name, args):
                 if name == "get_workflow_form" and args["workflow_key"] == "create_demo_lightpath":
                     inputs = args["page_inputs"]
-                    node = {"properties": {"node": {"enum": ["A", "B"], "type": "string"}}, "required": ["node"]}
+                    node = [field("node", options={"A": "A", "B": "B"})]
                     if not inputs:
-                        return {"page": 0, "complete": False, "schema": node}
-                    self.require(node, inputs[0])
-                    port = {
-                        "properties": {
-                            "port": {"enum": [f"{inputs[0]['node']}1"], "type": "string"},
-                            "spare": {"enum": ["S1"], "type": "string", "default": None},
-                        },
-                        "required": ["port"],
-                    }
+                        return page(0, None, node)
+                    if lacking := self.missing(node, inputs[0]):
+                        return page(0, None, node, lacking)
+                    only = f"{inputs[0]['node']}1"
+                    port = [
+                        field("port", options={only: only}),
+                        field("spare", required=False, nullable=True, options={"S1": "S1"}),
+                    ]
                     if len(inputs) == 1:
-                        return {"page": 1, "complete": False, "schema": port}
-                    if inputs[1].get("port") not in port["properties"]["port"]["enum"]:
-                        raise ModelRetry(rejection({"port": "Input should be the one port of the node"}))
-                    return {"page": 2, "complete": True, "schema": {}}
+                        return page(1, None, port)
+                    if inputs[1].get("port") != only:
+                        return page(1, None, port, errors({"port": "Input should be the one port of the node"}))
+                    return complete(2)
                 return await super().__call__(name, args)
 
         core, state = RegeneratingCore(), SearchState()

@@ -41,7 +41,7 @@ from pydantic.fields import FieldInfo
 from pydantic_ai import Agent
 from pydantic_ai.models import Model
 
-from orchestrator_agent.form_fill.core_bridge import choices, is_list, value_type
+from orchestrator_agent.form_fill.model import choices, is_list, value_type
 
 logger = structlog.get_logger(__name__)
 
@@ -60,7 +60,7 @@ INSTRUCTIONS = (
 class Interpreter(Protocol):
     """The one reading a form needs from an engine: the person's words per rejected field -> the values they meant.
 
-    ``form`` is the pydantic model of the fields in play (``core_bridge.form_model``); a field the words
+    ``form`` is the pydantic model of the fields in play (``model.form_model``); a field the words
     say nothing usable about is left out.
     """
 

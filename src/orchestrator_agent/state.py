@@ -17,13 +17,12 @@ from enum import StrEnum
 from typing import Any, Literal
 from uuid import UUID
 
+from orchestrator.core.schemas.mcp_tools import FormFieldError, WorkflowFormPage
 from orchestrator.core.search.filters import FilterTree
 from orchestrator.core.search.query.queries import Query
 from pydantic import BaseModel, ConfigDict, Field
-from typing_extensions import NotRequired, TypedDict
+from typing_extensions import TypedDict
 
-# Core's vocabulary the form-fill skill relies on.
-ACCEPT_VALUE = "ACCEPTED"  # the value pydantic-forms' ``Accept`` field takes
 # core's name for a subscription reference: the field of its ``ModifySubscriptionPage``, the first page of
 # every modify / terminate workflow.
 SUBSCRIPTION_ID = "subscription_id"
@@ -73,19 +72,6 @@ class Approval:
     args: dict[str, Any]
 
 
-class FormError(TypedDict):
-    """One validation error, as pydantic-forms reports it (the shape of its ``ErrorDict``).
-
-    Declared here because pydantic only takes a ``typing_extensions.TypedDict`` on Python < 3.12, and
-    pydantic-forms' own is a ``typing.TypedDict``.
-    """
-
-    loc: tuple[int | str, ...]
-    msg: str
-    type: str
-    ctx: NotRequired[dict[str, Any]]
-
-
 class SummaryTable(TypedDict, total=False):
     """One table of a workflow's own summary page, as pydantic-forms carries it (the shape of its ``SummaryData``).
 
@@ -102,7 +88,7 @@ class FormReply(BaseModel):
     """What a turn of the form-fill skill came to, as data: the text of its reply, one JSON object.
 
     Nothing in it is phrased by this code; it carries core's own data. ``gathering``: the page core did not
-    accept and what core ``rejected`` in its own words (pydantic-forms' error dicts), the ``values`` known
+    accept and what core ``rejected`` in its own words (its form tool's errors), the ``values`` known
     so far. ``confirming``: the ``values`` to be submitted and the ``defaults`` that apply, and the
     workflow's own ``summary`` of the start when its form ends in one (core's summary form). ``started``:
     the ``process_id`` (or, when core's answer was not one, that answer as the ``reason``). ``failed``: the
@@ -114,7 +100,7 @@ class FormReply(BaseModel):
     status: Literal["gathering", "confirming", "started", "cancelled", "failed"]
     page: int | None = None
     title: str | None = None
-    rejected: list[FormError] = Field(default_factory=list)
+    rejected: list[FormFieldError] = Field(default_factory=list)
     reason: str | None = None
     values: dict[str, Any] = Field(default_factory=dict)
     labels: dict[str, Any] = Field(default_factory=dict)  # field -> the label of its value, where the form has one
@@ -140,14 +126,14 @@ class FormFillSession(BaseModel):
 
     ``values`` is everything the human answered (or an interpreter made of their words), keyed by field
     name and applied to a page when its field appears; ``page_inputs`` is the last walk's validated pages —
-    exactly what ``create_workflow`` is called with; ``pages`` is their schemas as core sent them, from
-    which the page models are rebuilt each turn (a dynamic model cannot be persisted).
+    exactly what ``create_workflow`` is called with; ``pages`` is how core described them (title and
+    fields), which every stop reads.
     """
 
     workflow_key: str
     status: Literal["opening", "gathering", "confirming", "done"] = "gathering"  # opening = handed off, not walked yet
     values: dict[str, Any] = Field(default_factory=dict)
-    pages: list[dict[str, Any]] = Field(default_factory=list)  # the schemas of the last walk's pages, in order
+    pages: list[WorkflowFormPage] = Field(default_factory=list)  # the last walk's pages as core described them
     page_inputs: list[dict[str, Any]] = Field(default_factory=list)
     # accept fields: "<page>:<name>" -> the fingerprint of what the consent was given for (see the skill)
     consents: dict[str, str] = Field(default_factory=dict)
