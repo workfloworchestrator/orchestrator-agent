@@ -98,7 +98,7 @@ def make(
 async def test_a_long_list_is_asked_as_typed_text_with_its_size():
     reply = await open_form(make(), WidgetCore(), SearchState(), KEY)
     customer = reply.question("customer_id")
-    assert customer.choices == () and customer.hint == "Type a name or part of it — 23 options."
+    assert customer.choices == () and customer.hint == "Type to search 23 options."
 
 
 async def test_an_exact_name_is_its_option_without_a_model():

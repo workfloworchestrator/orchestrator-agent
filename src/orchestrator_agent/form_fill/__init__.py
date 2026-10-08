@@ -22,6 +22,7 @@ from pydantic_ai.models import Model
 
 from orchestrator_agent.form_fill.capability import FormFillCapability
 from orchestrator_agent.form_fill.interpret import Interpreter, ModelInterpreter
+from orchestrator_agent.form_fill.labels import CoreLabels, core_api_url
 from orchestrator_agent.form_fill.skill import CallTool, FormFillSkill
 from orchestrator_agent.form_fill.widgets import (
     BUILTIN_WIDGETS,
@@ -47,6 +48,7 @@ def build_form_fill_skill(
     ``model`` interprets typed answers core rejected and chooses the option typed words mean for a long-list
     widget field. The widgets are the built-ins as ``FORM_WIDGET_EXTENDER`` arranges them (a bad extender
     fails here, at startup); they read core's GraphQL API beside its MCP endpoint unless configured otherwise.
+    Questions are worded with the labels the frontend shows, core's form translations beside its MCP endpoint.
     """
     reader = ModelInterpreter(model) if model is not None else None
     return FormFillSkill(
@@ -57,6 +59,7 @@ def build_form_fill_skill(
         graphql=graphql
         or CoreGraphQL(graphql_url(agent_settings.WFO_CORE_MCP_URL, agent_settings.WFO_CORE_GRAPHQL_URL)),
         choose=reader,
+        labels=CoreLabels(core_api_url(agent_settings.WFO_CORE_MCP_URL)),
     )
 
 

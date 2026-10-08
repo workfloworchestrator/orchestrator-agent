@@ -39,7 +39,7 @@ PAGE = [
         title="Product",
     ),
     AskField(name="ticket_id", question="Ticket (`ticket_id`, optional)", required=False, title="Ticket"),
-    AskField(name="policer", question="Policer (`policer`, required)", choices=["True", "False"], values=[True, False]),
+    AskField(name="policer", question="`Policer` *", choices=["True", "False"], values=[True, False]),
     AskField(
         name="ports",
         question="Ports (`ports`, required)",
@@ -117,11 +117,11 @@ class TestCards:
     def test_a_question_is_plain_text_with_the_page_as_its_header(self):
         session, _ = _paused()
         product = _question(session, 0)
-        assert product["question"] == "Product (product, required)"
+        assert product["question"] == "Product *"
         assert product["header"] == "Port details"
         assert "description" not in product
         # Without a title the skill's own wording is used, less its markdown.
-        assert _question(session, 2)["question"] == "Policer (policer, required)"
+        assert _question(session, 2)["question"] == "Policer *"
         # Core's message on a rejected field is the description.
         assert _question(session, 3)["description"] == "List should have at least 2 items"
         # A page the form gave no title is headed by its workflow.
@@ -140,7 +140,7 @@ class TestCards:
     def test_an_optional_field_can_be_left_as_it_is(self):
         session, _ = _paused()
         ticket = _question(session, 1)
-        assert ticket["question"] == "Ticket (ticket_id, optional)"
+        assert ticket["question"] == "Ticket"
         assert [option["label"] for option in ticket["options"]] == [KEEP_LABEL]
         assert KEEP_LABEL in ticket["description"]
         assert "options" not in _question(session, 4)  # a required free field is just typed

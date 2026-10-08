@@ -76,6 +76,7 @@ from orchestrator_agent.form_fill.core_bridge import (
     widget_mark,
 )
 from orchestrator_agent.form_fill.interpret import Chooser, Interpreter
+from orchestrator_agent.form_fill.labels import NO_LABELS, FieldLabels, LabelSource
 from orchestrator_agent.form_fill.widgets import MAX_INLINE, CascadeWidget, FieldWidget, GraphQL, WidgetContext
 from orchestrator_agent.form_fill.widgets.enrich import EnrichedPage, LongList, enrich
 from orchestrator_agent.form_fill.widgets.resolve import Resolution, resolve_answer, shown_as
@@ -120,7 +121,7 @@ _WORKFLOWS_TTL = 300.0  # seconds the workflow catalogue is cached per skill ins
 _MISSING = "missing"  # pydantic's error type for a required field without a value: the question says so already
 
 # What a stop says about a widget field (``AskField.hint``): the size of a long list, what typed words matched.
-LONG_LIST_HINT = "Type a name or part of it — {total} options."
+LONG_LIST_HINT = "Type to search {total} options."
 SEVERAL_FIT = "More than one option fits what was typed: pick one, or type more of the name."
 TOO_MANY_FIT = "Many options fit what was typed: type more of the name."
 NOTHING_FIT = "Nothing matched {words}: type another name."
@@ -149,6 +150,7 @@ def questions(
     *,
     untouched: bool = True,
     asked: Collection[str] = (),
+    names: FieldLabels = NO_LABELS,
 ) -> list[AskField]:
     """The stop as questions for the human: the fields core rejected, with its message, then the unanswered ones.
 
@@ -157,13 +159,14 @@ def questions(
     is no form verdict at all (``reason``) — is asked again in full, the first question with what core said.
     A field waiting for another value (``later``) is left out while anything else is asked; when nothing else
     is, it is asked as typed text, like a field without its widget, so it never leaves a stop with no question.
-    An optional field the person was ``asked`` and left at its default is not asked again. A field asked for a
+    The questions follow the page, as the frontend shows its fields, worded with its labels (``names``). An optional
+    field the person was ``asked`` and left at its default is not asked again. A field asked for a
     step that comes before its value (a node, before the port) ends the stop: what follows it on the page may
     depend on that choice, so it is asked with the value, on the next stop.
     """
     waiting = {name for name, info in model.model_fields.items() if _waits(info)}
-    found = _questions(model, values, errors, reason, untouched, waiting, asked) or _questions(
-        model, values, errors, reason, untouched, set(), asked
+    found = _questions(model, values, errors, reason, untouched, waiting, asked, names) or _questions(
+        model, values, errors, reason, untouched, set(), asked, names
     )
     return _up_to_a_step(model, found)
 
@@ -183,6 +186,7 @@ def _questions(
     untouched: bool,
     waiting: set[str],
     asked: Collection[str],
+    names: FieldLabels,
 ) -> list[AskField]:
     """``questions``, leaving out the ``waiting`` fields and core's errors on them."""
     fields = {name: info for name, info in model.model_fields.items() if name not in waiting}
@@ -194,20 +198,26 @@ def _questions(
     if (errors or reason) and not problems and untouched:
         said = "; ".join(str(error["msg"]) for error in errors) or str(reason)
         problems = {name: said if index == 0 else "" for index, name in enumerate(fields)}
-    found = [question(name, fields[name], problem) for name, problem in problems.items()]
-    if untouched:
-        open_ = {name: info for name, info in fields.items() if name not in problems and name not in values}
-        found += [question(name, info) for name, info in open_.items() if info.is_required() or name not in asked]
-    return found
+    open_ = {
+        name
+        for name, info in fields.items()
+        if untouched and name not in problems and name not in values and (info.is_required() or name not in asked)
+    }
+    return [  # in page order, as the frontend shows them
+        question(name, info, problems.get(name, ""), names)
+        for name, info in fields.items()
+        if name in problems or name in open_
+    ]
 
 
-def question(name: str, info: FieldInfo, problem: str = "") -> AskField:
-    """One field as a question: its title, whether it is required, its options as chips, core's message if it rejected the answer.
+def question(name: str, info: FieldInfo, problem: str = "", names: FieldLabels = NO_LABELS) -> AskField:
+    """One field as a question, as the frontend shows it: its label, its options, why core rejected it.
 
+    The label is the frontend's (``names``), ``*`` marking a required field; the label's help text goes under it.
     Nothing spells out what the field expects: a person answers in words, the interpreter has the schema.
     """
-    note = "required" if info.is_required() else "optional — leave empty to keep the default"
-    text = f"{info.title or name} (`{name}`, {note})" + (f" — {problem}" if problem else "")
+    title = _title(name, info, names)
+    text = title + (" *" if info.is_required() else "") + (f" — {problem}" if problem else "")
     options: tuple[Any, ...] = ()
     if is_accept(info):
         options = (ACCEPT_VALUE,)
@@ -219,7 +229,11 @@ def question(name: str, info: FieldInfo, problem: str = "") -> AskField:
     mark = widget_mark(info) or {}
     hint = LONG_LIST_HINT.format(total=mark["total"]) if mark.get("total") else ""
     if "total" in mark and not mark["total"]:  # a widget field whose source has nothing to offer
-        hint = NO_OPTIONS.format(title=info.title or name)
+        hint = NO_OPTIONS.format(title=title)
+    if not mark.get("total") and (
+        info_text := names.info(name)
+    ):  # the frontend's help text, where nothing else is said
+        hint = " ".join(filter(None, (hint, info_text)))
     if stepped := mark.get("stepped"):  # its options follow from steps chosen first: offer to choose again
         change = CHANGE_STEP.format(step=" / ".join(stepped))
         options, hint = (*options, change), " ".join(filter(None, (hint, f'Pick "{change}" to go back.')))
@@ -230,10 +244,18 @@ def question(name: str, info: FieldInfo, problem: str = "") -> AskField:
         values=options,
         multiple=is_list(info),
         required=info.is_required(),
-        title=info.title or name,
+        title=title,
         problem=problem,
         hint=hint,
     )
+
+
+def _title(name: str, info: FieldInfo, names: FieldLabels) -> str:
+    """The field's label: the frontend's, else the schema's title; a cascade step keeps its own part ("Port — Node")."""
+    schema_title = info.title or name
+    step = schema_title.split(" — ", 1)[1] if " — " in schema_title and (widget_mark(info) or {}).get("step") else None
+    label = names.title(name) or schema_title.split(" — ", 1)[0]
+    return f"{label} — {step.capitalize()}" if step else label
 
 
 def offered(reply: Reply, unresolved: Mapping[str, Resolution]) -> Reply:
@@ -320,6 +342,8 @@ class FormFillSkill:
     widgets: Sequence[FieldWidget] = ()  # the formats whose options core leaves to the frontend (``form_fill.widgets``)
     graphql: GraphQL | None = None  # core's GraphQL API, for the widgets that read it
     choose: Chooser | None = None  # words a person typed for a widget field -> the options they fit
+    labels: LabelSource | None = None  # what the frontend calls each field (core's form translations)
+    _field_labels: FieldLabels = dc_field(default=NO_LABELS, init=False, repr=False)
     _catalogue: dict[str, str] | None = dc_field(default=None, init=False, repr=False)
     _catalogue_at: float = dc_field(default=0.0, init=False, repr=False)
 
@@ -417,6 +441,7 @@ class FormFillSkill:
         it as it is. The validated pages are committed to the session only when the walk stops, so a failure
         in the middle (an exception propagating to the adapter) leaves the session as it was.
         """
+        self._field_labels = await self.labels.labels() if self.labels is not None else NO_LABELS
         pages: list[dict[str, Any]] = []
         interpreted: set[str] = set()
         session.pages = []  # this walk's pages only: a regenerated form leaves no stale field behind
@@ -544,7 +569,9 @@ class FormFillSkill:
         reason = error if error and not errors else None  # a refusal that is not a form body, as it came
         rejected = {str(e["loc"][0]) for e in errors if e["loc"]}
         values = {**_given(session), **{name: value for name, value in submitted.items() if name not in rejected}}
-        ask = questions(model, values, errors, reason, untouched=page is not None, asked=session.asked)
+        ask = questions(
+            model, values, errors, reason, untouched=page is not None, asked=session.asked, names=self._field_labels
+        )
         if not ask:
             session.status = "done"
             return self._reply(session, "failed", reason=error or "the form asks for nothing a person can answer")

@@ -179,7 +179,7 @@ async def test_a_node_typed_loosely_among_many_is_searched_in_the_steps_own_opti
     core, state, chooser = PortCore(), SearchState(), Picks()
     skill = FormFillSkill(widgets=[ManyNodes()], choose=chooser)
     first = await open_form(skill, core, state, KEY)
-    assert first.question("port_id").hint == "Type a name or part of it — 251 options."
+    assert first.question("port_id").hint == "Type to search 251 options."
     ports = await turn(skill, core, state, {"port_id": "asd001b"})  # part of the device name: no exact match
     assert ports.question("port_id").title == "Port Id" and ports.question("port_id").values == (101, 102, BACK)
     assert chooser.offered and chooser.offered[0] <= 50  # read among the candidates the search found, not all

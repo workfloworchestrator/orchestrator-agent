@@ -146,16 +146,15 @@ def _header(session: FormFillSession) -> str:
 
 def _question(request_id: str, index: int, field: AskField, header: str) -> dict[str, Any]:
     """One field as a question of the tool."""
-    note = "required" if field.required else "optional"
-    # A card is plain text: the field's title, name and whether it is required, without the markdown and the
-    # "leave empty" of the skill's own wording (here an optional field is left as it is by picking an option).
-    text = f"{field.title} ({field.name}, {note})" if field.title else _plain(field.question)
+    # A card is plain text: the field's label as the frontend shows it, "*" when it is required (an optional
+    # field is left as it is by picking an option).
+    text = f"{field.title}{' *' if field.required else ''}" if field.title else _plain(field.question)
     question: dict[str, Any] = {
         "id": f"q{index}",
         "header": _cut(header, MAX_HEADER),
         "question": _cut(text, MAX_QUESTION),
     }
-    described = [text for text in (field.problem, field.hint) if text]
+    described = [said for said in (field.problem, field.hint) if said]
     options = [{"label": _label(label), "value": token} for token, label in _option_values(request_id, index, field)]
     if field.choices and not options:
         described.append(f"Type one of its {len(field.choices)} options: " + "; ".join(field.choices))

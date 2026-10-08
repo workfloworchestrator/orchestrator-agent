@@ -420,10 +420,10 @@ class TestQuestions:
         # One question per field: its title and whether it is required; a missing value needs no message.
         errors = form_errors(rejection({"service_ports": "Field required", "note": "Too long"}))
         errors[0]["type"] = "missing"
-        assert [q.question for q in questions(model, {}, errors)] == [
-            "service_ports (`service_ports`, required)",
-            "note (`note`, optional — leave empty to keep the default) — Too long",
-            "subscription_id (`subscription_id`, required)",
+        assert [q.question for q in questions(model, {}, errors)] == [  # in page order, required ones marked
+            "service_ports *",
+            "subscription_id *",
+            "note — Too long",
         ]
 
     def test_options_are_chips_shown_by_label_and_a_boolean_is_two_chips(self):
@@ -496,14 +496,15 @@ class TestWalk:
         # 2. The human answers two of them; core still misses the name, and only that is asked again.
         reply = await turn(skill, core, state, self.VALUES)
         assert reply.asked == ["customer_name"] and reply.question("customer_name").choices == ()
-        assert reply.question("customer_name").question == "Customer Name (`customer_name`, required) — Field required"
+        assert reply.question("customer_name").question == "Customer Name * — Field required"
         assert reply.values == {"product": PRODUCT, "speed": "10000", "speed_policer": True}
         # 3. Page 2 (10 Gbit/s -> redundancy): a choice shown by label, and the optional ticket offered along.
         reply = await turn(skill, core, state, {"customer_name": "Universiteit Twente"})
         assert reply.page == 2 and rejected(reply) == ["redundancy"] and reply.asked == ["redundancy", "ticket_id"]
         redundancy = reply.question("redundancy")
         assert redundancy.choices == ("Protected", "Unprotected") and redundancy.values == ("protected", "unprotected")
-        assert "optional" in reply.question("ticket_id").question
+        ticket = reply.question("ticket_id")
+        assert not ticket.required and not ticket.question.endswith("*")  # optional: asked without the mark
         # 4. The summary is the start to approve: the call as it will be made, and what its ids stand for.
         reply = await turn(skill, core, state, {"redundancy": "protected", "ticket_id": "JIRA-4821"})
         assert reply.status == "confirming" and reply.asked == [] and state.form_fill.status == "confirming"
