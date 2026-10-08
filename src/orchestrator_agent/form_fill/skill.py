@@ -48,6 +48,7 @@ from __future__ import annotations
 import hashlib
 import json
 import time
+from collections import Counter
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from dataclasses import field as dc_field
@@ -162,17 +163,28 @@ def question(name: str, info: FieldInfo, problem: str = "") -> AskField:
         options = allowed
     elif value_type(info) is bool:
         options = (True, False)
-    shown = labels(info)
     return AskField(
         name=name,
         question=text,
-        choices=tuple(shown.get(str(value), str(value)) for value in options),  # the human sees labels
+        choices=unique_choices(options, labels(info)),  # the human sees labels, told apart where they coincide
         values=options,
         multiple=is_list(info),
         required=info.is_required(),
         title=info.title or name,
         problem=problem,
     )
+
+
+def unique_choices(options: Sequence[Any], shown: Mapping[str, str]) -> tuple[str, ...]:
+    """The options as a person sees them: each by its label, with its value added where labels coincide.
+
+    Labels are descriptions and descriptions are not unique, while a chip's text is all a transport gets
+    back from a pick; two options must never read the same, or a pick could not be mapped to the value core
+    takes (an id, never a label). The value is what tells them apart, and it is what the person confirms.
+    """
+    texts = [shown.get(str(value), str(value)) for value in options]
+    counts = Counter(texts)
+    return tuple(f"{text} ({value})" if counts[text] > 1 else text for text, value in zip(texts, options, strict=True))
 
 
 def _given(session: FormFillSession) -> dict[str, Any]:
@@ -512,4 +524,4 @@ class FormFillSkill:
         return self._reply(session, "started", process_id=process_id)
 
 
-__all__ = ["CallTool", "FormFillSkill", "as_reply", "question", "questions"]
+__all__ = ["CallTool", "FormFillSkill", "as_reply", "question", "questions", "unique_choices"]

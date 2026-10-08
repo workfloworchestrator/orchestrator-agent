@@ -59,25 +59,37 @@ def pending_of(session: FormFillSession | None) -> PendingAsk | None:
         return None
 
 
-def answered_values(pending: PendingAsk, answers: Sequence[Sequence[str]]) -> dict[str, Any] | None:
+# One answer to a question: a picked choice, by its position among the question's choices, or typed text.
+Pick = int | str
+
+
+def answered_values(pending: PendingAsk, answers: Sequence[Sequence[Pick]]) -> dict[str, Any] | None:
     """The human's answers, one list per question asked, as field values; None if they do not fit the ask.
 
-    A choice is mapped to the value behind it; what was typed travels as typed. A multi-select question's
-    picks stay a list, a single-answer question takes its first answer. An unanswered question stays out:
-    nothing is sent for the field, so the form's default applies (and a required one comes back rejected
-    by core).
+    A picked choice is the value behind it. Typed text that is the label of exactly one choice is that
+    choice's value; any other text travels as typed — two choices can share a label (descriptions are not
+    unique), and a label alone then names neither. A multi-select question's picks stay a list, a
+    single-answer question takes its first answer. An unanswered question stays out: nothing is sent for
+    the field, so the form's default applies (and a required one comes back rejected by core).
     """
     if pending.kind != "ask" or len(answers) != len(pending.questions):
         return None
     values: dict[str, Any] = {}
     for field, answer in zip(pending.questions, answers, strict=True):
-        items: list[Any] = [a for a in answer if a.strip()]
-        if field.values:
-            behind = dict(zip(field.choices, field.values, strict=True))
-            items = [behind.get(item, item) for item in items]
+        items = [value for pick in answer if (value := value_of(field, pick)) is not None]
         if items:
             values[field.name] = items if field.multiple else items[0]
     return values
 
 
-__all__ = ["PendingAsk", "answered_values", "pending_approval", "pending_ask", "pending_of"]
+def value_of(field: AskField, pick: Pick) -> Any | None:
+    """The value one pick stands for; None when it is no answer (blank text, or a position without a choice)."""
+    if isinstance(pick, int):
+        return field.values[pick] if 0 <= pick < len(field.values) else None
+    if not pick.strip():
+        return None
+    named = [value for label, value in zip(field.choices, field.values) if label == pick]
+    return named[0] if len(named) == 1 else pick
+
+
+__all__ = ["PendingAsk", "Pick", "answered_values", "pending_approval", "pending_ask", "pending_of", "value_of"]
