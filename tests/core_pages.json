@@ -4,262 +4,117 @@
   "complete": false,
   "status": "next",
   "title": "NL8 Service Port 400G",
-  "schema": null,
-  "fields": [
-   {
-    "name": "port",
-    "title": "Port",
-    "description": null,
-    "kind": "string",
-    "format": null,
-    "required": true,
-    "default": null,
-    "nullable": false,
-    "options": [
-     {
-      "value": "AH001A",
-      "label": "AH001A (400 Gbit/s)"
+  "schema": {
+   "type": "object",
+   "title": "NL8 Service Port 400G",
+   "additionalProperties": false,
+   "properties": {
+    "port": {
+     "type": "string",
+     "enum": [
+      "AH001A",
+      "AMR001A",
+      "ASD002A"
+     ],
+     "options": {
+      "AH001A": "AH001A (400 Gbit/s)",
+      "AMR001A": "AMR001A (400 Gbit/s)",
+      "ASD002A": "ASD002A (400 Gbit/s)"
      },
-     {
-      "value": "AMR001A",
-      "label": "AMR001A (400 Gbit/s)"
+     "title": "Port"
+    },
+    "port_mode": {
+     "type": "string",
+     "enum": [
+      "tagged",
+      "untagged",
+      "link_member"
+     ],
+     "options": {
+      "tagged": "Tagged",
+      "untagged": "Untagged",
+      "link_member": "Link member"
      },
-     {
-      "value": "ASD002A",
-      "label": "ASD002A (400 Gbit/s)"
-     }
-    ],
-    "item": null,
-    "constraints": {},
-    "unique_items": false,
-    "fields": null,
-    "read_only": false,
-    "display_only": false,
-    "data": null
-   },
-   {
-    "name": "port_mode",
-    "title": "Port Mode",
-    "description": null,
-    "kind": "string",
-    "format": null,
-    "required": true,
-    "default": null,
-    "nullable": false,
-    "options": [
-     {
-      "value": "tagged",
-      "label": "Tagged"
+     "title": "Port Mode"
+    },
+    "admin_state": {
+     "type": "string",
+     "enum": [
+      "enabled",
+      "disabled"
+     ],
+     "options": {
+      "enabled": "Enabled",
+      "disabled": "Disabled"
      },
-     {
-      "value": "untagged",
-      "label": "Untagged"
-     },
-     {
-      "value": "link_member",
-      "label": "Link member"
-     }
-    ],
-    "item": null,
-    "constraints": {},
-    "unique_items": false,
-    "fields": null,
-    "read_only": false,
-    "display_only": false,
-    "data": null
-   },
-   {
-    "name": "admin_state",
-    "title": "Admin State",
-    "description": null,
-    "kind": "string",
-    "format": null,
-    "required": false,
-    "default": "enabled",
-    "nullable": false,
-    "options": [
-     {
-      "value": "enabled",
-      "label": "Enabled"
-     },
-     {
-      "value": "disabled",
-      "label": "Disabled"
-     }
-    ],
-    "item": null,
-    "constraints": {},
-    "unique_items": false,
-    "fields": null,
-    "read_only": false,
-    "display_only": false,
-    "data": null
-   },
-   {
-    "name": "lldp",
-    "title": "Lldp",
-    "description": null,
-    "kind": "boolean",
-    "format": null,
-    "required": false,
-    "default": false,
-    "nullable": false,
-    "options": null,
-    "item": null,
-    "constraints": {},
-    "unique_items": false,
-    "fields": null,
-    "read_only": false,
-    "display_only": false,
-    "data": null
-   },
-   {
-    "name": "ignore_l3_incompletes",
-    "title": "Ignore L3 Incompletes",
-    "description": null,
-    "kind": "boolean",
-    "format": null,
-    "required": false,
-    "default": false,
-    "nullable": false,
-    "options": null,
-    "item": null,
-    "constraints": {},
-    "unique_items": false,
-    "fields": null,
-    "read_only": false,
-    "display_only": false,
-    "data": null
-   },
-   {
-    "name": "native_vlan",
-    "title": "Native Vlan",
-    "description": null,
-    "kind": "integer",
-    "format": null,
-    "required": false,
-    "default": null,
-    "nullable": true,
-    "options": null,
-    "item": null,
-    "constraints": {},
-    "unique_items": false,
-    "fields": null,
-    "read_only": false,
-    "display_only": false,
-    "data": null
-   },
-   {
-    "name": "contact_persons",
-    "title": "Contact Persons",
-    "description": null,
-    "kind": "list",
-    "format": null,
-    "required": false,
-    "default": [],
-    "nullable": false,
-    "options": null,
-    "item": {
-     "name": "",
-     "title": "",
-     "description": null,
-     "kind": "object",
-     "format": null,
-     "required": false,
-     "default": null,
-     "nullable": false,
-     "options": null,
-     "item": null,
-     "constraints": {},
-     "unique_items": false,
-     "fields": [
+     "title": "Admin State",
+     "default": "enabled"
+    },
+    "lldp": {
+     "type": "boolean",
+     "title": "Lldp",
+     "default": false
+    },
+    "ignore_l3_incompletes": {
+     "type": "boolean",
+     "title": "Ignore L3 Incompletes",
+     "default": false
+    },
+    "native_vlan": {
+     "anyOf": [
       {
-       "name": "name",
-       "title": "Name",
-       "description": null,
-       "kind": "string",
-       "format": "contactPersonName",
-       "required": true,
-       "default": null,
-       "nullable": false,
-       "options": null,
-       "item": null,
-       "constraints": {},
-       "unique_items": false,
-       "fields": null,
-       "read_only": false,
-       "display_only": false,
-       "data": null
+       "type": "integer"
       },
       {
-       "name": "email",
-       "title": "Email",
-       "description": null,
-       "kind": "any",
-       "format": null,
-       "required": true,
-       "default": null,
-       "nullable": false,
-       "options": null,
-       "item": null,
-       "constraints": {},
-       "unique_items": false,
-       "fields": null,
-       "read_only": false,
-       "display_only": false,
-       "data": null
-      },
-      {
-       "name": "phone",
-       "title": "Phone",
-       "description": null,
-       "kind": "string",
-       "format": null,
-       "required": false,
-       "default": "",
-       "nullable": false,
-       "options": null,
-       "item": null,
-       "constraints": {},
-       "unique_items": false,
-       "fields": null,
-       "read_only": false,
-       "display_only": false,
-       "data": null
+       "type": "null"
       }
      ],
-     "read_only": false,
-     "display_only": false,
-     "data": null
+     "title": "Native Vlan",
+     "default": null
     },
-    "constraints": {
-     "min_length": 0
+    "contact_persons": {
+     "type": "array",
+     "items": {
+      "type": "object",
+      "properties": {
+       "name": {
+        "type": "string",
+        "format": "contactPersonName",
+        "title": "Name"
+       },
+       "email": {
+        "type": "string",
+        "format": "email",
+        "title": "Email"
+       },
+       "phone": {
+        "type": "string",
+        "title": "Phone",
+        "default": ""
+       }
+      },
+      "required": [
+       "name",
+       "email"
+      ],
+      "title": "ContactPerson",
+      "default": null
+     },
+     "minItems": 0,
+     "title": "Contact Persons",
+     "default": []
     },
-    "unique_items": false,
-    "fields": null,
-    "read_only": false,
-    "display_only": false,
-    "data": null
+    "ticket_id": {
+     "type": "string",
+     "title": "Ticket Id",
+     "default": ""
+    }
    },
-   {
-    "name": "ticket_id",
-    "title": "Ticket Id",
-    "description": null,
-    "kind": "string",
-    "format": null,
-    "required": false,
-    "default": "",
-    "nullable": false,
-    "options": null,
-    "item": null,
-    "constraints": {},
-    "unique_items": false,
-    "fields": null,
-    "read_only": false,
-    "display_only": false,
-    "data": null
-   }
-  ],
+   "required": [
+    "port",
+    "port_mode"
+   ]
+  },
   "errors": []
  },
  "page_2_rejected": {
@@ -267,262 +122,117 @@
   "complete": false,
   "status": "rejected",
   "title": "NL8 Service Port 400G",
-  "schema": null,
-  "fields": [
-   {
-    "name": "port",
-    "title": "Port",
-    "description": null,
-    "kind": "string",
-    "format": null,
-    "required": true,
-    "default": null,
-    "nullable": false,
-    "options": [
-     {
-      "value": "AH001A",
-      "label": "AH001A (400 Gbit/s)"
+  "schema": {
+   "type": "object",
+   "title": "NL8 Service Port 400G",
+   "additionalProperties": false,
+   "properties": {
+    "port": {
+     "type": "string",
+     "enum": [
+      "AH001A",
+      "AMR001A",
+      "ASD002A"
+     ],
+     "options": {
+      "AH001A": "AH001A (400 Gbit/s)",
+      "AMR001A": "AMR001A (400 Gbit/s)",
+      "ASD002A": "ASD002A (400 Gbit/s)"
      },
-     {
-      "value": "AMR001A",
-      "label": "AMR001A (400 Gbit/s)"
+     "title": "Port"
+    },
+    "port_mode": {
+     "type": "string",
+     "enum": [
+      "tagged",
+      "untagged",
+      "link_member"
+     ],
+     "options": {
+      "tagged": "Tagged",
+      "untagged": "Untagged",
+      "link_member": "Link member"
      },
-     {
-      "value": "ASD002A",
-      "label": "ASD002A (400 Gbit/s)"
-     }
-    ],
-    "item": null,
-    "constraints": {},
-    "unique_items": false,
-    "fields": null,
-    "read_only": false,
-    "display_only": false,
-    "data": null
-   },
-   {
-    "name": "port_mode",
-    "title": "Port Mode",
-    "description": null,
-    "kind": "string",
-    "format": null,
-    "required": true,
-    "default": null,
-    "nullable": false,
-    "options": [
-     {
-      "value": "tagged",
-      "label": "Tagged"
+     "title": "Port Mode"
+    },
+    "admin_state": {
+     "type": "string",
+     "enum": [
+      "enabled",
+      "disabled"
+     ],
+     "options": {
+      "enabled": "Enabled",
+      "disabled": "Disabled"
      },
-     {
-      "value": "untagged",
-      "label": "Untagged"
-     },
-     {
-      "value": "link_member",
-      "label": "Link member"
-     }
-    ],
-    "item": null,
-    "constraints": {},
-    "unique_items": false,
-    "fields": null,
-    "read_only": false,
-    "display_only": false,
-    "data": null
-   },
-   {
-    "name": "admin_state",
-    "title": "Admin State",
-    "description": null,
-    "kind": "string",
-    "format": null,
-    "required": false,
-    "default": "enabled",
-    "nullable": false,
-    "options": [
-     {
-      "value": "enabled",
-      "label": "Enabled"
-     },
-     {
-      "value": "disabled",
-      "label": "Disabled"
-     }
-    ],
-    "item": null,
-    "constraints": {},
-    "unique_items": false,
-    "fields": null,
-    "read_only": false,
-    "display_only": false,
-    "data": null
-   },
-   {
-    "name": "lldp",
-    "title": "Lldp",
-    "description": null,
-    "kind": "boolean",
-    "format": null,
-    "required": false,
-    "default": false,
-    "nullable": false,
-    "options": null,
-    "item": null,
-    "constraints": {},
-    "unique_items": false,
-    "fields": null,
-    "read_only": false,
-    "display_only": false,
-    "data": null
-   },
-   {
-    "name": "ignore_l3_incompletes",
-    "title": "Ignore L3 Incompletes",
-    "description": null,
-    "kind": "boolean",
-    "format": null,
-    "required": false,
-    "default": false,
-    "nullable": false,
-    "options": null,
-    "item": null,
-    "constraints": {},
-    "unique_items": false,
-    "fields": null,
-    "read_only": false,
-    "display_only": false,
-    "data": null
-   },
-   {
-    "name": "native_vlan",
-    "title": "Native Vlan",
-    "description": null,
-    "kind": "integer",
-    "format": null,
-    "required": false,
-    "default": null,
-    "nullable": true,
-    "options": null,
-    "item": null,
-    "constraints": {},
-    "unique_items": false,
-    "fields": null,
-    "read_only": false,
-    "display_only": false,
-    "data": null
-   },
-   {
-    "name": "contact_persons",
-    "title": "Contact Persons",
-    "description": null,
-    "kind": "list",
-    "format": null,
-    "required": false,
-    "default": [],
-    "nullable": false,
-    "options": null,
-    "item": {
-     "name": "",
-     "title": "",
-     "description": null,
-     "kind": "object",
-     "format": null,
-     "required": false,
-     "default": null,
-     "nullable": false,
-     "options": null,
-     "item": null,
-     "constraints": {},
-     "unique_items": false,
-     "fields": [
+     "title": "Admin State",
+     "default": "enabled"
+    },
+    "lldp": {
+     "type": "boolean",
+     "title": "Lldp",
+     "default": false
+    },
+    "ignore_l3_incompletes": {
+     "type": "boolean",
+     "title": "Ignore L3 Incompletes",
+     "default": false
+    },
+    "native_vlan": {
+     "anyOf": [
       {
-       "name": "name",
-       "title": "Name",
-       "description": null,
-       "kind": "string",
-       "format": "contactPersonName",
-       "required": true,
-       "default": null,
-       "nullable": false,
-       "options": null,
-       "item": null,
-       "constraints": {},
-       "unique_items": false,
-       "fields": null,
-       "read_only": false,
-       "display_only": false,
-       "data": null
+       "type": "integer"
       },
       {
-       "name": "email",
-       "title": "Email",
-       "description": null,
-       "kind": "any",
-       "format": null,
-       "required": true,
-       "default": null,
-       "nullable": false,
-       "options": null,
-       "item": null,
-       "constraints": {},
-       "unique_items": false,
-       "fields": null,
-       "read_only": false,
-       "display_only": false,
-       "data": null
-      },
-      {
-       "name": "phone",
-       "title": "Phone",
-       "description": null,
-       "kind": "string",
-       "format": null,
-       "required": false,
-       "default": "",
-       "nullable": false,
-       "options": null,
-       "item": null,
-       "constraints": {},
-       "unique_items": false,
-       "fields": null,
-       "read_only": false,
-       "display_only": false,
-       "data": null
+       "type": "null"
       }
      ],
-     "read_only": false,
-     "display_only": false,
-     "data": null
+     "title": "Native Vlan",
+     "default": null
     },
-    "constraints": {
-     "min_length": 0
+    "contact_persons": {
+     "type": "array",
+     "items": {
+      "type": "object",
+      "properties": {
+       "name": {
+        "type": "string",
+        "format": "contactPersonName",
+        "title": "Name"
+       },
+       "email": {
+        "type": "string",
+        "format": "email",
+        "title": "Email"
+       },
+       "phone": {
+        "type": "string",
+        "title": "Phone",
+        "default": ""
+       }
+      },
+      "required": [
+       "name",
+       "email"
+      ],
+      "title": "ContactPerson",
+      "default": null
+     },
+     "minItems": 0,
+     "title": "Contact Persons",
+     "default": []
     },
-    "unique_items": false,
-    "fields": null,
-    "read_only": false,
-    "display_only": false,
-    "data": null
+    "ticket_id": {
+     "type": "string",
+     "title": "Ticket Id",
+     "default": ""
+    }
    },
-   {
-    "name": "ticket_id",
-    "title": "Ticket Id",
-    "description": null,
-    "kind": "string",
-    "format": null,
-    "required": false,
-    "default": "",
-    "nullable": false,
-    "options": null,
-    "item": null,
-    "constraints": {},
-    "unique_items": false,
-    "fields": null,
-    "read_only": false,
-    "display_only": false,
-    "data": null
-   }
-  ],
+   "required": [
+    "port",
+    "port_mode"
+   ]
+  },
   "errors": [
    {
     "loc": [

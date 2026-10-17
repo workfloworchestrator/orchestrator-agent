@@ -17,10 +17,11 @@ from enum import StrEnum
 from typing import Any, Literal
 from uuid import UUID
 
-from orchestrator.core.schemas.mcp_tools import FormFieldError, WorkflowFormPage
+from orchestrator.core.schemas.mcp_tools import WorkflowFormPage
 from orchestrator.core.search.filters import FilterTree
 from orchestrator.core.search.query.queries import Query
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, SerializationInfo, field_serializer
+from pydantic_forms.core import FormFieldError
 from typing_extensions import TypedDict
 
 # core's name for a subscription reference: the field of its ``ModifySubscriptionPage``, the first page of
@@ -127,7 +128,7 @@ class FormFillSession(BaseModel):
     ``values`` is everything the human answered (or an interpreter made of their words), keyed by field
     name and applied to a page when its field appears; ``page_inputs`` is the last walk's validated pages —
     exactly what ``create_workflow`` is called with; ``pages`` is how core described them (title and
-    fields), which every stop reads.
+    schema), which every stop reads.
     """
 
     workflow_key: str
@@ -135,6 +136,12 @@ class FormFillSession(BaseModel):
     values: dict[str, Any] = Field(default_factory=dict)
     pages: list[WorkflowFormPage] = Field(default_factory=list)  # the last walk's pages as core described them
     page_inputs: list[dict[str, Any]] = Field(default_factory=list)
+
+    @field_serializer("pages")
+    def _pages_by_alias(self, pages: list[WorkflowFormPage], info: SerializationInfo) -> list[dict[str, Any]]:
+        """Each page by its public keys (``schema``, not ``schema_``), so a persisted session validates back as it was."""
+        return [page.model_dump(mode=info.mode, by_alias=True) for page in pages]
+
     # accept fields: "<page>:<name>" -> the fingerprint of what the consent was given for (see the skill)
     consents: dict[str, str] = Field(default_factory=dict)
     asked: list[str] = Field(default_factory=list)  # fields of optional-only pages already asked once

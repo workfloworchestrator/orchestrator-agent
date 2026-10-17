@@ -11,45 +11,164 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""A form page as a pydantic model, built from core's field spec: what the interpreter reads and answers with.
+"""A form page as core describes it, read into the fields the skill works from.
 
-Core's ``get_workflow_form`` describes a page as data (``FormField``s), and the skill works from that data.
-The one place that needs a pydantic model is the interpreter: the model run that turns a person's words
-into values has the page as its output type and is shown its JSON schema. ``page_model`` builds it — a
-choice as a ``Literal`` of its values with the labels kept in the schema, a list of what its item is, a
-nested object as a model of its own, and nothing for a field that is only shown.
+Core's ``get_workflow_form`` describes a page as one JSON Schema: every reference inlined, ``readOnly`` on a
+field that is only shown, a choice's values in ``enum`` with their labels in ``options``, consent as
+``format: "accept"``. ``fields_of`` reads that schema into one ``FieldSpec`` per field, which every stop of
+the skill works from. ``form_schema`` is the walked pages' askable fields as one schema again, the page as
+core defined it: what the interpreter hands its model as the output type. No pydantic model is rebuilt from
+the schema anywhere; core's validation is the only validation.
 """
 
 from __future__ import annotations
 
-from collections.abc import Sequence
+import json
+from collections.abc import Mapping, Sequence
 from functools import lru_cache
-from types import NoneType, UnionType
-from typing import Any, Literal, Union, get_args, get_origin
+from itertools import chain
+from typing import Any
 
-from orchestrator.core.schemas.mcp_tools import FormField, FormFieldOption
-from pydantic import BaseModel, ConfigDict, Field, create_model
-from pydantic.fields import FieldInfo
+from orchestrator.core.schemas.mcp_tools import WorkflowFormPage
+from pydantic import BaseModel, ConfigDict, Field
 
-_KINDS: dict[str, Any] = {"string": str, "integer": int, "number": float, "boolean": bool, "object": dict[str, Any]}
+# pydantic-forms' ``format`` markers the skill acts on.
+ACCEPT = "accept"  # consent, given once per page by picking its one option
+SUMMARY = "summary"  # a table of the workflow's own recap: shown, never filled
+ACCEPTED = "ACCEPTED"  # the one value of an accept field that core's validation passes
+HINTS = ("uniforms", "extraProperties")  # pydantic-forms' widget hints: a widget reads them, a model never does
 
-
-# --- what a field spec says ------------------------------------------------------------------------------
-
-
-def askable(field: FormField) -> bool:
-    """A field a caller may send a value for: not one that is only shown, or shown and fixed."""
-    return not (field.display_only or field.read_only)
+_TYPES = {"string": "string", "integer": "integer", "number": "number", "boolean": "boolean"}
+_TYPES |= {"array": "list", "object": "object"}
 
 
-def options_of(field: FormField) -> list[FormFieldOption] | None:
+class Option(BaseModel):
+    """One value a field is limited to, with the label the form shows for it."""
+
+    model_config = ConfigDict(frozen=True)
+
+    value: Any
+    label: str
+
+
+class FieldSpec(BaseModel):
+    """One field of a page as the skill reads it off the page schema."""
+
+    model_config = ConfigDict(frozen=True)
+
+    name: str
+    title: str
+    description: str | None = None
+    kind: str  # string, integer, number, boolean, list, object, or any
+    format: str | None = None
+    required: bool = False
+    default: Any = None
+    nullable: bool = False
+    options: list[Option] | None = None  # the values it is limited to, in the form's order
+    item: FieldSpec | None = None  # of a list: what one item is
+    constraints: dict[str, Any] = Field(default_factory=dict)  # of a list: ``min_length`` / ``max_length``
+    fields: list[FieldSpec] | None = None  # of a nested object: its own fields
+    read_only: bool = False  # shown, never submitted
+    data: Any = None  # of a summary: its table
+
+
+# --- the page schema -> its fields ---------------------------------------------------------------------------
+
+
+def fields_of(page: WorkflowFormPage) -> list[FieldSpec]:
+    """The fields of a page as core described it; [] for a page without a schema (the form complete)."""
+    if page.schema_ is None:
+        return []
+    return list(_fields_cached(json.dumps(page.schema_, default=str)))  # the form's order is the key's
+
+
+def fields_in(schema: Mapping[str, Any]) -> list[FieldSpec]:
+    """The fields of one object schema, in the form's order."""
+    required = set(schema.get("required") or [])
+    return [
+        _spec(name, prop, required=name in required)
+        for name, prop in (schema.get("properties") or {}).items()
+        if isinstance(prop, Mapping)
+    ]
+
+
+@lru_cache(maxsize=256)
+def _fields_cached(schema_json: str) -> tuple[FieldSpec, ...]:
+    return tuple(fields_in(json.loads(schema_json)))
+
+
+def _spec(name: str, prop: Mapping[str, Any], *, required: bool) -> FieldSpec:
+    shape, nullable = _shape(prop)
+    kind = _TYPES.get(str(shape.get("type")), "any")
+    items = shape.get("items")
+    hints = shape.get("uniforms") or shape.get("extraProperties") or {}
+    sizes = (("min_length", shape.get("minItems")), ("max_length", shape.get("maxItems")))
+    return FieldSpec(
+        name=name,
+        title=str(shape.get("title") or name.replace("_", " ").title()),
+        description=shape.get("description"),
+        kind=kind,
+        format=shape.get("format"),
+        required=required,
+        default=shape.get("default"),
+        nullable=nullable,
+        options=_options(shape),
+        item=_spec("", items, required=False) if kind == "list" and isinstance(items, Mapping) else None,
+        constraints={key: value for key, value in sizes if value is not None},
+        fields=fields_in(shape) if kind == "object" and shape.get("properties") else None,
+        read_only=bool(shape.get("readOnly")),
+        data=hints.get("data") if shape.get("format") == SUMMARY else None,
+    )
+
+
+def _shape(prop: Mapping[str, Any]) -> tuple[dict[str, Any], bool]:
+    """The field's shape with a nullable field's ``anyOf`` unwrapped, and whether it allows null.
+
+    Core inlines every reference, so a field's shape is at top level except for the ``anyOf`` of a nullable
+    field, whose null variant is a flag rather than a shape. The field's own keys win over what they wrap.
+    """
+    shape = dict(prop)
+    variants = shape.pop("anyOf", None) or []
+    shapes = [variant for variant in variants if variant.get("type") != "null"]
+    if len(shapes) == 1:
+        shape = {**shapes[0], **shape}
+    elif shapes:
+        shape["anyOf"] = shapes  # several real shapes: the field is read as free, and core judges the value
+    return shape, len(shapes) < len(variants)
+
+
+def _options(shape: Mapping[str, Any]) -> list[Option] | None:
+    """The values a field is limited to: consent's one value, its ``const``, or its ``enum`` with the labels.
+
+    An accept field lists ``ACCEPTED`` and ``INCOMPLETE`` for the checkbox that renders it; only ``ACCEPTED``
+    passes core's validation, so that is its one option.
+    """
+    if shape.get("format") == ACCEPT:
+        return [Option(value=ACCEPTED, label=ACCEPTED)]
+    if "const" in shape:
+        return [Option(value=shape["const"], label=str(shape["const"]))]
+    if not isinstance(shape.get("enum"), list):
+        return None
+    labels = shape.get("options") or {}
+    return [Option(value=value, label=str(labels.get(str(value), value))) for value in shape["enum"]]
+
+
+# --- what a field says ----------------------------------------------------------------------------------------
+
+
+def askable(field: FieldSpec) -> bool:
+    """A field a caller may send a value for: not one that is only shown."""
+    return not field.read_only
+
+
+def options_of(field: FieldSpec) -> list[Option] | None:
     """The options a field (or, for a list, its item) is limited to; None when the value is free."""
     if field.options is None and field.item is not None:
         return field.item.options
     return field.options
 
 
-def label_of(field: FormField, value: Any) -> Any:
+def label_of(field: FieldSpec, value: Any) -> Any:
     """How the form shows ``value`` (each item of a list), or None when it shows the value itself."""
     shown = {str(o.value): o.label for o in options_of(field) or [] if o.label != str(o.value)}
     if isinstance(value, list):
@@ -57,77 +176,39 @@ def label_of(field: FormField, value: Any) -> Any:
     return shown.get(str(value))
 
 
-# --- the page as a model -----------------------------------------------------------------------------------
+# --- the walked pages as one schema ---------------------------------------------------------------------------
 
 
-def page_model(fields: Sequence[FormField]) -> type[BaseModel]:
-    """The page as a model of the fields a caller may send; one page gives one model (cached)."""
-    return _model("Page", tuple(field.model_dump_json() for field in fields))
+def form_schema(pages: Sequence[WorkflowFormPage]) -> dict[str, Any]:
+    """The askable fields of the walked pages as one object schema (a later page wins a name).
+
+    What a reading of the form works from: the properties as core sent them, less the fields that are only
+    shown and pydantic-forms' widget hints. Nothing is required, since a reading may leave any field out.
+    """
+    properties = dict(chain.from_iterable(_askable_properties(page) for page in pages))
+    return {"type": "object", "properties": properties, "additionalProperties": False}
 
 
-def form_model(pages: Sequence[Sequence[FormField]]) -> type[BaseModel]:
-    """The walked pages as one model (a later page wins a name): what a reading of the form works from."""
-    named = {field.name: field for page in pages for field in page}
-    return page_model(list(named.values()))
+def _askable_properties(page: WorkflowFormPage) -> list[tuple[str, dict[str, Any]]]:
+    properties = (page.schema_ or {}).get("properties") or {}
+    return [
+        (field.name, {key: value for key, value in properties[field.name].items() if key not in HINTS})
+        for field in fields_of(page)
+        if askable(field)
+    ]
 
 
-@lru_cache(maxsize=256)
-def _model(name: str, fields_json: tuple[str, ...]) -> type[BaseModel]:
-    fields = [FormField.model_validate_json(field) for field in fields_json]
-    attributes: dict[str, Any] = {field.name: _attribute(field) for field in fields if askable(field)}
-    return create_model(name, __config__=ConfigDict(protected_namespaces=()), **attributes)
-
-
-def _attribute(field: FormField) -> tuple[Any, FieldInfo]:
-    annotation = _annotation(field)
-    if field.nullable or (not field.required and field.default is None):
-        annotation = annotation | None
-    labels = {str(o.value): o.label for o in options_of(field) or [] if o.label != str(o.value)}
-    extra: dict[str, Any] = {key: value for key, value in (("format", field.format), ("labels", labels)) if value}
-    info = Field(
-        ... if field.required else field.default,
-        title=field.title,
-        description=field.description,
-        json_schema_extra=extra or None,
-    )
-    return annotation, info
-
-
-def _annotation(field: FormField) -> Any:
-    """The type of the value a field takes: its allowed values, a scalar, a list of its item, or a nested model."""
-    if field.options:  # a choice with no option today keeps its base type: core rejects whatever is sent
-        return Literal.__getitem__(tuple(option.value for option in field.options))
-    if field.kind == "list":
-        item = field.item
-        inner = (_annotation(item) | None if item.nullable else _annotation(item)) if item else Any
-        return list[inner]  # type: ignore[valid-type]
-    if field.kind == "object" and field.fields:
-        return _model(field.title.replace(" ", "") or "Item", tuple(f.model_dump_json() for f in field.fields))
-    return _KINDS.get(field.kind, Any)
-
-
-# --- what a built model says about its fields (the interpreter reads its own output type) ----------------
-
-
-def value_type(info: FieldInfo) -> Any:
-    """The field's type without the ``None`` an optional field allows."""
-    annotation = info.annotation
-    if get_origin(annotation) in (Union, UnionType):
-        variants = [a for a in get_args(annotation) if a is not NoneType]
-        if len(variants) == 1:
-            return variants[0]
-    return annotation
-
-
-def is_list(info: FieldInfo) -> bool:
-    return get_origin(value_type(info)) is list
-
-
-def choices(info: FieldInfo) -> tuple[Any, ...] | None:
-    """The values an option field (or a list of them) allows, in order; None when the field is free."""
-    inner = value_type(info)
-    item = get_args(inner)[0] if get_origin(inner) is list else inner
-    return get_args(item) if get_origin(item) is Literal else None
-
-
-__all__ = ["askable", "choices", "form_model", "is_list", "label_of", "options_of", "page_model", "value_type"]
+__all__ = [
+    "ACCEPT",
+    "ACCEPTED",
+    "HINTS",
+    "SUMMARY",
+    "FieldSpec",
+    "Option",
+    "askable",
+    "fields_in",
+    "fields_of",
+    "form_schema",
+    "label_of",
+    "options_of",
+]

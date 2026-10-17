@@ -6,18 +6,18 @@ import os
 
 os.environ.setdefault("DATABASE_URI", "postgresql://test:test@localhost:5432/test")
 
-import pytest
-from pydantic import ValidationError
+from orchestrator.core.schemas.mcp_tools import WorkflowFormPage
 from pydantic_ai.messages import ModelResponse, ToolCallPart
 from pydantic_ai.models.function import AgentInfo, FunctionModel
 
 from orchestrator_agent.form_fill import FormFillSkill, ModelInterpreter
-from orchestrator_agent.form_fill.interpret import fields_model, reading_type
-from orchestrator_agent.form_fill.model import page_model
+from orchestrator_agent.form_fill.interpret import fields_schema, reading_schema
+from orchestrator_agent.form_fill.model import form_schema
 from orchestrator_agent.state import SearchState
 
 from .test_form_fill import (
     LIGHTPATH_FIELDS,
+    LIGHTPATH_PAGE,
     SPEED,
     FakeCore,
     choice_list,
@@ -29,7 +29,14 @@ from .test_form_fill import (
     turn,
 )
 
-LIGHTPATH = page_model(LIGHTPATH_FIELDS)  # customer_name, speed (labelled options), speed_policer
+
+def form_of(*pages) -> dict:
+    """The walked pages' askable fields as one schema, as the skill hands it to the interpreter."""
+    walked = [WorkflowFormPage.model_validate(page(i, title, fields)) for i, (title, fields) in enumerate(pages)]
+    return form_schema(walked)
+
+
+LIGHTPATH = form_of(LIGHTPATH_PAGE)  # customer_name, speed (labelled options), speed_policer
 
 
 class PickyCore(FakeCore):
@@ -53,7 +60,7 @@ class FakeInterpreter:
         self.values, self.calls = values, []
 
     async def answers(self, form, words):
-        self.calls.append(([name for name in form.model_fields if name in words], dict(words)))
+        self.calls.append(([name for name in form["properties"] if name in words], dict(words)))
         return {name: value for name, value in self.values.items() if name in words}
 
 
@@ -93,43 +100,49 @@ class TestSkillReinterpretsRejectedAnswers:
         assert interpreter.calls[-1][1] == {"speed": "ten gigabit"}
 
 
-class TestReadingType:
-    """The interpreter's output type is the page model with every field optional."""
+class TestReadingSchema:
+    """The interpreter's output schema is the page schema with every field optional."""
 
-    def test_one_attribute_per_field_typed_as_its_value(self):
-        reading = reading_type(fields_model(LIGHTPATH, ["speed", "speed_policer"]))
-        assert list(reading.model_fields) == ["speed", "speed_policer"]
-        parsed = reading(speed=["10000"], speed_policer="true")
-        assert parsed.speed == ["10000"] and parsed.speed_policer is True
-        assert reading().speed is None and reading().speed_policer is None
-        with pytest.raises(ValidationError):
-            reading(speed=["42"])  # a value outside the options
+    def test_one_property_per_asked_field_as_core_defined_it(self):
+        reading = reading_schema(fields_schema(LIGHTPATH, ["speed", "speed_policer"]))
+        assert list(reading["properties"]) == ["speed", "speed_policer"] and "required" not in reading
+        assert reading["properties"]["speed_policer"] == {"default": False, "title": "Speed Policer", "type": "boolean"}
+        assert "customer_name" not in reading["properties"]  # not asked: not read
 
     def test_a_choice_between_several_options_is_read_as_every_option_the_words_fit(self):
-        page = page_model(
-            [
-                field("speed", options=SPEED),
-                field("only", options={"x": "x"}),
-                choice_list("many", {"a": "a", "b": "b"}),
-                field("confirm", format="accept", options={"ACCEPTED": "ACCEPTED"}),
-            ]
+        form = form_of(
+            (
+                None,
+                [
+                    field("speed", options=SPEED),
+                    field("only", options={"x": "x"}),
+                    choice_list("many", {"a": "a", "b": "b"}),
+                    field("confirm", format="accept"),
+                ],
+            )
         )
-        properties = reading_type(page).model_json_schema()["properties"]
-        assert properties["speed"]["anyOf"][0] == {"items": {"enum": list(SPEED), "type": "string"}, "type": "array"}
-        assert properties["speed"]["labels"] == SPEED  # still shown with what people call the options
+        properties = reading_schema(form)["properties"]
+        speed = properties["speed"]
+        assert speed["type"] == "array" and speed["title"] == "Speed" and "enum" not in speed
+        assert speed["items"]["enum"] == list(SPEED) and speed["items"]["options"] == SPEED  # shown as people call them
         # One option, a list of options and consent are read as the value itself: there is nothing to tell apart.
-        assert properties["only"]["anyOf"][0] == {"const": "x", "type": "string"}
-        assert properties["many"]["anyOf"][0]["items"] == {"enum": ["a", "b"], "type": "string"}
-        assert properties["confirm"]["anyOf"][0] == {"const": "ACCEPTED", "type": "string"}
+        assert properties["only"]["enum"] == ["x"] and "items" not in properties["only"]
+        assert properties["many"]["type"] == "array" and properties["many"]["items"]["enum"] == ["a", "b"]
+        assert properties["confirm"]["format"] == "accept" and "items" not in properties["confirm"]
 
-    def test_types_follow_the_schema(self):
+    def test_the_schema_is_cores_own_less_what_is_only_shown_and_the_widget_hints(self):
         port = field("", "object", required=False, fields=[field("subscription_id")])
-        page = page_model([field("n", "integer"), field("p", "list", item=port)])
-        reading = reading_type(page)
-        assert reading(n="12").n == 12
-        ports = reading(p=[{"subscription_id": "p-1"}])
-        assert ports.model_dump(exclude_unset=True) == {"p": [{"subscription_id": "p-1"}]}
-        assert "decision" not in reading.model_fields  # a decision is never something a model reads
+        shown = field("note", required=False, format="label", read_only=True)
+        form = form_of((None, [field("n", "integer"), field("p", "list", item=port), shown]))
+        reading = reading_schema(form)
+        assert list(reading["properties"]) == ["n", "p"]  # a field that is only shown is no reading's
+        ports = reading["properties"]["p"]["items"]["properties"]
+        assert ports == {"subscription_id": {"title": "Subscription Id", "type": "string"}}
+        assert "decision" not in reading["properties"]  # a decision is never something a model reads
+        hinted = {"type": "string", "enum": ["p-1"], "uniforms": {"productIds": ["p-1"]}, "title": "Product"}
+        schema = {"type": "object", "properties": {"product": hinted}, "required": ["product"]}
+        walked = [WorkflowFormPage(page=0, complete=False, status="next", schema=schema)]
+        assert form_schema(walked)["properties"]["product"] == {"type": "string", "enum": ["p-1"], "title": "Product"}
 
 
 def _scripted(values):
@@ -148,17 +161,20 @@ class TestModelInterpreter:
         answers = {"speed": "ten gig please", "speed_policer": "yes please"}
         assert await ModelInterpreter(model).answers(LIGHTPATH, answers) == {"speed": "10000", "speed_policer": True}
         # The prompt carries the fields' schema (with the labels behind the values) and the person's words.
-        assert '"labels":{"1000":"1 Gbit/s","10000":"10 Gbit/s","100000":"100 Gbit/s"}' in seen["prompt"]
+        assert '"options":{"1000":"1 Gbit/s","10000":"10 Gbit/s","100000":"100 Gbit/s"}' in seen["prompt"]
         assert "- speed: ten gig please" in seen["prompt"] and "- speed_policer: yes please" in seen["prompt"]
         assert "Speed Policer" in seen["prompt"] and "customer_name" not in seen["prompt"]  # only what was asked
 
     async def test_a_single_select_list_stays_a_list_and_nulls_are_left_out(self):
         model, _ = _scripted({"n": ["b"], "m": None})
-        page = page_model(
-            [
-                choice_list("n", {"a": "a", "b": "b"}, constraints={"max_length": 1}),
-                field("m", "integer", required=False, nullable=True),
-            ]
+        page = form_of(
+            (
+                None,
+                [
+                    choice_list("n", {"a": "a", "b": "b"}, constraints={"max_length": 1}),
+                    field("m", "integer", required=False, nullable=True),
+                ],
+            )
         )
         assert await ModelInterpreter(model).answers(page, {"n": "the second", "m": "no idea"}) == {"n": ["b"]}
 

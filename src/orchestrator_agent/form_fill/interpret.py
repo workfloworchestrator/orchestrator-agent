@@ -19,13 +19,15 @@ asks the ``Interpreter`` once, for all rejected fields of the page at once, and 
 human sees the result before anything starts, at the approval. Nothing else is ever read: no chat
 message, no decision.
 
-The seam is one protocol call — the form's model plus the person's words, in; the values, out — so any
+The seam is one protocol call — the fields' schema plus the person's words, in; the values, out — so any
 engine that answers a page of typed questions in one call can sit behind it. Here it is pydantic-ai with
-the page model's partial variant as the output type (``ModelInterpreter``); the Jev branch puts its typed
+the page schema itself as the output type (``ModelInterpreter``, through ``StructuredDict``): the page as
+core defined it, every field optional, no model rebuilt from it. What comes back is not validated here;
+it goes to core as a page, and core's validation is the only validation. The Jev branch puts its typed
 decision engine behind the same protocol.
 
-Words that fit more than one option of a field are not a value: the output type asks for every option the
-words fit, and the field is taken only when that is exactly one (``reading_type``).
+Words that fit more than one option of a field are not a value: the output schema asks for every option the
+words fit, and the field is taken only when that is exactly one (``reading_schema``).
 """
 
 from __future__ import annotations
@@ -36,18 +38,16 @@ from dataclasses import dataclass
 from typing import Any, Protocol
 
 import structlog
-from pydantic import BaseModel, ConfigDict, Field, create_model
-from pydantic.fields import FieldInfo
-from pydantic_ai import Agent
+from pydantic_ai import Agent, StructuredDict
 from pydantic_ai.models import Model
 
-from orchestrator_agent.form_fill.model import choices, is_list, value_type
+from orchestrator_agent.form_fill.model import FieldSpec, fields_in
 
 logger = structlog.get_logger(__name__)
 
 INSTRUCTIONS = (
     "Form fields expect values and a person answered in their own words. The fields are given as a JSON schema; "
-    "where a field carries labels, they map each allowed value to how it is shown to people. Translate what was "
+    "where a field carries options, they map each allowed value to how it is shown to people. Translate what was "
     "said into the values the fields expect, typed exactly as the schema says: a number written in words or with "
     "a unit is that number, a label or a description of an option is that option's value, details of items are "
     "the objects the schema describes. A field that takes one of several options is asked as a list: give every "
@@ -60,93 +60,92 @@ INSTRUCTIONS = (
 class Interpreter(Protocol):
     """The one reading a form needs from an engine: the person's words per rejected field -> the values they meant.
 
-    ``form`` is the pydantic model of the fields in play (``model.form_model``); a field the words
-    say nothing usable about is left out.
+    ``form`` is the schema of the fields in play (``model.form_schema``); a field the words say nothing
+    usable about is left out.
     """
 
-    async def answers(self, form: type[BaseModel], words: Mapping[str, str]) -> Mapping[str, Any]: ...
+    async def answers(self, form: Mapping[str, Any], words: Mapping[str, str]) -> Mapping[str, Any]: ...
 
 
-def fields_model(form: type[BaseModel], names: Iterable[str]) -> type[BaseModel]:
-    """The named fields of ``form`` as a model of their own (what one reading is about)."""
+def fields_schema(form: Mapping[str, Any], names: Iterable[str]) -> dict[str, Any]:
+    """The named fields of ``form`` as a schema of their own (what one reading is about)."""
     wanted = set(names)
-    picked: dict[str, Any] = {
-        name: (info.annotation, info) for name, info in form.model_fields.items() if name in wanted
-    }
-    return create_model("Fields", __config__=ConfigDict(protected_namespaces=()), **picked)
+    properties = {name: prop for name, prop in _properties(form).items() if name in wanted}
+    return {"type": "object", "properties": properties, "additionalProperties": False}
 
 
-def reading_type(form: type[BaseModel]) -> type[BaseModel]:
-    """The output model of one reading: every field of ``form`` made optional.
+def reading_schema(form: Mapping[str, Any]) -> dict[str, Any]:
+    """The output schema of one reading: every field of ``form`` optional.
 
     A field that takes one of several options is read as every option the words fit (``_one_of_several``): a
     model asked for the one value settles words that fit two by guessing, asked for all of them it names both,
     and ``_values`` then takes the field only when exactly one fits.
     """
-    attributes: dict[str, Any] = {
-        name: (
-            _optional(list[value_type(info)] if _one_of_several(info) else info.annotation),  # type: ignore[misc]
-            Field(
-                default=None, title=info.title, description=info.description, json_schema_extra=info.json_schema_extra
-            ),
-        )
-        for name, info in form.model_fields.items()
-    }
-    return create_model("Reading", __config__=ConfigDict(protected_namespaces=()), **attributes)
+    several = _several(form)
+    properties = {name: _every_option(prop) if name in several else prop for name, prop in _properties(form).items()}
+    return {"type": "object", "title": "Reading", "properties": properties, "additionalProperties": False}
 
 
-def _one_of_several(info: FieldInfo) -> bool:
-    """A field whose value is one of several options (not a list of them, not a single-option field)."""
-    return not is_list(info) and len(choices(info) or ()) > 1
+def _properties(form: Mapping[str, Any]) -> Mapping[str, Any]:
+    return form.get("properties") or {}
 
 
-def _optional(annotation: Any) -> Any:
-    return annotation | None
+def _several(form: Mapping[str, Any]) -> set[str]:
+    """The fields of ``form`` whose value is one of several options (not a list of them, not a single-option field)."""
+    return {field.name for field in fields_in(form) if _one_of_several(field)}
 
 
-def _schema(form: type[BaseModel]) -> str:
-    return json.dumps(form.model_json_schema(), separators=(",", ":"))
+def _one_of_several(field: FieldSpec) -> bool:
+    return field.kind != "list" and len(field.options or ()) > 1
+
+
+def _every_option(prop: Mapping[str, Any]) -> dict[str, Any]:
+    """The field as a list of its options, keeping what names it to a person."""
+    shown = {key: prop[key] for key in ("title", "description") if key in prop}
+    return {**shown, "type": "array", "items": {key: value for key, value in prop.items() if key not in shown}}
+
+
+def _schema(form: Mapping[str, Any]) -> str:
+    return json.dumps(form, separators=(",", ":"))
 
 
 @dataclass(frozen=True)
 class ModelInterpreter:
-    """pydantic-ai as the interpreter: one run per reading, with the page model's partial variant as the output type."""
+    """pydantic-ai as the interpreter: one run per reading, with the page schema's partial variant as the output type."""
 
     model: Model | str
 
-    async def answers(self, form: type[BaseModel], words: Mapping[str, str]) -> dict[str, Any]:
-        asked = fields_model(form, words)
-        if not asked.model_fields:
+    async def answers(self, form: Mapping[str, Any], words: Mapping[str, str]) -> dict[str, Any]:
+        asked = fields_schema(form, words)
+        if not asked["properties"]:
             return {}
-        agent: Agent[None, Any] = Agent(self.model, output_type=reading_type(asked), instructions=INSTRUCTIONS)
+        reading = StructuredDict(reading_schema(asked), name="Reading", description="The values the words meant.")
+        agent: Agent[None, Any] = Agent(self.model, output_type=reading, instructions=INSTRUCTIONS)
         prompt = "\n".join(
             [
                 f"Fields (JSON schema): {_schema(asked)}",
                 "Answers:",
-                *(f"- {name}: {words[name]}" for name in asked.model_fields),
+                *(f"- {name}: {words[name]}" for name in asked["properties"]),
             ]
         )
         values = _values((await agent.run(prompt)).output, asked)
-        logger.info("Form-fill answers interpreted", asked=list(asked.model_fields), values=values)
+        logger.info("Form-fill answers interpreted", asked=list(asked["properties"]), values=values)
         return values
 
 
-def _values(output: BaseModel, form: type[BaseModel]) -> dict[str, Any]:
-    """The fields the reading gave a value, as plain data (a nested model is its object); nulls are left out.
+def _values(output: Mapping[str, Any], form: Mapping[str, Any]) -> dict[str, Any]:
+    """The fields the reading gave a value, as plain data; nulls, and fields that were not asked, are left out.
 
     A field read as the options the words fit is a value only when exactly one fits: words that fit none, or
     do not tell several apart, leave it open and the person is asked again.
     """
-    values: dict[str, Any] = {}
-    for name, value in output.model_dump(mode="json", exclude_unset=True).items():
-        if value is None:
-            continue
-        if _one_of_several(form.model_fields[name]):
-            if len(value) != 1:
-                continue
-            (value,) = value
-        values[name] = value
-    return values
+    several = _several(form)
 
+    def value_of(name: str, value: Any) -> Any:
+        if name not in several:
+            return value
+        fits = value if isinstance(value, list) else [value]
+        return fits[0] if len(fits) == 1 else None
 
-__all__ = ["INSTRUCTIONS", "Interpreter", "ModelInterpreter", "fields_model", "reading_type"]
+    read = {name: value_of(name, value) for name, value in output.items() if name in _properties(form)}
+    return {name: value for name, value in read.items() if value is not None}

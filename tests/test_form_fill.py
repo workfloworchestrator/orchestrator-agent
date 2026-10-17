@@ -10,29 +10,93 @@ from typing import Literal
 os.environ.setdefault("DATABASE_URI", "postgresql://test:test@localhost:5432/test")
 
 import pytest
-from orchestrator.core.schemas.mcp_tools import FormField, FormFieldError, FormFieldOption, WorkflowFormPage
+from orchestrator.core.schemas.mcp_tools import WorkflowFormPage
 from pydantic_ai import ModelRetry
+from pydantic_forms.core import FormFieldError
 
-from orchestrator_agent.form_fill.model import askable, page_model
+from orchestrator_agent.form_fill.model import FieldSpec, askable, fields_in, fields_of, form_schema
 from orchestrator_agent.form_fill.skill import FormFillSkill, questions
 from orchestrator_agent.state import AskField, Decision, FormFillSession, FormInput, FormReply, Reply, SearchState
 
 PRODUCT = "a19904e6-fa9f-4dd3-90c1-08dbd6d0821e"
 
 
-# --- pages as core's form tool describes them -------------------------------------------------------------
+# --- pages as core's form tool describes them: one JSON Schema each, as pydantic-forms renders it ------------
+
+Prop = tuple[str, dict, bool]  # a property of a page schema: its name, its schema, whether the page requires it
 
 
-def field(name, kind="string", *, title=None, required=True, default=None, options=None, **extra) -> FormField:
-    """A field of a page; ``options`` as ``{value: label}``, the rest as core's ``FormField`` has it."""
-    listed = [FormFieldOption(value=v, label=label) for v, label in options.items()] if options is not None else None
-    title = title or name.title().replace("_", " ")
-    return FormField(name=name, title=title, kind=kind, required=required, default=default, options=listed, **extra)
+def field(
+    name,
+    type_="string",
+    *,
+    title=None,
+    required=True,
+    default=None,
+    options=None,
+    nullable=False,
+    format=None,
+    read_only=False,
+    item=None,
+    constraints=None,
+    fields=None,
+    data=None,
+) -> Prop:
+    """A field of a page as its schema property; ``options`` as ``{value: label}``, ``fields`` a nested object's."""
+    prop = _shape(type_, item, constraints or {}, fields or [])
+    if format == "accept":
+        prop["enum"] = ["ACCEPTED", "INCOMPLETE"]  # the checkbox's two states; only ACCEPTED passes
+    elif options is not None:
+        prop["enum"], prop["options"] = list(options), dict(options)
+    marks = (
+        ("format", format),
+        ("readOnly", read_only or None),
+        ("uniforms", {"data": data} if data is not None else None),
+    )
+    prop.update({key: value for key, value in marks if value})
+    if nullable:
+        prop = {"anyOf": [prop, {"type": "null"}]}
+    if shown := title or name.replace("_", " ").title():
+        prop["title"] = shown
+    if not required:
+        prop["default"] = default
+    return name, prop, required
 
 
-def choice_list(name, options, **extra) -> FormField:
-    """A multi-select of ``options`` (core puts the options on the list's item)."""
+def _shape(type_, item, constraints, fields) -> dict:
+    """The type of a property, with what a list (its item and size) or an object (its fields) carries."""
+    if type_ == "list":
+        sizes = {"minItems": constraints.get("min_length"), "maxItems": constraints.get("max_length")}
+        items = {"items": item[1]} if item is not None else {}
+        return {"type": "array", **items, **{key: value for key, value in sizes.items() if value is not None}}
+    if type_ == "object" and fields:
+        return {
+            "type": "object",
+            "properties": {n: s for n, s, _ in fields},
+            "required": [n for n, _, r in fields if r],
+        }
+    return {} if type_ == "any" else {"type": type_}
+
+
+def choice_list(name, options, **extra) -> Prop:
+    """A multi-select of ``options`` (the options are on the list's item)."""
     return field(name, "list", item=field("", required=False, options=options), **extra)
+
+
+def schema_of(title, fields) -> dict:
+    """A page's schema as core sends it: one object, every property inlined."""
+    return {
+        "type": "object",
+        "title": title or "unknown",
+        "additionalProperties": False,
+        "properties": {name: prop for name, prop, _ in fields},
+        "required": [name for name, _, required in fields if required],
+    }
+
+
+def specs(fields) -> list[FieldSpec]:
+    """The fields as the skill reads them off a page schema."""
+    return fields_in(schema_of(None, fields))
 
 
 def errors(problems: dict[str, str], type_="value_error") -> list[FormFieldError]:
@@ -44,7 +108,7 @@ def page(index: int, title, fields, verdict=()) -> dict:
     """A page as the tool returns it: the next one to fill, or with ``verdict`` the page core rejected."""
     status: Literal["next", "rejected"] = "rejected" if verdict else "next"
     result = WorkflowFormPage(
-        page=index, complete=False, status=status, title=title, fields=fields, errors=list(verdict)
+        page=index, complete=False, status=status, title=title, schema=schema_of(title, fields), errors=list(verdict)
     )
     return result.model_dump(mode="json", by_alias=True)
 
@@ -63,7 +127,7 @@ SPEED = {"1000": "1 Gbit/s", "10000": "10 Gbit/s", "100000": "100 Gbit/s"}
 REDUNDANCY = {"protected": "Protected", "unprotected": "Unprotected"}
 PRODUCT_PAGE = (None, [field("product", options={PRODUCT: "Demo Lightpath"}, format="productId")])
 LIGHTPATH_FIELDS = [
-    field("header", required=False, default="Details", format="label", display_only=True),
+    field("header", required=False, default="Details", format="label", read_only=True),
     field("locked", required=False, default="fixed", read_only=True),
     field("customer_name"),
     field("speed", options=SPEED),
@@ -75,7 +139,7 @@ REDUNDANCY_PAGE = (
     [field("redundancy", options=REDUNDANCY), field("ticket_id", required=False, default="")],
 )
 TICKET_PAGE = ("Ticket", [field("ticket_id", required=False, default="")])
-ACCEPT = field("confirm", format="accept", options={"ACCEPTED": "ACCEPTED"})
+ACCEPT = field("confirm", format="accept")
 ACCEPT_PAGE = ("Dry run", [ACCEPT])
 # The last page of a form that ends in core's summary form (``base_summary``): tables to show, nothing to fill.
 SUMMARY_TABLE = {
@@ -86,8 +150,8 @@ SUMMARY_TABLE = {
 SUMMARY_PAGE = (
     "Demo Lightpath Summary",
     [
-        field("divider_1", required=False, nullable=True, format="divider", display_only=True),
-        field("product_summary", "any", required=False, format="summary", display_only=True, data=SUMMARY_TABLE),
+        field("divider_1", required=False, nullable=True, format="divider", read_only=True),
+        field("product_summary", "object", required=False, format="summary", read_only=True, data=SUMMARY_TABLE),
     ],
 )
 
@@ -145,7 +209,9 @@ class FakeCore:
     @staticmethod
     def missing(fields, submitted: dict) -> list[FormFieldError]:
         """Core's verdict on a submitted page that lacks a required field."""
-        lacking = {f.name: "Field required" for f in fields if askable(f) and f.required and f.name not in submitted}
+        lacking = {
+            f.name: "Field required" for f in specs(fields) if askable(f) and f.required and f.name not in submitted
+        }
         return errors(lacking, "missing")
 
     def walk(self, pages: list[tuple], inputs: list[dict]) -> dict:
@@ -267,7 +333,7 @@ FIELDS = [
     field("vlan", "integer", required=False, nullable=True),
     choice_list("nodes", {"a": "Node A", "b": "Node B"}, required=False),
     ACCEPT,
-    field("header", required=False, format="label", display_only=True),
+    field("header", required=False, format="label", read_only=True),
 ]
 
 
@@ -291,16 +357,16 @@ class TestQuestions:
         ]
         # One question per field: its title and whether it is required; a missing value needs no message.
         verdicts = errors({"service_ports": "Field required"}, "missing") + errors({"note": "Too long"})
-        assert [q.question for q in questions(fields, {}, verdicts)] == [
+        assert [q.question for q in questions(specs(fields), {}, verdicts)] == [
             "Service Ports (`service_ports`, required)",
             "Note (`note`, optional — leave empty to keep the default) — Too long",
             "Subscription Id (`subscription_id`, required)",
         ]
-        ports = questions(fields, {}, [])[0]
+        ports = questions(specs(fields), {}, [])[0]
         assert ports.multiple and ports.choices == ()  # a list of objects is typed, and interpreted
 
     def test_options_are_chips_shown_by_label_and_a_boolean_is_two_chips(self):
-        speed, policer, name, _vlan, nodes, confirm = questions(FIELDS, {}, [])  # the label is no question
+        speed, policer, name, _vlan, nodes, confirm = questions(specs(FIELDS), {}, [])  # the label is no question
         assert speed.choices == ("1 Gbit/s", "10 Gbit/s", "100 Gbit/s") and speed.values == ("1000", "10000", "100000")
         assert policer.choices == ("True", "False") and policer.values == (True, False)  # the value is a boolean
         assert name.choices == () and not name.multiple  # free: a person types
@@ -310,35 +376,43 @@ class TestQuestions:
     def test_options_that_share_a_label_are_told_apart_by_their_value(self):
         # Labels are descriptions and descriptions coincide. A chip's text is all a transport gets back from
         # a pick, so each option must read differently to map back to its id: core takes ids, never labels.
-        (nodes,) = questions([choice_list("nodes", {"id-1": "Node X", "id-2": "Node X", "id-3": "Node Y"})], {}, [])
+        (nodes,) = questions(
+            specs([choice_list("nodes", {"id-1": "Node X", "id-2": "Node X", "id-3": "Node Y"})]), {}, []
+        )
         assert nodes.choices == ("Node X (id-1)", "Node X (id-2)", "Node Y")
         assert nodes.values == ("id-1", "id-2", "id-3")
 
     def test_only_what_is_rejected_or_unanswered_is_asked(self):
         verdicts = errors({"speed": "Input should be '1000', '10000' or '100000'"})
-        asked = questions(LIGHTPATH_FIELDS, {"customer_name": "UT"}, verdicts)
+        asked = questions(specs(LIGHTPATH_FIELDS), {"customer_name": "UT"}, verdicts)
         assert [q.name for q in asked] == ["speed", "speed_policer"]  # the name was accepted: not asked again
         assert asked[0].question.endswith("— Input should be '1000', '10000' or '100000'")
 
     def test_a_rejection_core_pins_on_no_field_asks_the_page_again_with_what_core_said(self):
         verdicts = [FormFieldError(loc=["__root__"], msg="ports must differ", type="value_error")]
-        asked = questions(LIGHTPATH_FIELDS, {"customer_name": "UT", "speed": "1000"}, verdicts)
+        asked = questions(specs(LIGHTPATH_FIELDS), {"customer_name": "UT", "speed": "1000"}, verdicts)
         assert [q.name for q in asked] == ["customer_name", "speed", "speed_policer"]
         assert asked[0].question.endswith("— ports must differ") and "—" not in asked[1].question
         # A refusal that is no form verdict at all is asked the same way, with the refusal as it came.
-        asked = questions(LIGHTPATH_FIELDS, {"customer_name": "UT", "speed": "1000"}, [], "HTTP error 502: Bad Gateway")
+        asked = questions(
+            specs(LIGHTPATH_FIELDS), {"customer_name": "UT", "speed": "1000"}, [], "HTTP error 502: Bad Gateway"
+        )
         assert [q.name for q in asked] == ["customer_name", "speed", "speed_policer"]
         assert asked[0].question.endswith("— HTTP error 502: Bad Gateway")
 
 
 class TestRecordedCorePage:
-    """Pages recorded from core's form tool (``create_sn8_service_port`` on a production clone): the contract, live."""
+    """Pages recorded from core's form tool (``create_sn8_service_port`` on a production clone).
+
+    Recorded as core's earlier field spec and converted to the page schema core sends now; a fresh recording
+    from a core on the schema contract should replace the fixture.
+    """
 
     PAGES = json.loads((Path(__file__).parent / "core_pages.json").read_text())
 
     def test_a_recorded_page_is_asked_as_core_describes_it(self):
         page = WorkflowFormPage.model_validate(self.PAGES["page_2"])
-        asked = questions(page.fields, {}, [])
+        asked = questions(fields_of(page), {}, [])
         assert [q.name for q in asked] == [
             "port",
             "port_mode",
@@ -359,12 +433,12 @@ class TestRecordedCorePage:
         assert not state.required and lldp.values == (True, False)
         contacts = asked[6]
         assert contacts.multiple and contacts.choices == ()  # a list of objects: typed, then interpreted
-        assert list(page_model(page.fields).model_fields) == [q.name for q in asked]
+        assert list(form_schema([page])["properties"]) == [q.name for q in asked]
 
     def test_cores_verdict_on_a_recorded_page_is_asked_in_its_words(self):
         page = WorkflowFormPage.model_validate(self.PAGES["page_2_rejected"])
         assert page.status == "rejected" and page.page == 2
-        asked = questions(page.fields, {"port_mode": "sideways"}, page.errors)
+        asked = questions(fields_of(page), {"port_mode": "sideways"}, page.errors)
         assert [q.name for q in asked][:2] == ["port", "port_mode"]
         assert "—" not in asked[0].question  # missing: the question already says it is required
         assert asked[1].question.endswith("— Input should be 'tagged', 'untagged' or 'link_member'")
@@ -386,7 +460,7 @@ class TestSeePage:
                 "ticket_id": "T-1",
             },
         )
-        page = FormFillSkill._see_page(session, [f for f in FIELDS if askable(f)], [])
+        page = FormFillSkill._see_page(session, [f for f in specs(FIELDS) if askable(f)], [])
         assert page == {
             "speed": "10 Gbit/s",
             "vlan": "",

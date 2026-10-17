@@ -254,22 +254,24 @@ the form. Corrections after the fact are not offered: reject, and start the form
 Values are never judged by the agent: they go to core as given and core's form validation is the only
 validation. What a person *types* for a field (a number in words, an option described, a structured
 field such as a contact) is words, not a value: core rejects it, and it is then interpreted once, a page
-at a time, into the fields' values — one run of the agent's model whose output type is the page model
-with every field optional (`form_fill/interpret.py`) — and core decides again. Words that fit more than
+at a time, into the fields' values — one run of the agent's model whose output schema is the page's own
+schema with every field optional (`form_fill/interpret.py`) — and core decides again. Words that fit more than
 one option of a field are not a value: the model is asked for every option the words fit, and the field
 is filled only when that is exactly one — otherwise the person is asked again. The person sees the result
 before anything starts, at the approval. The interpreter is one protocol attribute of the skill, so
 another engine drops in behind the same protocol.
 
 **A page as core describes it.** Core's form tool (`get_workflow_form`, orchestrator-core ≥ 5.5) describes
-each page as data — one `FormField` per field: its kind, whether it is required, its default, the options
-with their labels, the limits it is validated against, nested fields, and whether it is only shown — and,
-asked for a verdict (`verdict="result"`), a rejected page as a result with core's errors. Every stop reads
-that data as it is: the questions and chips a person gets, the labels at the approval, the defaults that
-apply. The one pydantic model left is the interpreter's output type, built from the fields
-(`form_fill/model.py`). Core's tool results are validated with core's own response models and its tool
-arguments are built from core's request models (the agent depends on orchestrator-core), so nothing here
-reads a browser form schema or a tool error's text.
+each page as one JSON Schema (`schema`): every reference inlined, so a choice or a nested model is read in
+place; `readOnly` on a field that is only shown; a choice's values in `enum` with their labels in `options`;
+the limits a list is validated against; consent as `format: "accept"`. Asked for a verdict
+(`verdict="result"`), a rejected page comes back as a result with core's errors. `form_fill/model.py` reads
+the schema into one `FieldSpec` per field, and every stop works from those: the questions and chips a
+person gets, the labels at the approval, the defaults that apply. The interpreter's output type is the page
+schema itself (pydantic-ai's `StructuredDict`), every field optional: no model is rebuilt from it, and
+core's validation is the only validation of what it reads. Core's tool results are validated with core's
+own response models and its tool arguments are built from core's request models (the agent depends on
+orchestrator-core), so nothing here reads a tool error's text.
 
 In the agent the skill runs in (A2A) the model never sees core's write tools (`WriteToolGate` hides
 `create_workflow` / `resume_workflow_process` / `abort_workflow_process`), so writes only ever go through
