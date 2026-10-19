@@ -294,6 +294,26 @@ def _fits(field: FieldSpec, count: int) -> bool:
     return (low is None or count >= low) and (high is None or count <= high)
 
 
+def _dead_end(field: FieldSpec) -> str:
+    """Why no answer can satisfy the field, if so: nothing to choose from, or a size no list has; empty otherwise.
+
+    Core's own option lists only: a widget's empty list says nothing about what core takes for the field.
+    """
+    options = options_of(field) if field.widget is None else None
+    low, high = field.constraints.get("min_length"), field.constraints.get("max_length")
+    needs_one = field.required if field.kind != "list" else (low or 0) >= 1
+    if options == [] and needs_one:
+        return f"{field.title} has no options to choose from"
+    if field.kind == "list" and low is not None and high is not None and low > high:
+        return f"{field.title} needs at least {low} items but takes at most {high}"
+    return ""
+
+
+def unanswerable(fields: Sequence[FieldSpec]) -> str:
+    """Why a page can never be answered, if so: known from its schema alone, so said instead of asked."""
+    return next(filter(None, map(_dead_end, fields)), "")
+
+
 def _count_error(field: FieldSpec, count: int) -> FormFieldError:
     """The verdict on a list of ``count`` items, in the words of its hint and pydantic's error type."""
     high = field.constraints.get("max_length")
@@ -531,10 +551,8 @@ class FormFillSkill:
             session.pages.append(page)
             fields = [field for field in fields_of(page) if askable(field)]
             values = self._see_page(session, fields, pages)
-            if wrong := miscounted(
-                fields, values
-            ):  # the wrong number of items: known here, asked again, never submitted
-                return self._page_stop(session, page, [*pages, values], wrong)
+            if decided := self._decided_here(session, page, pages, fields, values):
+                return decided
             if unresolved:  # words that are no option: the page is asked again (with them), never submitted with them
                 asked = {name: value for name, value in values.items() if name not in unresolved}
                 return offered(self._page_stop(session, page, [*pages, asked]), unresolved)
@@ -548,6 +566,26 @@ class FormFillSkill:
             pages.append(values)
         session.status = "done"
         return self._reply(session, "failed", reason=f"the form did not complete after {_MAX_PAGES} pages")
+
+    def _decided_here(
+        self,
+        session: FormFillSession,
+        page: WorkflowFormPage,
+        pages: list[dict[str, Any]],
+        fields: Sequence[FieldSpec],
+        values: dict[str, Any],
+    ) -> Reply | None:
+        """What the page's schema alone settles, said without submitting anything.
+
+        A page no answer can satisfy closes the form with the reason; a list answered with the wrong number of
+        items is asked again with the count. None where core has to judge.
+        """
+        if reason := unanswerable(fields):
+            session.status = "done"
+            return self._reply(session, "failed", reason=reason)
+        if wrong := miscounted(fields, values):
+            return self._page_stop(session, page, [*pages, values], wrong)
+        return None
 
     async def _enriched(
         self, session: FormFillSession, call_tool: CallTool, pages: list[dict[str, Any]], schema: dict[str, Any]

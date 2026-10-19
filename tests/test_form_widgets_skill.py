@@ -22,7 +22,18 @@ from orchestrator_agent.form_fill.skill import NOTHING_FIT, SEVERAL_FIT, TOO_MAN
 from orchestrator_agent.form_fill.widgets import CoreGraphQL, FieldWidget, Option, Widget, WidgetContext
 from orchestrator_agent.state import AskField, FormFillSession, Reply, SearchState
 
-from .test_form_fill import FakeCore, choice_list, complete, errors, missing_in, open_form, raw_page, schema_of, turn
+from .test_form_fill import (
+    FakeCore,
+    choice_list,
+    complete,
+    errors,
+    field,
+    missing_in,
+    open_form,
+    raw_page,
+    schema_of,
+    turn,
+)
 from .test_form_widgets import FormatWidget
 
 CUSTOMER: dict[str, Any] = {"format": "customerId", "title": "Customer", "type": "string"}
@@ -215,6 +226,38 @@ class PicksCore(WidgetCore):
             self.submitted.extend(inputs)
             return raw_page(0, LINK_MEMBERS, errors({"link_members": OTHER_NODE}))
         return await super().__call__(name, args)
+
+
+@pytest.mark.parametrize(
+    ("prop", "reason"),
+    [
+        pytest.param(
+            choice_list("nodes", {}, constraints={"min_length": 1, "max_length": 0}),
+            "Nodes has no options to choose from",
+            id="a-list-of-nothing-that-needs-one",
+        ),
+        pytest.param(
+            field("site", options={}), "Site has no options to choose from", id="a-required-choice-of-nothing"
+        ),
+        pytest.param(
+            choice_list("nodes", {"a": "A", "b": "B"}, constraints={"min_length": 2, "max_length": 1}),
+            "Nodes needs at least 2 items but takes at most 1",
+            id="limits-no-list-meets",
+        ),
+    ],
+)
+async def test_a_page_no_answer_can_satisfy_closes_the_form_with_the_reason(prop, reason):
+    core = WidgetCore(pages=(schema_of("Choose", [prop]),))
+    state = SearchState()
+    reply = await open_form(make(interpret=Refuses()), core, state, KEY)
+    assert reply.status == "failed" and reply.reason == reason
+    assert core.submitted == [] and state.form_fill is None
+
+
+async def test_an_optional_list_of_nothing_is_still_asked():
+    core = WidgetCore(pages=(schema_of("Choose", [choice_list("nodes", {}, required=False)]),))
+    reply = await open_form(make(), core, SearchState(), KEY)
+    assert reply.status == "gathering" and reply.asked == ["nodes"]
 
 
 async def test_the_wrong_number_of_picks_is_bounced_without_core_or_the_model():
