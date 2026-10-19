@@ -198,28 +198,38 @@ LINK_MEMBERS = schema_of(
         )
     ],
 )
-TOO_MANY = "Value should have at most 2 items after validation, not 3"
+OTHER_NODE = "You must choose a port on a different node"
 
 
 class PicksCore(WidgetCore):
-    """Core with a list of its own options that takes exactly two: three picked is its verdict, as pydantic words it."""
+    """Core with a list of its own options that takes exactly two; its validator rejects the pair A and B."""
 
     def __init__(self) -> None:
         super().__init__(pages=(LINK_MEMBERS,))
 
     async def __call__(self, name: str, args: dict[str, Any]) -> Any:
         inputs = args.get("page_inputs") or []
-        if name == "get_workflow_form" and inputs and len(inputs[0].get("link_members") or []) > 2:
+        picks = inputs[0].get("link_members") if name == "get_workflow_form" and inputs else None
+        assert picks is None or len(picks) == 2, "a list of the wrong size must never reach core"
+        if picks == ["a", "b"]:
             self.submitted.extend(inputs)
-            return raw_page(0, LINK_MEMBERS, errors({"link_members": TOO_MANY}, "too_long"))
+            return raw_page(0, LINK_MEMBERS, errors({"link_members": OTHER_NODE}))
         return await super().__call__(name, args)
+
+
+async def test_the_wrong_number_of_picks_is_bounced_without_core_or_the_model():
+    skill = make(interpret=Refuses(), choose=Refuses())
+    reply = await open_form(skill, PicksCore(), SearchState(), KEY, {"link_members": ["a", "b", "c"]})
+    question = reply.question("link_members")
+    assert question.problem == "Pick 2, not 3." and question.hint == "Pick 2."
+    assert question.multiple and question.choices == ("Port A", "Port B", "Port C")
 
 
 async def test_core_rejecting_picked_options_shows_its_verdict_and_keeps_the_picks():
     skill = make(interpret=Refuses())
-    reply = await open_form(skill, PicksCore(), SearchState(), KEY, {"link_members": ["a", "b", "c"]})
+    reply = await open_form(skill, PicksCore(), SearchState(), KEY, {"link_members": ["a", "b"]})
     question = reply.question("link_members")
-    assert question.problem == TOO_MANY and question.multiple and question.choices == ("Port A", "Port B", "Port C")
+    assert question.problem == OTHER_NODE and question.choices == ("Port A", "Port B", "Port C")
 
 
 def test_a_session_persisted_before_widgets_still_loads():

@@ -426,6 +426,23 @@ class TestQuestions:
         (asked,) = questions(fields_in(schema), {}, [])
         assert (asked.title, asked.question, asked.hint) == expected
 
+    @pytest.mark.parametrize(
+        ("constraints", "hint"),
+        [
+            pytest.param({"min_length": 2, "max_length": 2}, "Pick 2.", id="exactly"),
+            pytest.param({"min_length": 1, "max_length": 6}, "Pick 1 to 6.", id="range"),
+            pytest.param({"min_length": 1}, "Pick at least 1.", id="at-least"),
+            pytest.param({"max_length": 6}, "Pick at most 6.", id="at-most"),
+            pytest.param({"max_length": 1}, "", id="a-single-pick-says-nothing"),
+            pytest.param({}, "", id="no-limit"),
+        ],
+    )
+    def test_a_list_says_how_many_items_it_takes(self, constraints, hint):
+        (asked,) = questions(
+            specs([choice_list("nodes", {"a": "A", "b": "B", "c": "C"}, constraints=constraints)]), {}, []
+        )
+        assert asked.hint == hint
+
     def test_options_that_share_a_label_are_told_apart_by_their_value(self):
         # Labels are descriptions and descriptions coincide. A chip's text is all a transport gets back from
         # a pick, so each option must read differently to map back to its id: core takes ids, never labels.

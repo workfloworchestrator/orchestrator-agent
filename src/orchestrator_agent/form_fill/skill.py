@@ -232,6 +232,8 @@ def question(field: FieldSpec, problem: str = "") -> AskField:
     # The field's help text, where nothing else is said — a step's question asks for the step, not the field.
     if not mark.get("total") and not mark.get("step") and field.description:
         hint = " ".join(filter(None, (hint, field.description)))
+    if count := _count_of(field):  # a list's size is known from the schema: said up front, not learnt from core
+        hint = " ".join(filter(None, (hint, f"{count}.")))
     if stepped := mark.get("stepped"):  # its options follow from steps chosen first: offer to choose again
         change = CHANGE_STEP.format(step=" / ".join(stepped))
         values, hint = (*values, change), " ".join(filter(None, (hint, f'Pick "{change}" to go back.')))
@@ -267,6 +269,47 @@ def unique_choices(options: Sequence[Any], shown: Mapping[str, str]) -> tuple[st
     texts = [shown.get(str(value), str(value)) for value in options]
     counts = Counter(texts)
     return tuple(f"{text} ({value})" if counts[text] > 1 else text for text, value in zip(texts, options, strict=True))
+
+
+def _count_of(field: FieldSpec) -> str:
+    """How many items a list takes ("Pick 2", "Give 1 to 6", "Pick at least 1"); empty for a single pick or no limit."""
+    low, high = field.constraints.get("min_length"), field.constraints.get("max_length")
+    if field.kind != "list" or single_pick(field) or low is None and high is None:
+        return ""
+    verb = "Pick" if options_of(field) is not None else "Give"
+    match (low, high):
+        case (_, None):
+            return f"{verb} at least {low}"
+        case (None, _):
+            return f"{verb} at most {high}"
+        case _ if low == high:
+            return f"{verb} {high}"
+        case _:
+            return f"{verb} {low} to {high}"
+
+
+def _fits(field: FieldSpec, count: int) -> bool:
+    """Whether ``count`` items satisfy the list's size limits."""
+    low, high = field.constraints.get("min_length"), field.constraints.get("max_length")
+    return (low is None or count >= low) and (high is None or count <= high)
+
+
+def _count_error(field: FieldSpec, count: int) -> FormFieldError:
+    """The verdict on a list of ``count`` items, in the words of its hint and pydantic's error type."""
+    high = field.constraints.get("max_length")
+    kind = "too_long" if high is not None and count > high else "too_short"
+    return FormFieldError(loc=[field.name], msg=f"{_count_of(field)}, not {count}.", type=kind)
+
+
+def miscounted(fields: Sequence[FieldSpec], values: Mapping[str, Any]) -> list[FormFieldError]:
+    """Each list answered with the wrong number of items, said as the hint said it: known here, so never submitted."""
+    return [
+        _count_error(field, len(values[field.name]))
+        for field in fields
+        if field.kind == "list"
+        and isinstance(values.get(field.name), list)
+        and not _fits(field, len(values[field.name]))
+    ]
 
 
 def single_pick(field: FieldSpec) -> bool:
@@ -488,6 +531,10 @@ class FormFillSkill:
             session.pages.append(page)
             fields = [field for field in fields_of(page) if askable(field)]
             values = self._see_page(session, fields, pages)
+            if wrong := miscounted(
+                fields, values
+            ):  # the wrong number of items: known here, asked again, never submitted
+                return self._page_stop(session, page, [*pages, values], wrong)
             if unresolved:  # words that are no option: the page is asked again (with them), never submitted with them
                 asked = {name: value for name, value in values.items() if name not in unresolved}
                 return offered(self._page_stop(session, page, [*pages, asked]), unresolved)
