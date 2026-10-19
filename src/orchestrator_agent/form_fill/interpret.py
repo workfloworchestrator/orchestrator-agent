@@ -33,12 +33,12 @@ words fit, and the field is taken only when that is exactly one (``reading_schem
 from __future__ import annotations
 
 import json
-from collections.abc import Iterable, Mapping
+from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass
 from typing import Any, Protocol
 
 import structlog
-from pydantic_ai import Agent, StructuredDict
+from pydantic_ai import Agent, ModelRetry, StructuredDict
 from pydantic_ai.models import Model
 
 from orchestrator_agent.form_fill.model import FieldSpec, fields_in
@@ -54,6 +54,20 @@ INSTRUCTIONS = (
     "allowed value the words fit, so more than one when they do not tell the options apart; choosing between "
     "them is not yours. Leave a field null when nothing usable was said for it. Never add what the words do not "
     "support."
+)
+
+
+class Chooser(Protocol):
+    """Which of a field's options a person's words fit: every value they fit, so the caller sees when several do."""
+
+    async def choose(self, title: str, options: Sequence[tuple[Any, str]], words: str) -> list[Any]: ...
+
+
+CHOOSE_INSTRUCTIONS = (
+    "A person answered a form field in their own words. The field's options are given as values with how they are "
+    "shown to people. Give every option value the words fit — a name, a short name, a description or a part of "
+    "one — so more than one when the words do not tell the options apart, and none when they fit none. Never give "
+    "a value that is not one of the options."
 )
 
 
@@ -132,6 +146,35 @@ class ModelInterpreter:
         logger.info("Form-fill answers interpreted", asked=list(asked["properties"]), values=values)
         return values
 
+    async def choose(self, title: str, options: Sequence[tuple[Any, str]], words: str) -> list[Any]:
+        """The option values the words fit, read over the candidates as one run; nothing outside them."""
+        values = [value for value, _ in options]
+        if not values:
+            return []
+        schema = {
+            "type": "object",
+            "title": "Choice",
+            "properties": {"values": {"type": "array", "items": {"enum": values}}},
+            "required": ["values"],
+            "additionalProperties": False,
+        }
+        choice = StructuredDict(schema, name="Choice", description="The option values the words fit.")
+        agent: Agent[None, Any] = Agent(self.model, output_type=choice, instructions=CHOOSE_INSTRUCTIONS)
+
+        @agent.output_validator
+        def among_the_options(output: dict[str, Any]) -> dict[str, Any]:  # an invented value: the model tries again
+            if outside := [value for value in output.get("values", ()) if value not in values]:
+                raise ModelRetry(f"{outside!r} are not among the option values; give only values that are listed")
+            return output
+
+        listed = "\n".join(f"- {json.dumps(value)}: {label}" for value, label in options)
+        prompt = f"Field: {title}\nOptions (value: shown as):\n{listed}\nAnswer: {words}"
+        output = (await agent.run(prompt)).output
+        picked = output.get("values") if isinstance(output, Mapping) else None
+        chosen = [value for value in (picked if isinstance(picked, list) else []) if value in values]
+        logger.info("Form-fill option chosen", field=title, words=words, chosen=chosen)
+        return chosen
+
 
 def _values(output: Mapping[str, Any], form: Mapping[str, Any]) -> dict[str, Any]:
     """The fields the reading gave a value, as plain data; nulls, and fields that were not asked, are left out.
@@ -149,3 +192,14 @@ def _values(output: Mapping[str, Any], form: Mapping[str, Any]) -> dict[str, Any
 
     read = {name: value_of(name, value) for name, value in output.items() if name in _properties(form)}
     return {name: value for name, value in read.items() if value is not None}
+
+
+__all__ = [
+    "CHOOSE_INSTRUCTIONS",
+    "INSTRUCTIONS",
+    "Chooser",
+    "Interpreter",
+    "ModelInterpreter",
+    "fields_schema",
+    "reading_schema",
+]

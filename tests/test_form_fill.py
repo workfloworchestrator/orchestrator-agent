@@ -15,7 +15,7 @@ from pydantic_ai import ModelRetry
 from pydantic_forms.core import FormFieldError
 
 from orchestrator_agent.form_fill.model import FieldSpec, askable, fields_in, fields_of, form_schema
-from orchestrator_agent.form_fill.skill import FormFillSkill, questions
+from orchestrator_agent.form_fill.skill import LONG_LIST_HINT, FormFillSkill, questions
 from orchestrator_agent.state import AskField, Decision, FormFillSession, FormInput, FormReply, Reply, SearchState
 
 PRODUCT = "a19904e6-fa9f-4dd3-90c1-08dbd6d0821e"
@@ -115,6 +115,26 @@ def page(index: int, title, fields, verdict=()) -> dict:
 
 def complete(index: int) -> dict:
     return WorkflowFormPage(page=index, complete=True, status="complete").model_dump(mode="json", by_alias=True)
+
+
+def raw_page(index: int, schema: dict, verdict=(), title=None) -> dict:
+    """A page as the tool returns it, from a page schema written out in full (the shape core sends)."""
+    status: Literal["next", "rejected"] = "rejected" if verdict else "next"
+    shown = title if title is not None else (schema.get("title") if schema.get("title") != "unknown" else None)
+    result = WorkflowFormPage(
+        page=index, complete=False, status=status, title=shown, schema=schema, errors=list(verdict)
+    )
+    return result.model_dump(mode="json", by_alias=True)
+
+
+def missing_in(schema: dict, submitted: dict) -> list[FormFieldError]:
+    """Core's verdict on a submitted page that lacks a required field, for a page schema written out in full."""
+    lacking = {
+        name: "Field required"
+        for name in schema.get("required", [])
+        if name not in submitted and not (schema["properties"].get(name) or {}).get("readOnly")
+    }
+    return errors(lacking, "missing")
 
 
 def rejection(problems: dict[str, str]) -> str:
@@ -357,10 +377,10 @@ class TestQuestions:
         ]
         # One question per field: its title and whether it is required; a missing value needs no message.
         verdicts = errors({"service_ports": "Field required"}, "missing") + errors({"note": "Too long"})
-        assert [q.question for q in questions(specs(fields), {}, verdicts)] == [
-            "Service Ports (`service_ports`, required)",
-            "Note (`note`, optional — leave empty to keep the default) — Too long",
-            "Subscription Id (`subscription_id`, required)",
+        assert [q.question for q in questions(specs(fields), {}, verdicts)] == [  # in page order, required ones marked
+            "Service Ports *",
+            "Subscription Id *",
+            "Note — Too long",
         ]
         ports = questions(specs(fields), {}, [])[0]
         assert ports.multiple and ports.choices == ()  # a list of objects is typed, and interpreted
@@ -372,6 +392,39 @@ class TestQuestions:
         assert name.choices == () and not name.multiple  # free: a person types
         assert nodes.multiple and nodes.choices == ("Node A", "Node B") and nodes.values == ("a", "b")
         assert confirm.choices == ("ACCEPTED",) and confirm.values == ("ACCEPTED",)
+
+    @pytest.mark.parametrize(
+        ("prop", "required", "expected"),
+        [
+            pytest.param(
+                {"type": "string", "title": "Port Mode", "description": "The mode of the new port"},
+                True,
+                ("Port Mode", "Port Mode *", "The mode of the new port"),
+                id="label-and-help-text",
+            ),
+            pytest.param(
+                {"type": "string", "title": "Notes", "default": ""},
+                False,
+                ("Notes", "Notes", ""),
+                id="optional-no-help",
+            ),
+            pytest.param(
+                {
+                    "type": "string",
+                    "title": "Customer",
+                    "description": "Pick one",
+                    "x-widget": {"id": "customerId", "total": 23},
+                },
+                True,
+                ("Customer", "Customer *", LONG_LIST_HINT.format(total=23)),
+                id="a-widgets-hint-comes-before-the-help-text",
+            ),
+        ],
+    )
+    def test_a_fields_label_and_help_text_from_the_schema_word_the_question(self, prop, required, expected):
+        schema = {"type": "object", "properties": {"field": prop}, "required": ["field"] if required else []}
+        (asked,) = questions(fields_in(schema), {}, [])
+        assert (asked.title, asked.question, asked.hint) == expected
 
     def test_options_that_share_a_label_are_told_apart_by_their_value(self):
         # Labels are descriptions and descriptions coincide. A chip's text is all a transport gets back from
@@ -485,14 +538,15 @@ class TestWalk:
         # 2. The human answers two of them; core still misses the name, and only that is asked again.
         reply = await turn(skill, core, state, self.VALUES)
         assert reply.asked == ["customer_name"] and reply.question("customer_name").choices == ()
-        assert reply.question("customer_name").question == "Customer Name (`customer_name`, required)"
+        assert reply.question("customer_name").question == "Customer Name *"  # the "*" says it is missing
         assert reply.values == {"product": PRODUCT, "speed": "10000", "speed_policer": True}
         # 3. Page 2 (10 Gbit/s -> redundancy): a choice shown by label, and the optional ticket offered along.
         reply = await turn(skill, core, state, {"customer_name": "Universiteit Twente"})
         assert reply.page == 2 and rejected(reply) == ["redundancy"] and reply.asked == ["redundancy", "ticket_id"]
         redundancy = reply.question("redundancy")
         assert redundancy.choices == ("Protected", "Unprotected") and redundancy.values == ("protected", "unprotected")
-        assert "optional" in reply.question("ticket_id").question
+        ticket = reply.question("ticket_id")
+        assert not ticket.required and not ticket.question.endswith("*")  # optional: asked without the mark
         # 4. The summary is the start to approve: the call as it will be made, and what its ids stand for.
         reply = await turn(skill, core, state, {"redundancy": "protected", "ticket_id": "JIRA-4821"})
         assert reply.status == "confirming" and reply.asked == [] and state.form_fill.status == "confirming"
@@ -934,8 +988,9 @@ class TestReviewRegressions:
 
         reply = await turn(skill, refusing, state, APPROVE)
         assert reply.status == "gathering" and reply.page == 1 and rejected(reply) == ["customer_name"]
-        # The page is asked again: what core rejected, and what was left to its default along with it.
-        assert reply.asked == ["customer_name", "speed_policer"] and reply.values["speed"] == "10000"
+        # The page is asked again: what core rejected. The policer was asked at the first stop and left at its
+        # default, so it is not asked again.
+        assert reply.asked == ["customer_name"] and reply.values["speed"] == "10000"
         assert reply.question("customer_name").question.endswith("— Customer no longer exists")
         assert state.form_fill.status == "gathering" and not core.created
         reply = await turn(skill, core, state, {"customer_name": "ACE"})  # answered: the start to approve again
