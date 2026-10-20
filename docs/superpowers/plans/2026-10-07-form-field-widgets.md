@@ -6,6 +6,12 @@
 > the page model is gone. A hook for a deployment's own widgets was planned and then left out: no deployment
 > widget exists yet to shape it, so it comes with the first one. With it went the registry module: the matching
 > rules live in `enrich.py`. The widget layer itself is otherwise as planned.
+>
+> **Status (2026-10-20):** the form-fill skill was then restructured as an explicit state machine (plan
+> `2026-10-19-form-fill-state-machine.md`): the walk with its enrichment and resolution lives in
+> `form_fill/walk.py` (`walk`, `see_page`, `page_stop`), the wording of questions in `questions.py`, the
+> session's writes in `session.py`. Where this document names `FormFillSkill._walk`, `_see_page` or
+> `skill.py` for those, read the new homes.
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 

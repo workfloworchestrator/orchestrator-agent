@@ -15,7 +15,9 @@ from pydantic_ai import ModelRetry
 from pydantic_forms.core import FormFieldError
 
 from orchestrator_agent.form_fill.model import FieldSpec, askable, fields_in, fields_of, form_schema
-from orchestrator_agent.form_fill.skill import LONG_LIST_HINT, FormFillSkill, questions
+from orchestrator_agent.form_fill.questions import LONG_LIST_HINT, questions
+from orchestrator_agent.form_fill.skill import FormFillSkill
+from orchestrator_agent.form_fill.walk import see_page
 from orchestrator_agent.state import AskField, Decision, FormFillSession, FormInput, FormReply, Reply, SearchState
 
 PRODUCT = "a19904e6-fa9f-4dd3-90c1-08dbd6d0821e"
@@ -530,7 +532,7 @@ class TestSeePage:
                 "ticket_id": "T-1",
             },
         )
-        page = FormFillSkill._see_page(session, [f for f in specs(FIELDS) if askable(f)], [])
+        page = see_page(session, [f for f in specs(FIELDS) if askable(f)], [])
         assert page == {
             "speed": "10 Gbit/s",
             "vlan": "",
