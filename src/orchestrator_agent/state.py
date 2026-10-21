@@ -63,6 +63,8 @@ class AskField:
     title: str = ""
     problem: str = ""  # core's message when it rejected the answer
     hint: str = ""  # one line shown with the question: how many options a long list has, what typed words matched
+    # A long list: a client that can search asks ``GET /chats/{thread}/options/{field}?q=`` and picks; typed words work too.
+    searchable: bool = False
 
 
 @dataclass(frozen=True)
@@ -170,6 +172,7 @@ class SearchState(BaseModel):
     query: Query | None = None
     pending_filters: FilterTree | None = None
     message_history: list[dict[str, Any]] = Field(default_factory=list)
+    owner: str | None = None  # the subject of the person the thread belongs to, on a route that binds threads (AG-UI)
     form_fill: FormFillSession | None = None
     form_reply: Reply | None = Field(default=None, exclude=True)  # the form-fill reply of this turn; never persisted
     form_input: FormInput | None = Field(default=None, exclude=True)  # the human's response carried by this turn

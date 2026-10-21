@@ -30,7 +30,7 @@ anything is submitted.
 from __future__ import annotations
 
 import time
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from dataclasses import field as dc_field
 from typing import Any
@@ -56,8 +56,9 @@ from orchestrator_agent.form_fill.walk import (
     page_stop,
     reply_of,
     walk,
+    widget_context,
 )
-from orchestrator_agent.form_fill.widgets import FieldWidget, GraphQL
+from orchestrator_agent.form_fill.widgets import FieldWidget, GraphQL, Option, match_widget, widget_target
 from orchestrator_agent.state import SUBSCRIPTION_ID, Approval, FormFillSession, FormReply, Reply, SearchState
 from orchestrator_agent.tool_names import CREATE_WORKFLOW_TOOL, JSON_DATA_PARAM, LIST_WORKFLOWS_TOOL, WORKFLOW_KEY_PARAM
 
@@ -136,6 +137,23 @@ class FormFillSkill:
                 outcome = await walk(self._walk(session, call_tool))
                 reply = self._summary(session) if isinstance(outcome, Completed) else outcome
         return self._finish(state, session, reply)
+
+    async def search_options(
+        self, session: FormFillSession, call_tool: CallTool, field: str, words: str, limit: int
+    ) -> list[Option] | None:
+        """The options of the pending page's widget field ``field`` that the words fit (the first ones, for none).
+
+        For a client that lets the person search a long list and pick: the pick travels back as the option's
+        value, which resolves exactly. None when the page has no widget field of that name.
+        """
+        page = session.pages[-1] if session.pages else None
+        prop: Mapping[str, Any] | None = ((page.schema_ or {}).get("properties") or {}).get(field) if page else None
+        widget = match_widget(self.widgets, prop) if prop else None
+        if widget is None or prop is None:
+            return None
+        ctx = widget_context(self._walk(session, call_tool), session.page_inputs)
+        options = await widget.options(widget_target(prop), ctx, search=words.strip() or None)
+        return list(options or ())[:limit]
 
     def _walk(self, session: FormFillSession, call_tool: CallTool) -> Walk:
         """A walk over this session with the skill's collaborators."""

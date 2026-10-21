@@ -13,9 +13,10 @@
 
 from fastapi.routing import APIRouter
 
-from orchestrator_agent.api.endpoints import agent, health
+from orchestrator_agent.api.endpoints import agent, chats, health
 
 api_router = APIRouter()
 
 api_router.include_router(health.router, prefix="/health", tags=["Health"])
 api_router.include_router(agent.router, prefix="/agui", tags=["AG-UI"])
+api_router.include_router(chats.router, prefix="/chats", tags=["AG-UI"])

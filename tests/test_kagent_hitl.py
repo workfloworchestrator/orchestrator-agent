@@ -144,12 +144,12 @@ def test_multiple_answers_stay_a_list_and_survive_commas_in_labels():
                 name="nodes",
                 question="Nodes?",
                 multiple=True,
-                choices=["Amsterdam, Science Park", "Utrecht"],
+                choices=["Alder Park", "Birch"],
                 values=["ams", "utr"],
             )
         ],
     )
-    response = AskUserResponse(id="r", answers=[AskUserAnswer(answer=["Amsterdam, Science Park", "Utrecht"])])
+    response = AskUserResponse(id="r", answers=[AskUserAnswer(answer=["Alder Park", "Birch"])])
     assert answers_as_values(pending, response) == {"nodes": ["ams", "utr"]}
     assert answers_as_values(pending, AskUserResponse(id="other", answers=[AskUserAnswer(answer=["a"])])) is None
     assert answers_as_values(pending, AskUserResponse(id="r", answers=[])) is None

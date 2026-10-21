@@ -31,7 +31,7 @@ from orchestrator_agent.artifacts import (
     QueryArtifact,
     RenderedBlock,
 )
-from orchestrator_agent.rendering.charts import aggregate_to_mermaid
+from orchestrator_agent.rendering.charts import aggregate_to_chart, chart_to_mermaid
 from orchestrator_agent.rendering.tables import search_to_markdown
 from orchestrator_agent.tool_names import AGGREGATE_TOOL, SEARCH_TOOL
 
@@ -45,8 +45,9 @@ def query_artifact(tool_name: str, payload: Any) -> QueryArtifact | None:
     query = _base_query_artifact(tool_name, payload)
     if query is None:
         return None
-    if tool_name == AGGREGATE_TOOL and (mermaid := aggregate_to_mermaid(payload)):
-        return query.model_copy(update={"rendered_block": RenderedBlock(type="mermaid", content=mermaid)})
+    if tool_name == AGGREGATE_TOOL and (chart := aggregate_to_chart(payload)):
+        block = RenderedBlock(type="mermaid", content=chart_to_mermaid(chart))
+        return query.model_copy(update={"rendered_block": block, "chart": chart})
     if tool_name == SEARCH_TOOL and (markdown := search_to_markdown(payload)):
         return query.model_copy(update={"rendered_block": RenderedBlock(type="markdown", content=markdown)})
     return query

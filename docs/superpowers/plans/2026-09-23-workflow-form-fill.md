@@ -140,8 +140,8 @@ else ticket_id only), the agent on A2A (`JEV_API_KEY` set, `gpt-4o` for the non-
 
 | # | Caller sends | Skill replies | Decisions (agent log) |
 |---|---|---|---|
-| 1 | "create a demo lightpath for Universiteit Twente at 10 gig, policer on. Ticket JIRA-4821." | page 1: needs `customer_name`; filled: product, speed 10000, speed_policer true | routing intent 1.0 / workflow 1.0; product 0.86; speed 1.0; policer 1.0 |
-| 2 | `customer_name: Universiteit Twente` + `ticket_id: JIRA-4821` | page 2: needs `redundancy` (options listed); ticket_id already taken | redundancy → not specified |
+| 1 | "create a demo lightpath for Universiteit Alder at 10 gig, policer on. Ticket JIRA-4821." | page 1: needs `customer_name`; filled: product, speed 10000, speed_policer true | routing intent 1.0 / workflow 1.0; product 0.86; speed 1.0; policer 1.0 |
+| 2 | `customer_name: Universiteit Alder` + `ticket_id: JIRA-4821` | page 2: needs `redundancy` (options listed); ticket_id already taken | redundancy → not specified |
 | 3 | `redundancy: protected` | summary of all six values, asks to confirm | — |
 | 4 | `yes` | "Started workflow … Process id …" | approve 1.0 |
 | 5 | "how many workflows are there?" | model path (aggregate + artifact) | routing intent other 1.0 |

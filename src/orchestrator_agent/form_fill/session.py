@@ -205,7 +205,7 @@ def consent(session: FormFillSession, key: str, seen: str, name: str) -> None:
 
 def paused(session: FormFillSession, pending: PendingAsk, *, unseen: bool) -> None:
     """The stop a transport sent as a pause, to map the response back; ``unseen`` when the human has not seen it yet."""
-    session.pending = pending.model_dump(mode="json")
+    session.pending = pending.model_dump(mode="json", exclude_none=True)  # what a transport did not set is left out
     session.unseen = unseen
 
 

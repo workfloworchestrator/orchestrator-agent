@@ -14,6 +14,7 @@
 """Standalone FastAPI app for the WFO search agent."""
 
 from contextlib import AsyncExitStack, asynccontextmanager
+from functools import partial
 from typing import AsyncGenerator
 
 import structlog
@@ -21,6 +22,7 @@ from fastapi import FastAPI
 from orchestrator.core.db import init_database
 
 from orchestrator_agent.adapters import A2AAdapter, ChatCompletionsAdapter, MCPApp
+from orchestrator_agent.adapters.ag_ui.contract import openapi_with_the_agui_contract
 from orchestrator_agent.agent import build_agent
 from orchestrator_agent.api.api import api_router
 from orchestrator_agent.form_fill import build_form_fill_skill
@@ -41,7 +43,8 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     langfuse_client = configure_langfuse()
 
     # Fail loud at startup if the live MCP server's tools have drifted from what the agent expects.
-    await verify_tool_contract(build_core_toolset())
+    core_toolset = build_core_toolset()
+    await verify_tool_contract(core_toolset)
 
     a2a_url = f"{agent_settings.BASE_URL}/"
     model = agent_settings.create_model()
@@ -50,6 +53,11 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     a2a.add_routes(app)
     # The same agent as an OpenAI-compatible chat model (LibreChat): forms through its ask-user tool.
     ChatCompletionsAdapter(a2a.agent).add_routes(app)
+    # And behind the AG-UI route (the chat popup): forms through AG-UI interrupts.
+    app.state.agent = a2a.agent
+    # The chats API searches a form field's options with the skill's widgets, as the person asking.
+    app.state.form_fill = form_fill
+    app.state.core_toolset = core_toolset
 
     mcp_app = MCPApp(build_agent(agent_settings.create_model()))
     app.mount("/mcp", mcp_app.app)
@@ -66,6 +74,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
         "Agent adapters started",
         a2a_url=a2a_url,
         chat_path="/v1/chat/completions",
+        agui_path="/agui/",
         mcp_path="/mcp",
         agent_model=agent_settings.AGENT_MODEL,
         form_fill_skill="literal",
@@ -83,4 +92,6 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
 
 app = FastAPI(title="WFO Search Agent", lifespan=lifespan)
 app.include_router(api_router)
+# The document names what travels inside AG-UI messages too, so a client types itself from /openapi.json alone.
+app.openapi = partial(openapi_with_the_agui_contract, app)  # type: ignore[method-assign]
 app.add_middleware(AuthMiddleware, auth_manager=create_auth_manager())

@@ -42,6 +42,22 @@ jobs:
           token: ${{ secrets.CODECOV_TOKEN }}
           fail_ci_if_error: false
 
+  web:
+    name: Chat popup (demos/web)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: demos/web
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: demos/web/package-lock.json
+      - run: npm ci
+      - run: npm run check
+
   build:
     name: Build container image (${{ matrix.variant }})
     needs: test

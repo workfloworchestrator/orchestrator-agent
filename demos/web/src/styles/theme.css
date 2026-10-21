@@ -1,0 +1,127 @@
+/*
+ * Tailwind without preflight: the popup is dropped into other people's pages and must not reset their styles.
+ * The utilities are left out of a cascade layer so that a host page's own element rules (p, code, table,
+ * button) do not win over them.
+ */
+@import "tailwindcss/theme.css" layer(theme);
+@import "tailwindcss/utilities.css" source(none);
+/* Only the package's own files are scanned for utilities, not the page that happens to host its source. */
+@source "../";
+
+/* Dark follows the system, unless the popup pins a theme with data-theme="light" or "dark" on its root. */
+@custom-variant dark {
+  &:where([data-theme="dark"], [data-theme="dark"] *) {
+    @slot;
+  }
+  @media (prefers-color-scheme: dark) {
+    &:where(:not([data-theme="light"], [data-theme="light"] *)) {
+      @slot;
+    }
+  }
+}
+
+/*
+ * The popup's look is its theme: bg-wfo-accent, text-wfo-ink, border-wfo-line, font-wfo, ... A host page
+ * retunes it by overriding these variables on :root, and gives it its own typeface through --font-wfo.
+ */
+@theme {
+  --color-wfo-bg: #ffffff;
+  --color-wfo-surface: #f1f4f3;
+  --color-wfo-line: rgb(16 36 44 / 0.12);
+  --color-wfo-ink: #14202b;
+  --color-wfo-muted: #61707c;
+  --color-wfo-accent: #0e6f6b;
+  --color-wfo-accent-strong: #0a5855;
+  --color-wfo-accent-soft: #e1f0ee;
+  --color-wfo-on-accent: #ffffff;
+  --color-wfo-mark: #10293a;
+  --color-wfo-on-mark: #7fd6cf;
+  --color-wfo-wait: #9a6307;
+  --color-wfo-wait-soft: #fbf0d9;
+  --color-wfo-danger: #b3261e;
+  --color-wfo-danger-soft: #fdecea;
+  --font-wfo: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  --shadow-wfo-panel: 0 24px 48px -12px rgb(10 25 35 / 0.28), 0 1px 3px rgb(10 25 35 / 0.1);
+  --shadow-wfo-launcher: 0 10px 24px -8px rgb(10 25 35 / 0.5);
+
+  /* Motion answers an event: the panel opening, the agent working, a step arriving, a result landing. */
+  --animate-wfo-pop: wfo-pop 180ms cubic-bezier(0.2, 0.8, 0.2, 1);
+  --animate-wfo-blink: wfo-blink 1.2s infinite ease-in-out;
+  --animate-wfo-draw: wfo-draw 160ms ease-out both;
+  --animate-wfo-rise: wfo-rise 200ms ease-out both;
+  --animate-wfo-land: wfo-land 180ms cubic-bezier(0.2, 0.8, 0.2, 1) both;
+  @keyframes wfo-pop {
+    from {
+      opacity: 0;
+      transform: translateY(12px) scale(0.97);
+    }
+    to {
+      opacity: 1;
+      transform: none;
+    }
+  }
+  @keyframes wfo-blink {
+    0%,
+    80%,
+    100% {
+      opacity: 0.3;
+      transform: translateY(0);
+    }
+    40% {
+      opacity: 1;
+      transform: translateY(-2px);
+    }
+  }
+  /* The rail's line draws down to a new step. */
+  @keyframes wfo-draw {
+    from {
+      transform: scaleY(0);
+    }
+    to {
+      transform: scaleY(1);
+    }
+  }
+  /* A step's row, or a chart, comes in behind the line. */
+  @keyframes wfo-rise {
+    from {
+      opacity: 0;
+      transform: translateY(-2px);
+    }
+    to {
+      opacity: 1;
+      transform: none;
+    }
+  }
+  /* A result lands: the check, the chip. */
+  @keyframes wfo-land {
+    from {
+      opacity: 0;
+      transform: scale(0.5);
+    }
+    to {
+      opacity: 1;
+      transform: none;
+    }
+  }
+}
+
+/* The same theme in the dark. */
+.wfo-chat {
+  @variant dark {
+    --color-wfo-bg: #141c23;
+    --color-wfo-surface: #1d2730;
+    --color-wfo-line: rgb(255 255 255 / 0.11);
+    --color-wfo-ink: #e6ecf0;
+    --color-wfo-muted: #93a1ad;
+    --color-wfo-accent: #3fb7b0;
+    --color-wfo-accent-strong: #5fcdc6;
+    --color-wfo-accent-soft: rgb(63 183 176 / 0.16);
+    --color-wfo-on-accent: #0b1a1e;
+    --color-wfo-mark: #0e6f6b;
+    --color-wfo-on-mark: #e6fbf9;
+    --color-wfo-wait: #e4b04a;
+    --color-wfo-wait-soft: rgb(228 176 74 / 0.16);
+    --color-wfo-danger: #f28b82;
+    --color-wfo-danger-soft: rgb(242 139 130 / 0.16);
+  }
+}

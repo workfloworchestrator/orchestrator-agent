@@ -1,0 +1,5 @@
+# Read by BuildKit for demo/Dockerfile (its context is the package root); nothing in the package itself needs Docker.
+node_modules/
+dist/
+dist-site/
+.git/
