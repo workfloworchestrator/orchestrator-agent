@@ -1,0 +1,646 @@
+{
+  "openapi": "3.1.0",
+  "info": { "title": "WFO Search Agent", "version": "0.1.0" },
+  "paths": {
+    "/health/": {
+      "get": {
+        "tags": ["Health"],
+        "summary": "Get Health",
+        "description": "Health check — verifies database connectivity.",
+        "operationId": "get_health_health__get",
+        "responses": {
+          "200": { "description": "Successful Response", "content": { "application/json": { "schema": {} } } }
+        }
+      }
+    },
+    "/agui/": {
+      "post": {
+        "tags": ["AG-UI"],
+        "summary": "Agent Conversation",
+        "description": "Agent conversation endpoint using pydantic-ai AG-UI protocol.",
+        "operationId": "agent_conversation_agui__post",
+        "responses": {
+          "200": { "description": "Successful Response", "content": { "application/json": { "schema": {} } } }
+        }
+      }
+    },
+    "/chats/": {
+      "get": {
+        "tags": ["AG-UI"],
+        "summary": "List Chats",
+        "description": "The caller's chats, newest first.",
+        "operationId": "list_chats_chats__get",
+        "parameters": [
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": { "type": "integer", "maximum": 200, "minimum": 1, "default": 50, "title": "Limit" }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": { "$ref": "#/components/schemas/ChatSummary" },
+                  "title": "Response List Chats Chats  Get"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/HTTPValidationError" } } }
+          }
+        }
+      }
+    },
+    "/chats/{thread_id}": {
+      "get": {
+        "tags": ["AG-UI"],
+        "summary": "Get Chat",
+        "description": "One chat: its last ``last`` messages and the form stop it waits on, if any.",
+        "operationId": "get_chat_chats__thread_id__get",
+        "parameters": [
+          { "name": "thread_id", "in": "path", "required": true, "schema": { "type": "string", "title": "Thread Id" } },
+          {
+            "name": "last",
+            "in": "query",
+            "required": false,
+            "schema": { "type": "integer", "maximum": 500, "minimum": 1, "default": 50, "title": "Last" }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Chat" } } }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/HTTPValidationError" } } }
+          }
+        }
+      },
+      "delete": {
+        "tags": ["AG-UI"],
+        "summary": "Forget Chat",
+        "description": "Forget a chat: its messages, its state and its open form.",
+        "operationId": "forget_chat_chats__thread_id__delete",
+        "parameters": [
+          { "name": "thread_id", "in": "path", "required": true, "schema": { "type": "string", "title": "Thread Id" } }
+        ],
+        "responses": {
+          "204": { "description": "Successful Response" },
+          "422": {
+            "description": "Validation Error",
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/HTTPValidationError" } } }
+          }
+        }
+      }
+    },
+    "/.well-known/agent-card.json": {
+      "get": {
+        "tags": ["A2A: Agent Card"],
+        "summary": " Get Agent Card",
+        "description": "Returns the public AgentCard describing this agent's capabilities, supported transports, and skills.",
+        "operationId": "_get_agent_card__well_known_agent_card_json_get",
+        "responses": {
+          "200": { "description": "Successful Response", "content": { "application/json": { "schema": {} } } }
+        }
+      }
+    },
+    "/": {
+      "post": {
+        "tags": ["A2A: JSON-RPC"],
+        "summary": "A2A JSON-RPC endpoint",
+        "description": "A2A JSON-RPC 2.0 endpoint. The `method` field selects the operation;\n`params` must match that method's schema (see the `oneOf` below).\n\n**Supported methods:**\n\n- `SendMessage` — Send a message to the agent (returns a Task or response Message).\n- `SendStreamingMessage` — Send a message and receive a Server-Sent Events stream.\n- `GetTask` — Fetch a task by ID.\n- `ListTasks` — List tasks with pagination and filtering.\n- `CancelTask` — Cancel an in-progress task.\n- `CreateTaskPushNotificationConfig` — Register a push-notification config on a task.\n- `GetTaskPushNotificationConfig` — Read a single push-notification config.\n- `ListTaskPushNotificationConfigs` — List all push-notification configs for a task.\n- `DeleteTaskPushNotificationConfig` — Delete a push-notification config.\n- `SubscribeToTask` — Subscribe to task events via Server-Sent Events.\n- `GetExtendedAgentCard` — Fetch the authenticated extended agent card.\n",
+        "operationId": "handle_requests__post",
+        "responses": {
+          "200": { "description": "Successful Response", "content": { "application/json": { "schema": {} } } }
+        },
+        "requestBody": {
+          "description": "A2A JSON-RPC 2.0 request",
+          "required": true,
+          "content": { "application/json": { "schema": { "$ref": "#/components/schemas/A2ARequest" } } }
+        },
+        "parameters": [
+          {
+            "in": "header",
+            "name": "A2A-Version",
+            "required": true,
+            "schema": { "type": "string", "enum": ["1.0"] },
+            "example": "1.0"
+          }
+        ]
+      }
+    },
+    "/v1/chat/completions": {
+      "post": {
+        "summary": "Chat",
+        "operationId": "chat_v1_chat_completions_post",
+        "security": [{ "HTTPBearer": [] }],
+        "parameters": [
+          {
+            "name": "x-conversation-id",
+            "in": "header",
+            "required": false,
+            "schema": { "anyOf": [{ "type": "string" }, { "type": "null" }], "title": "X-Conversation-Id" }
+          },
+          {
+            "name": "x-agent-client",
+            "in": "header",
+            "required": false,
+            "schema": { "anyOf": [{ "type": "string" }, { "type": "null" }], "title": "X-Agent-Client" }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ChatRequest" } } }
+        },
+        "responses": {
+          "200": { "description": "Successful Response", "content": { "application/json": { "schema": {} } } },
+          "422": {
+            "description": "Validation Error",
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/HTTPValidationError" } } }
+          }
+        }
+      }
+    },
+    "/v1/models": {
+      "get": {
+        "summary": "Models",
+        "operationId": "models_v1_models_get",
+        "responses": {
+          "200": { "description": "Successful Response", "content": { "application/json": { "schema": {} } } }
+        }
+      }
+    }
+  },
+  "components": {
+    "schemas": {
+      "Chat": {
+        "properties": {
+          "thread_id": { "type": "string", "title": "Thread Id" },
+          "title": { "type": "string", "title": "Title" },
+          "updated_at": { "type": "string", "format": "date-time", "title": "Updated At" },
+          "form_open": { "type": "boolean", "title": "Form Open" },
+          "messages": {
+            "items": { "additionalProperties": true, "type": "object" },
+            "type": "array",
+            "title": "Messages"
+          },
+          "pending": {
+            "anyOf": [{ "additionalProperties": true, "type": "object" }, { "type": "null" }],
+            "title": "Pending"
+          }
+        },
+        "type": "object",
+        "required": ["thread_id", "title", "updated_at", "form_open", "messages", "pending"],
+        "title": "Chat",
+        "description": "A chat as it is opened (``GET /chats/{id}``): its last messages, and the form stop to show again."
+      },
+      "ChatMessage": {
+        "properties": {
+          "role": { "type": "string", "title": "Role" },
+          "content": {
+            "anyOf": [
+              { "type": "string" },
+              { "items": { "$ref": "#/components/schemas/ContentPart" }, "type": "array" },
+              { "type": "null" }
+            ],
+            "title": "Content"
+          },
+          "tool_call_id": { "anyOf": [{ "type": "string" }, { "type": "null" }], "title": "Tool Call Id" }
+        },
+        "type": "object",
+        "required": ["role"],
+        "title": "ChatMessage",
+        "description": "One message of a request."
+      },
+      "ChatRequest": {
+        "properties": {
+          "model": { "type": "string", "title": "Model", "default": "wfo" },
+          "messages": { "items": { "$ref": "#/components/schemas/ChatMessage" }, "type": "array", "title": "Messages" },
+          "stream": { "type": "boolean", "title": "Stream", "default": false },
+          "tools": {
+            "anyOf": [
+              { "items": { "additionalProperties": true, "type": "object" }, "type": "array" },
+              { "type": "null" }
+            ],
+            "title": "Tools"
+          }
+        },
+        "type": "object",
+        "title": "ChatRequest",
+        "description": "The body of a chat-completions request."
+      },
+      "ChatSummary": {
+        "properties": {
+          "thread_id": { "type": "string", "title": "Thread Id" },
+          "title": { "type": "string", "title": "Title" },
+          "updated_at": { "type": "string", "format": "date-time", "title": "Updated At" },
+          "form_open": { "type": "boolean", "title": "Form Open" }
+        },
+        "type": "object",
+        "required": ["thread_id", "title", "updated_at", "form_open"],
+        "title": "ChatSummary",
+        "description": "A chat as the list shows it (``GET /chats/``)."
+      },
+      "ContentPart": {
+        "properties": {
+          "type": { "type": "string", "title": "Type", "default": "text" },
+          "text": { "anyOf": [{ "type": "string" }, { "type": "null" }], "title": "Text" }
+        },
+        "type": "object",
+        "title": "ContentPart",
+        "description": "One part of a message's content; only its text is read."
+      },
+      "HTTPValidationError": {
+        "properties": {
+          "detail": { "items": { "$ref": "#/components/schemas/ValidationError" }, "type": "array", "title": "Detail" }
+        },
+        "type": "object",
+        "title": "HTTPValidationError"
+      },
+      "ValidationError": {
+        "properties": {
+          "loc": {
+            "items": { "anyOf": [{ "type": "string" }, { "type": "integer" }] },
+            "type": "array",
+            "title": "Location"
+          },
+          "msg": { "type": "string", "title": "Message" },
+          "type": { "type": "string", "title": "Error Type" },
+          "input": { "title": "Input" },
+          "ctx": { "type": "object", "title": "Context" }
+        },
+        "type": "object",
+        "required": ["loc", "msg", "type"],
+        "title": "ValidationError"
+      },
+      "ApprovalAnswer": {
+        "description": "The payload that resolves a ``tool_call`` interrupt: the decision on the start, as AG-UI shapes an approval.",
+        "properties": {
+          "approved": { "title": "Approved", "type": "boolean" },
+          "reason": { "anyOf": [{ "type": "string" }, { "type": "null" }], "default": null, "title": "Reason" }
+        },
+        "required": ["approved"],
+        "title": "ApprovalAnswer",
+        "type": "object"
+      },
+      "ApprovalStop": {
+        "description": "The metadata of a ``tool_call`` interrupt: the workflow start to approve.",
+        "properties": {
+          "workflow_key": { "title": "Workflow Key", "type": "string" },
+          "tool": { "$ref": "#/components/schemas/ToolCall" },
+          "form": { "anyOf": [{ "additionalProperties": true, "type": "object" }, { "type": "null" }], "title": "Form" }
+        },
+        "required": ["workflow_key", "tool", "form"],
+        "title": "ApprovalStop",
+        "type": "object"
+      },
+      "AskAnswers": {
+        "description": "The payload that resolves an ``ask_user`` interrupt: one answer per question, in the order asked.\n\nAn answer is the positions of the choices picked (several only for a question that takes several), or\nthe text typed; an empty answer leaves the field to its default.",
+        "properties": {
+          "answers": {
+            "items": { "items": { "anyOf": [{ "type": "integer" }, { "type": "string" }] }, "type": "array" },
+            "title": "Answers",
+            "type": "array"
+          }
+        },
+        "required": ["answers"],
+        "title": "AskAnswers",
+        "type": "object"
+      },
+      "AskStop": {
+        "description": "The metadata of an ``ask_user`` interrupt: the page's questions and the form they belong to.",
+        "properties": {
+          "workflow_key": { "title": "Workflow Key", "type": "string" },
+          "title": { "title": "Title", "type": "string" },
+          "questions": {
+            "items": { "$ref": "#/components/schemas/AskedQuestion" },
+            "title": "Questions",
+            "type": "array"
+          },
+          "form": { "anyOf": [{ "additionalProperties": true, "type": "object" }, { "type": "null" }], "title": "Form" }
+        },
+        "required": ["workflow_key", "title", "questions", "form"],
+        "title": "AskStop",
+        "type": "object"
+      },
+      "AskedQuestion": {
+        "description": "A question as the interrupt shows it: an ``AskField`` without the values behind its choices.\n\nAn answer picks a choice by position, so the client never sees the form values.",
+        "properties": {
+          "name": { "title": "Name", "type": "string" },
+          "question": { "title": "Question", "type": "string" },
+          "choices": { "default": [], "items": { "type": "string" }, "title": "Choices", "type": "array" },
+          "multiple": { "default": false, "title": "Multiple", "type": "boolean" },
+          "required": { "default": true, "title": "Required", "type": "boolean" },
+          "title": { "default": "", "title": "Title", "type": "string" },
+          "problem": { "default": "", "title": "Problem", "type": "string" },
+          "hint": { "default": "", "title": "Hint", "type": "string" }
+        },
+        "required": ["name", "question"],
+        "title": "AskedQuestion",
+        "type": "object"
+      },
+      "ChartData": {
+        "description": "A grouped aggregation as data a client draws itself (the popup), beside its Mermaid rendering.\n\n``kind`` is core's ``visualization`` hint (pie, bar or line); ``metric`` names the aggregation plotted\nand ``title`` says what it is grouped by. A pie is a part-to-whole hint, which a client is free to\ndraw as bars.",
+        "properties": {
+          "kind": { "enum": ["pie", "bar", "line"], "title": "Kind", "type": "string" },
+          "title": { "title": "Title", "type": "string" },
+          "metric": { "title": "Metric", "type": "string" },
+          "points": { "items": { "$ref": "#/components/schemas/ChartPoint" }, "title": "Points", "type": "array" }
+        },
+        "required": ["kind", "title", "metric", "points"],
+        "title": "ChartData",
+        "type": "object"
+      },
+      "ChartPoint": {
+        "description": "One category of a distribution and the value plotted for it.",
+        "properties": {
+          "label": { "title": "Label", "type": "string" },
+          "value": { "anyOf": [{ "type": "number" }, { "type": "integer" }], "title": "Value" }
+        },
+        "required": ["label", "value"],
+        "title": "ChartPoint",
+        "type": "object"
+      },
+      "DataArtifact": {
+        "description": "Metadata for tools that return full entity data for LLM reasoning.",
+        "properties": {
+          "description": { "title": "Description", "type": "string" },
+          "entity_id": { "title": "Entity Id", "type": "string" },
+          "entity_type": { "title": "Entity Type", "type": "string" }
+        },
+        "required": ["description", "entity_id", "entity_type"],
+        "title": "DataArtifact",
+        "type": "object"
+      },
+      "ExportArtifact": {
+        "description": "Metadata for tools that produce a downloadable export reference.",
+        "properties": {
+          "description": { "title": "Description", "type": "string" },
+          "query_id": { "title": "Query Id", "type": "string" },
+          "download_url": { "title": "Download Url", "type": "string" }
+        },
+        "required": ["description", "query_id", "download_url"],
+        "title": "ExportArtifact",
+        "type": "object"
+      },
+      "QueryArtifact": {
+        "description": "Lightweight reference returned by query tools.",
+        "properties": {
+          "description": { "title": "Description", "type": "string" },
+          "query_id": { "title": "Query Id", "type": "string" },
+          "total_results": { "title": "Total Results", "type": "integer" },
+          "visualization_type": { "$ref": "#/components/schemas/VisualizationType" },
+          "search_type": { "default": "", "title": "Search Type", "type": "string" },
+          "rendered_block": {
+            "anyOf": [{ "$ref": "#/components/schemas/RenderedBlock" }, { "type": "null" }],
+            "default": null
+          },
+          "chart": { "anyOf": [{ "$ref": "#/components/schemas/ChartData" }, { "type": "null" }], "default": null }
+        },
+        "required": ["description", "query_id", "total_results"],
+        "title": "QueryArtifact",
+        "type": "object"
+      },
+      "RenderedBlock": {
+        "description": "A pre-rendered output block ready to inject into the agent's text reply.",
+        "properties": {
+          "type": { "enum": ["mermaid", "markdown"], "title": "Type", "type": "string" },
+          "content": { "title": "Content", "type": "string" }
+        },
+        "required": ["type", "content"],
+        "title": "RenderedBlock",
+        "type": "object"
+      },
+      "ToolCall": {
+        "description": "The call the agent wants approved, as it will be made.",
+        "properties": {
+          "name": { "title": "Name", "type": "string" },
+          "args": { "additionalProperties": true, "title": "Args", "type": "object" }
+        },
+        "required": ["name", "args"],
+        "title": "ToolCall",
+        "type": "object"
+      },
+      "VisualizationType": {
+        "description": "Visualization type for aggregation results.\n\nChoose based on the query context:\n- 'pie': For categorical distributions (e.g., subscriptions by status, products by type)\n- 'line': For time-series data (e.g., subscriptions created per month, trends over time)\n- 'table': For detailed data or multiple grouping dimensions (default)",
+        "properties": {
+          "type": {
+            "default": "table",
+            "description": "Visualization render type: 'pie' for categorical distributions, 'line' for time-series, 'table' for detailed data",
+            "enum": ["pie", "line", "table"],
+            "title": "Type",
+            "type": "string"
+          }
+        },
+        "title": "VisualizationType",
+        "type": "object"
+      },
+      "SendMessageRequest": {
+        "type": "object",
+        "properties": {
+          "tenant": { "type": "string", "example": "" },
+          "message": { "$ref": "#/components/schemas/Message" },
+          "configuration": {
+            "oneOf": [{ "$ref": "#/components/schemas/SendMessageConfiguration" }, { "type": "null" }],
+            "example": null
+          },
+          "metadata": { "type": "object" }
+        }
+      },
+      "Message": {
+        "type": "object",
+        "properties": {
+          "message_id": { "type": "string", "example": "message_id" },
+          "context_id": { "type": "string", "example": "" },
+          "task_id": { "type": "string", "example": "" },
+          "role": { "type": "string", "enum": ["ROLE_UNSPECIFIED", "ROLE_USER", "ROLE_AGENT"], "example": "ROLE_USER" },
+          "parts": { "type": "array", "items": { "$ref": "#/components/schemas/Part" }, "example": [{ "text": "" }] },
+          "metadata": { "type": "object" },
+          "extensions": { "type": "array", "items": { "type": "string", "example": "" }, "example": [""] },
+          "reference_task_ids": { "type": "array", "items": { "type": "string", "example": "" }, "example": [""] }
+        }
+      },
+      "Part": {
+        "allOf": [
+          {
+            "type": "object",
+            "properties": {
+              "metadata": { "type": "object" },
+              "filename": { "type": "string", "example": "" },
+              "media_type": { "type": "string", "example": "" }
+            }
+          },
+          {
+            "oneOf": [
+              { "type": "object", "properties": { "text": { "type": "string", "example": "" } }, "required": ["text"] },
+              {
+                "type": "object",
+                "properties": { "raw": { "type": "string", "format": "byte" } },
+                "required": ["raw"]
+              },
+              { "type": "object", "properties": { "url": { "type": "string", "example": "" } }, "required": ["url"] },
+              { "type": "object", "properties": { "data": {} }, "required": ["data"] }
+            ]
+          }
+        ],
+        "example": { "text": "" }
+      },
+      "SendMessageConfiguration": {
+        "type": "object",
+        "properties": {
+          "accepted_output_modes": { "type": "array", "items": { "type": "string", "example": "" }, "example": [""] },
+          "task_push_notification_config": {
+            "oneOf": [{ "$ref": "#/components/schemas/TaskPushNotificationConfig" }, { "type": "null" }],
+            "example": null
+          },
+          "history_length": { "type": "integer", "format": "int32" },
+          "return_immediately": { "type": "boolean", "example": false }
+        }
+      },
+      "TaskPushNotificationConfig": {
+        "type": "object",
+        "properties": {
+          "tenant": { "type": "string", "example": "" },
+          "id": { "type": "string", "example": "" },
+          "task_id": { "type": "string", "example": "" },
+          "url": { "type": "string", "example": "url" },
+          "token": { "type": "string", "example": "" },
+          "authentication": {
+            "oneOf": [{ "$ref": "#/components/schemas/AuthenticationInfo" }, { "type": "null" }],
+            "example": null
+          }
+        }
+      },
+      "AuthenticationInfo": {
+        "type": "object",
+        "properties": {
+          "scheme": { "type": "string", "example": "scheme" },
+          "credentials": { "type": "string", "example": "" }
+        }
+      },
+      "GetTaskRequest": {
+        "type": "object",
+        "properties": {
+          "tenant": { "type": "string", "example": "" },
+          "id": { "type": "string", "example": "id" },
+          "history_length": { "type": "integer", "format": "int32" }
+        }
+      },
+      "ListTasksRequest": {
+        "type": "object",
+        "properties": {
+          "tenant": { "type": "string", "example": "" },
+          "context_id": { "type": "string", "example": "" },
+          "status": {
+            "type": "string",
+            "enum": [
+              "TASK_STATE_UNSPECIFIED",
+              "TASK_STATE_SUBMITTED",
+              "TASK_STATE_WORKING",
+              "TASK_STATE_COMPLETED",
+              "TASK_STATE_FAILED",
+              "TASK_STATE_CANCELED",
+              "TASK_STATE_INPUT_REQUIRED",
+              "TASK_STATE_REJECTED",
+              "TASK_STATE_AUTH_REQUIRED"
+            ],
+            "example": "TASK_STATE_SUBMITTED"
+          },
+          "page_size": { "type": "integer", "format": "int32" },
+          "page_token": { "type": "string", "example": "" },
+          "history_length": { "type": "integer", "format": "int32" },
+          "status_timestamp_after": { "type": "string", "format": "date-time" },
+          "include_artifacts": { "type": "boolean", "example": false }
+        }
+      },
+      "CancelTaskRequest": {
+        "type": "object",
+        "properties": {
+          "tenant": { "type": "string", "example": "" },
+          "id": { "type": "string", "example": "id" },
+          "metadata": { "type": "object" }
+        }
+      },
+      "GetTaskPushNotificationConfigRequest": {
+        "type": "object",
+        "properties": {
+          "tenant": { "type": "string", "example": "" },
+          "task_id": { "type": "string", "example": "task_id" },
+          "id": { "type": "string", "example": "id" }
+        }
+      },
+      "ListTaskPushNotificationConfigsRequest": {
+        "type": "object",
+        "properties": {
+          "tenant": { "type": "string", "example": "" },
+          "task_id": { "type": "string", "example": "task_id" },
+          "page_size": { "type": "integer", "format": "int32" },
+          "page_token": { "type": "string", "example": "" }
+        }
+      },
+      "DeleteTaskPushNotificationConfigRequest": {
+        "type": "object",
+        "properties": {
+          "tenant": { "type": "string", "example": "" },
+          "task_id": { "type": "string", "example": "task_id" },
+          "id": { "type": "string", "example": "id" }
+        }
+      },
+      "SubscribeToTaskRequest": {
+        "type": "object",
+        "properties": { "tenant": { "type": "string", "example": "" }, "id": { "type": "string", "example": "id" } }
+      },
+      "GetExtendedAgentCardRequest": {
+        "type": "object",
+        "properties": { "tenant": { "type": "string", "example": "" } }
+      },
+      "A2ARequest": {
+        "type": "object",
+        "required": ["jsonrpc", "method"],
+        "properties": {
+          "jsonrpc": { "type": "string", "enum": ["2.0"] },
+          "id": { "oneOf": [{ "type": "string" }, { "type": "integer" }, { "type": "null" }] },
+          "method": {
+            "type": "string",
+            "enum": [
+              "SendMessage",
+              "SendStreamingMessage",
+              "GetTask",
+              "ListTasks",
+              "CancelTask",
+              "CreateTaskPushNotificationConfig",
+              "GetTaskPushNotificationConfig",
+              "ListTaskPushNotificationConfigs",
+              "DeleteTaskPushNotificationConfig",
+              "SubscribeToTask",
+              "GetExtendedAgentCard"
+            ]
+          },
+          "params": {
+            "oneOf": [
+              { "$ref": "#/components/schemas/SendMessageRequest" },
+              { "$ref": "#/components/schemas/GetTaskRequest" },
+              { "$ref": "#/components/schemas/ListTasksRequest" },
+              { "$ref": "#/components/schemas/CancelTaskRequest" },
+              { "$ref": "#/components/schemas/TaskPushNotificationConfig" },
+              { "$ref": "#/components/schemas/GetTaskPushNotificationConfigRequest" },
+              { "$ref": "#/components/schemas/ListTaskPushNotificationConfigsRequest" },
+              { "$ref": "#/components/schemas/DeleteTaskPushNotificationConfigRequest" },
+              { "$ref": "#/components/schemas/SubscribeToTaskRequest" },
+              { "$ref": "#/components/schemas/GetExtendedAgentCardRequest" }
+            ]
+          }
+        }
+      }
+    },
+    "securitySchemes": { "HTTPBearer": { "type": "http", "scheme": "bearer" } }
+  }
+}

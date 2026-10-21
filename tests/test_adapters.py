@@ -10,6 +10,7 @@ import asyncio
 import json
 import uuid
 from contextlib import asynccontextmanager
+from datetime import UTC, datetime
 from types import SimpleNamespace
 from typing import Any
 from unittest.mock import AsyncMock, MagicMock, patch
@@ -37,6 +38,7 @@ from orchestrator_agent.adapters.a2a.kagent import HITL_EXTENSION_URI
 from orchestrator_agent.adapters.ag_ui import AGUIEventStream, AGUIWorker, _AGUIAdapter
 from orchestrator_agent.adapters.mcp import MCPApp, MCPWorker
 from orchestrator_agent.artifacts import QueryArtifact
+from orchestrator_agent.persistence import StoredThread
 from orchestrator_agent.state import Approval, AskField, Decision, FormFillSession, FormInput, Reply, SearchState
 
 from .conftest import (
@@ -829,10 +831,12 @@ class TestAGUIWorkerStaticMethods:
             context=[],
             forwarded_props={},
         )
-        result = AGUIWorker._prepare_run_input(run_input)
+        state = SearchState(user_input=AGUIWorker._extract_user_input(run_input))
+        result = AGUIWorker._prepare_run_input(run_input, state)
 
+        # The run's state is the server's own, not what the client sent.
         assert result.state["user_input"] == expected_user_input
-        assert result.state["existing_key"] == "val"
+        assert "existing_key" not in result.state
         assert result.thread_id == "t1"
         assert result.run_id == run_input.run_id
 
@@ -882,15 +886,15 @@ class TestAGUIWorkerRunRequest:
         return agent
 
     @pytest.mark.asyncio
-    @patch("orchestrator_agent.adapters.ag_ui.PostgresStatePersistence")
-    @patch("orchestrator_agent.adapters.ag_ui._AGUIAdapter")
+    @patch("orchestrator_agent.adapters.ag_ui.worker.PostgresStatePersistence")
+    @patch("orchestrator_agent.adapters.ag_ui.worker._AGUIAdapter")
     async def test_run_request_new_run_streams_events(self, mock_adapter_cls, mock_persistence_cls):
         agent = self._agent()
         db_session = MagicMock()
         db_session.get.return_value = None  # No existing run
 
         mock_persistence = AsyncMock()
-        mock_persistence.load_state.return_value = None
+        mock_persistence.load_thread.return_value = None
         mock_persistence_cls.return_value = mock_persistence
 
         async def mock_sse_stream():
@@ -911,8 +915,8 @@ class TestAGUIWorkerRunRequest:
         mock_persistence.snapshot.assert_awaited_once()
 
     @pytest.mark.asyncio
-    @patch("orchestrator_agent.adapters.ag_ui.PostgresStatePersistence")
-    @patch("orchestrator_agent.adapters.ag_ui._AGUIAdapter")
+    @patch("orchestrator_agent.adapters.ag_ui.worker.PostgresStatePersistence")
+    @patch("orchestrator_agent.adapters.ag_ui.worker._AGUIAdapter")
     async def test_run_request_existing_run_skips_insert(self, mock_adapter_cls, mock_persistence_cls):
         from orchestrator.core.db.models import AgentRunTable
 
@@ -922,7 +926,7 @@ class TestAGUIWorkerRunRequest:
         db_session.get.return_value = existing_run  # Run already exists
 
         mock_persistence = AsyncMock()
-        mock_persistence.load_state.return_value = None
+        mock_persistence.load_thread.return_value = None
         mock_persistence_cls.return_value = mock_persistence
 
         async def empty_stream():
@@ -940,8 +944,8 @@ class TestAGUIWorkerRunRequest:
         db_session.add.assert_not_called()
 
     @pytest.mark.asyncio
-    @patch("orchestrator_agent.adapters.ag_ui.PostgresStatePersistence")
-    @patch("orchestrator_agent.adapters.ag_ui._AGUIAdapter")
+    @patch("orchestrator_agent.adapters.ag_ui.worker.PostgresStatePersistence")
+    @patch("orchestrator_agent.adapters.ag_ui.worker._AGUIAdapter")
     async def test_run_request_loads_previous_state(self, mock_adapter_cls, mock_persistence_cls):
         agent = self._agent()
         db_session = MagicMock()
@@ -949,7 +953,9 @@ class TestAGUIWorkerRunRequest:
 
         previous_state = SearchState(user_input="old query")
         mock_persistence = AsyncMock()
-        mock_persistence.load_state.return_value = previous_state
+        mock_persistence.load_thread.return_value = StoredThread(
+            thread_id="t-thread", agent_type="agui", updated_at=datetime.now(UTC), state=previous_state
+        )
         mock_persistence_cls.return_value = mock_persistence
 
         async def empty_stream():
@@ -970,15 +976,15 @@ class TestAGUIWorkerRunRequest:
         assert initial_state["user_input"] == "new query"
 
     @pytest.mark.asyncio
-    @patch("orchestrator_agent.adapters.ag_ui.PostgresStatePersistence")
-    @patch("orchestrator_agent.adapters.ag_ui._AGUIAdapter")
+    @patch("orchestrator_agent.adapters.ag_ui.worker.PostgresStatePersistence")
+    @patch("orchestrator_agent.adapters.ag_ui.worker._AGUIAdapter")
     async def test_run_request_rollback_on_stream_error(self, mock_adapter_cls, mock_persistence_cls):
         agent = self._agent()
         db_session = MagicMock()
         db_session.get.return_value = None
 
         mock_persistence = AsyncMock()
-        mock_persistence.load_state.return_value = None
+        mock_persistence.load_thread.return_value = None
         mock_persistence_cls.return_value = mock_persistence
 
         async def failing_stream():
