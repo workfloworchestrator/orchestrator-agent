@@ -64,6 +64,7 @@ uv run demos/mcp_client.py search "active subscriptions"
 | `AGENT_API_KEY` | *(none)* | API key for the LLM provider |
 | `AGENT_API_VERSION` | *(none)* | API version for Azure OpenAI (e.g. `2024-12-01-preview`) |
 | `AGENT_DOMAIN_CONTEXT` | *(empty)* | Optional free-text domain knowledge appended to the agent system prompt (e.g. identifier conventions and their filter fields). Empty disables the section |
+| `WFO_CORE_GRAPHQL_URL` | *(derived)* | URL of orchestrator-core's GraphQL API, which form-fill widgets read options from (customers). Unset: `WFO_CORE_MCP_URL` with `/mcp` replaced by `/api/graphql` |
 | `OAUTH2_ACTIVE` | `true` | Enable OIDC authentication on incoming requests (via `oauth2_lib`) |
 | `OAUTH2_OUTBOUND_ACTIVE` | *(unset)* | Enable OAuth2 client-credentials auth on outgoing requests to orchestrator-core. When unset, follows `OAUTH2_ACTIVE`; set to `true`/`false` to control outbound auth independently of incoming auth |
 | `OIDC_BASE_URL` | *(none)* | Base URL of the OIDC provider (required when `OAUTH2_ACTIVE=true`) |
@@ -264,7 +265,8 @@ another engine drops in behind the same protocol.
 **A page as core describes it.** Core's form tool (`get_workflow_form`, orchestrator-core ≥ 5.5) describes
 each page as one JSON Schema (`schema`): every reference inlined, so a choice or a nested model is read in
 place; `readOnly` on a field that is only shown; a choice's values in `enum` with their labels in `options`;
-the limits a list is validated against; consent as `format: "accept"`. Asked for a verdict
+the limits a list is validated against; consent as `format: "accept"`; each field's label and help text as
+the frontend shows them in `title` and `description`, which word the questions a person gets. Asked for a verdict
 (`verdict="result"`), a rejected page comes back as a result with core's errors. `form_fill/model.py` reads
 the schema into one `FieldSpec` per field, and every stop works from those: the questions and chips a
 person gets, the labels at the approval, the defaults that apply. The interpreter's output type is the page
@@ -279,6 +281,22 @@ this skill; the MCP and AG-UI agents run without the skill, so they get neither 
 `workflow` plugin and behave as before. Routing in front of the model and prefilling pages from the
 conversation with a typed decision engine (Jev) live on a separate branch; a handed-off key core does not
 know is a tool retry, so the model corrects itself.
+
+**Form field widgets.** Some form fields carry no options in core's schema: core's `CustomerId` is a string
+with `format: customerId`, and the WFO frontend's customer select fetches the customers itself. The agent does
+the same through *widgets*, its counterpart of pydantic-forms' component matchers. Before a page is read, each
+field a widget matches gets its options from core (GraphQL or MCP, as the person asking) written into the page
+schema the way core writes a static choice (`enum` + `options`), so everything downstream works unchanged: up to
+ten are asked as options to pick; a longer list is typed, and what is typed is resolved to one of its options — an
+exact name directly, otherwise the agent's model reads the words over the candidates — before core sees it. Words
+that fit several options are asked again as those options; words that fit none are asked again. Typed text is
+never sent to core for such a field. A field whose options depend on another (the free ports of a node) is asked
+in steps, the node first.
+
+The agent ships widgets for the two formats orchestrator-core itself defines, `customerId` and `productId`,
+reading the customers from core's GraphQL API and the products from its `list_products` tool, which the startup
+tool-contract check (`verify_tool_contract`) therefore includes. A widget whose source fails leaves its field
+typed, as without it.
 
 **A2A protocol version.** The A2A endpoint speaks protocol v1.0 (a2a-sdk 1.x, protobuf types:
 `SendMessage`, `SendStreamingMessage`; the agent card is at `/.well-known/agent-card.json`; a v1 client
