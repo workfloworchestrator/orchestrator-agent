@@ -7,20 +7,51 @@ import { Chart } from "./Chart";
 import { Markdown } from "./Markdown";
 import { CHIP_OFF } from "./classes";
 
-/** One step the agent took, a node on the rail: the tool it called, and what came back. */
-function Step({ call, result, running }: { call: ToolCall; result: string | undefined; running: boolean }) {
+/** The rail's line, drawn by each step: from its top edge to its node, and from its node down to the next step. */
+const LINE_ABOVE =
+  "before:absolute before:top-0 before:left-[7.5px] before:h-2.5 before:w-px before:origin-top before:bg-wfo-line";
+const LINE_BELOW =
+  "after:absolute after:top-2.5 after:bottom-0 after:left-[7.5px] after:w-px after:origin-top after:bg-wfo-line";
+
+/**
+ * One step the agent took, a node on the rail: the tool it called, and what came back.
+ *
+ * A step that arrives while the agent works is seen arriving: the line draws down to it, its row comes in
+ * behind, and the check and the result's chip land when the result does. A stored chat's steps just are.
+ */
+function Step({
+  call,
+  result,
+  running,
+  fresh,
+  first,
+  last,
+}: {
+  call: ToolCall;
+  result: string | undefined;
+  running: boolean;
+  /** Arrived during this run, rather than loaded with the chat. */
+  fresh: boolean;
+  first: boolean;
+  last: boolean;
+}) {
   const artifact = artifactOf(result);
   const name = call.function.name.replaceAll("_", " ");
   const done = result !== undefined;
   const chart = artifact?.chart;
   const table = !chart && artifact?.rendered_block?.type === "markdown" ? artifact.rendered_block.content : null;
+  const above = first ? "" : `${LINE_ABOVE} ${fresh ? "motion-safe:before:animate-wfo-draw" : ""}`;
+  const below = last ? "" : `${LINE_BELOW} ${fresh ? "motion-safe:after:animate-wfo-draw" : ""}`;
+  const rise = fresh ? "motion-safe:animate-wfo-rise motion-safe:[animation-delay:160ms]" : "";
+  const land = fresh ? "motion-safe:animate-wfo-land" : "";
   return (
-    <li className="flex flex-col gap-1.5 py-0.5">
-      <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-xs leading-4 text-wfo-muted">
+    <li className={`relative flex flex-col gap-1.5 py-0.5 ${above} ${below}`}>
+      <div className={`flex flex-wrap items-center gap-x-2 gap-y-1 text-xs leading-4 text-wfo-muted ${rise}`}>
         <span className="relative z-[1] inline-flex h-4 w-4 shrink-0 items-center justify-center rounded-full bg-wfo-bg">
           <span
+            key={done ? "done" : "waiting"}
             className={`inline-flex h-4 w-4 items-center justify-center rounded-full ${
-              done ? "bg-wfo-accent-soft text-wfo-accent" : "border border-wfo-line bg-wfo-bg"
+              done ? `bg-wfo-accent-soft text-wfo-accent ${land}` : "border border-wfo-line bg-wfo-bg"
             }`}
           >
             {done ? (
@@ -32,7 +63,9 @@ function Step({ call, result, running }: { call: ToolCall; result: string | unde
         </span>
         <span>{name}</span>
         {artifact && (
-          <span className="inline-flex items-center gap-1.5 rounded-full bg-wfo-surface px-2 py-0.5 text-wfo-ink">
+          <span
+            className={`inline-flex items-center gap-1.5 rounded-full bg-wfo-surface px-2 py-0.5 text-wfo-ink ${land}`}
+          >
             {artifact.description ?? artifact.entity_type ?? "result"}
             {artifact.download_url && (
               <a
@@ -49,12 +82,14 @@ function Step({ call, result, running }: { call: ToolCall; result: string | unde
         )}
       </div>
       {chart && (
-        <div className="ml-6">
+        <div className={`ml-6 ${fresh ? "motion-safe:animate-wfo-rise" : ""}`}>
           <Chart chart={chart} />
         </div>
       )}
       {table && (
-        <div className="ml-6 overflow-x-auto rounded-lg border border-wfo-line bg-wfo-bg px-3 py-2">
+        <div
+          className={`ml-6 overflow-x-auto rounded-lg border border-wfo-line bg-wfo-bg px-3 py-2 ${fresh ? "motion-safe:animate-wfo-rise" : ""}`}
+        >
           <Markdown text={table} />
         </div>
       )}
@@ -159,16 +194,17 @@ export function Messages({
           );
         }
         return (
-          <ol
-            key={item.id}
-            className={`relative m-0 flex max-w-full list-none flex-col self-start p-0 ${
-              item.steps.length > 1
-                ? "before:absolute before:top-2.5 before:bottom-2.5 before:left-[7.5px] before:w-px before:bg-wfo-line"
-                : ""
-            }`}
-          >
-            {item.steps.map(({ call, result }) => (
-              <Step key={call.id} call={call} result={result} running={running} />
+          <ol key={item.id} className="m-0 flex max-w-full list-none flex-col self-start p-0">
+            {item.steps.map(({ call, result }, index) => (
+              <Step
+                key={call.id}
+                call={call}
+                result={result}
+                running={running}
+                fresh={running}
+                first={index === 0}
+                last={index === item.steps.length - 1}
+              />
             ))}
           </ol>
         );

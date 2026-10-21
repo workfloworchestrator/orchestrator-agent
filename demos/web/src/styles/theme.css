@@ -44,9 +44,12 @@
   --shadow-wfo-panel: 0 24px 48px -12px rgb(10 25 35 / 0.28), 0 1px 3px rgb(10 25 35 / 0.1);
   --shadow-wfo-launcher: 0 10px 24px -8px rgb(10 25 35 / 0.5);
 
-  /* Motion answers the person's action: the panel opening, the agent working. */
+  /* Motion answers an event: the panel opening, the agent working, a step arriving, a result landing. */
   --animate-wfo-pop: wfo-pop 180ms cubic-bezier(0.2, 0.8, 0.2, 1);
   --animate-wfo-blink: wfo-blink 1.2s infinite ease-in-out;
+  --animate-wfo-draw: wfo-draw 160ms ease-out both;
+  --animate-wfo-rise: wfo-rise 200ms ease-out both;
+  --animate-wfo-land: wfo-land 180ms cubic-bezier(0.2, 0.8, 0.2, 1) both;
   @keyframes wfo-pop {
     from {
       opacity: 0;
@@ -67,6 +70,37 @@
     40% {
       opacity: 1;
       transform: translateY(-2px);
+    }
+  }
+  /* The rail's line draws down to a new step. */
+  @keyframes wfo-draw {
+    from {
+      transform: scaleY(0);
+    }
+    to {
+      transform: scaleY(1);
+    }
+  }
+  /* A step's row, or a chart, comes in behind the line. */
+  @keyframes wfo-rise {
+    from {
+      opacity: 0;
+      transform: translateY(-2px);
+    }
+    to {
+      opacity: 1;
+      transform: none;
+    }
+  }
+  /* A result lands: the check, the chip. */
+  @keyframes wfo-land {
+    from {
+      opacity: 0;
+      transform: scale(0.5);
+    }
+    to {
+      opacity: 1;
+      transform: none;
     }
   }
 }

@@ -68,15 +68,22 @@ def _summary_table(table: SummaryTable) -> list[str]:
 
 
 def _values_table(form: FormReply) -> list[str]:
-    """The values as they will be submitted (an id as the label the form has for it), and the defaults that apply."""
-    lines: list[str] = []
-    if form.values:
-        lines += ["", "| Field | Value |", "|---|---|"]
-        lines += [f"| {name} | {_cell(form.labels.get(name, value))} |" for name, value in form.values.items()]
-    if form.defaults:
-        defaults = ", ".join(f"{name} = {_cell(value)}" for name, value in form.defaults.items())
-        lines += ["", f"Defaults that apply: {defaults}"]
+    """Every value as it will be submitted, as one table.
+
+    What the person gave first (an id as the label the form has for it), then what the form fills in by
+    itself, marked as a default.
+    """
+    if not form.values and not form.defaults:
+        return []
+    lines = ["", "| Field | Value |", "|---|---|"]
+    lines += [f"| {name} | {_cell(form.labels.get(name, value))} |" for name, value in form.values.items()]
+    lines += [f"| {name} | {_default(value)} *(default)* |" for name, value in form.defaults.items()]
     return lines
+
+
+def _default(value: Any) -> str:
+    """A default as the person reads it: an empty one (nothing, no items, no text) is "none"."""
+    return "none" if value is None or value == "" or value == [] or value == {} else _cell(value)
 
 
 def _form(reply: Reply) -> FormReply | None:

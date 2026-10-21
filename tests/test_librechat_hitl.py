@@ -323,8 +323,18 @@ class TestShown:
             "|---|---|",
             "| product | SN8 10G |",  # an id is shown as the label the form has for it
             "| vlan | 20 |",
-            "",
-            "Defaults that apply: policer = true",
+            "| policer | true *(default)* |",  # what the form fills in by itself, in the same table
+        ]
+
+    def test_an_empty_default_reads_as_none(self):
+        reply = Reply(
+            '{"workflow_key":"create_port","status":"confirming","values":{"vlan":20},'
+            '"defaults":{"native_vlan":null,"contacts":[],"ticket_id":""}}'
+        )
+        assert shown(reply).splitlines()[-3:] == [
+            "| native_vlan | none *(default)* |",
+            "| contacts | none *(default)* |",
+            "| ticket_id | none *(default)* |",
         ]
 
     def test_the_approval_adds_the_workflows_own_summary_when_its_form_has_one(self):
