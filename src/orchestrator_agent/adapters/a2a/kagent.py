@@ -45,6 +45,7 @@ from google.protobuf import json_format
 from pydantic import BaseModel, Field, TypeAdapter, ValidationError
 
 from orchestrator_agent.form_fill.pending import PendingAsk, answered_values, pending_approval, pending_ask
+from orchestrator_agent.form_fill.session import paused
 from orchestrator_agent.state import Approval, AskField, Decision, FormFillSession, FormInput, Reply
 
 logger = structlog.get_logger(__name__)
@@ -226,8 +227,7 @@ def pause(
         payload, pending = approval_request(request_id, reply.approval)
     else:
         payload, pending = ask_request(request_id, reply.ask or [])
-    session.pending = pending.model_dump(mode="json")
-    session.unseen = answered
+    paused(session, pending, unseen=answered)
     return payload
 
 

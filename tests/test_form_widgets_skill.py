@@ -18,7 +18,8 @@ from orchestrator_agent.adapters.chat.librechat import pause as librechat_pause
 from orchestrator_agent.form_fill import build_form_fill_skill
 from orchestrator_agent.form_fill.interpret import ModelInterpreter
 from orchestrator_agent.form_fill.pending import pending_of
-from orchestrator_agent.form_fill.skill import NOTHING_FIT, SEVERAL_FIT, TOO_MANY_FIT, FormFillSkill
+from orchestrator_agent.form_fill.questions import NOTHING_FIT, SEVERAL_FIT, TOO_MANY_FIT
+from orchestrator_agent.form_fill.skill import FormFillSkill
 from orchestrator_agent.form_fill.widgets import CoreGraphQL, FieldWidget, Option, Widget, WidgetContext
 from orchestrator_agent.state import AskField, FormFillSession, Reply, SearchState
 

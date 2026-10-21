@@ -3,6 +3,12 @@
 **Date:** 2026-10-07
 **Status:** Approved (pending spec review)
 
+> **Status (2026-10-20):** the form-fill skill was then restructured as an explicit state machine (plan
+> `2026-10-19-form-fill-state-machine.md`): the walk with its enrichment and resolution lives in
+> `form_fill/walk.py` (`walk`, `see_page`, `page_stop`), the wording of questions in `questions.py`, the
+> session's writes in `session.py`. Where this document names `FormFillSkill._walk`, `_see_page` or
+> `skill.py` for those, read the new homes.
+
 ## Goal
 
 Let the form-fill skill handle the pydantic-forms field components whose options are *not* in the JSON
