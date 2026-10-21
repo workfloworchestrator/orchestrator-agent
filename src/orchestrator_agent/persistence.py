@@ -18,6 +18,7 @@ from typing import Any
 from uuid import UUID
 
 from orchestrator.core.db.models import AgentRunTable, GraphSnapshotTable
+from pydantic import ValidationError
 from pydantic_ai.messages import ModelMessage, ModelMessagesTypeAdapter
 from sqlalchemy import delete, select
 from sqlalchemy.orm import Session
@@ -66,13 +67,32 @@ def _latest_per_thread(agent_types: Sequence[str] | None = None) -> Any:
     return stmt.subquery()
 
 
-def _thread(row: Any) -> StoredThread:
-    state = SearchState.model_validate((row.snapshot_data or {}).get("state", {}))
+def read_state(snapshot_data: Any, thread_id: str) -> SearchState | None:
+    """A snapshot's state as it reads today; None when it no longer reads at all.
+
+    A model may have changed since the snapshot was written. The search cache (``query``) is the first thing
+    let go: a reopened chat is its messages and its form, the cache only what the last turn found. A state
+    that does not read without it either is left out, with a warning naming the thread.
+    """
+    data = dict((snapshot_data or {}).get("state") or {})
+    for attempt in (data, {key: value for key, value in data.items() if key != "query"}):
+        try:
+            return SearchState.model_validate(attempt)
+        except ValidationError as error:
+            reason = error
+    logger.warning("A stored thread's state no longer reads; it is left out", thread_id=thread_id, error=str(reason))
+    return None
+
+
+def _thread(row: Any) -> StoredThread | None:
+    state = read_state(row.snapshot_data, row.thread_id)
+    if state is None:
+        return None
     return StoredThread(thread_id=row.thread_id, agent_type=row.agent_type, updated_at=row.updated_at, state=state)
 
 
 def load_thread(session: Session, thread_id: str) -> StoredThread | None:
-    """The thread's latest state with the route that wrote it; None when the thread is unknown."""
+    """The thread's latest state with the route that wrote it; None when the thread is unknown or unreadable."""
     latest = _latest_per_thread()
     row = session.execute(select(latest).where(latest.c.thread_id == thread_id)).one_or_none()
     return _thread(row) if row is not None else None
@@ -88,7 +108,7 @@ def list_threads(session: Session, *, agent_types: Sequence[str], owner: str | N
         .order_by(latest.c.updated_at.desc())
         .limit(limit)
     )
-    return [_thread(row) for row in session.execute(stmt).all()]
+    return [thread for row in session.execute(stmt).all() if (thread := _thread(row)) is not None]
 
 
 def delete_thread(session: Session, thread_id: str) -> int:
@@ -167,9 +187,9 @@ class PostgresStatePersistence:
             return None
         db_snapshot, agent_type = row
 
-        snapshot_data = db_snapshot.snapshot_data
-        state_data = snapshot_data.get("state", {})
-        state = SearchState.model_validate(state_data)
+        state = read_state(db_snapshot.snapshot_data, self.thread_id)
+        if state is None:  # the thread starts over rather than never answering again
+            return None
 
         # Update sequence counter to continue from where we left off
         self._sequence_counter = db_snapshot.sequence_number + 1

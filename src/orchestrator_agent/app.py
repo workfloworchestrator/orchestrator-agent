@@ -43,7 +43,8 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     langfuse_client = configure_langfuse()
 
     # Fail loud at startup if the live MCP server's tools have drifted from what the agent expects.
-    await verify_tool_contract(build_core_toolset())
+    core_toolset = build_core_toolset()
+    await verify_tool_contract(core_toolset)
 
     a2a_url = f"{agent_settings.BASE_URL}/"
     model = agent_settings.create_model()
@@ -54,6 +55,9 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     ChatCompletionsAdapter(a2a.agent).add_routes(app)
     # And behind the AG-UI route (the chat popup): forms through AG-UI interrupts.
     app.state.agent = a2a.agent
+    # The chats API searches a form field's options with the skill's widgets, as the person asking.
+    app.state.form_fill = form_fill
+    app.state.core_toolset = core_toolset
 
     mcp_app = MCPApp(build_agent(agent_settings.create_model()))
     app.mount("/mcp", mcp_app.app)

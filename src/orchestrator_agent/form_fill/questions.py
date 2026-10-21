@@ -148,6 +148,7 @@ def question(field: FieldSpec, problem: str = "") -> AskField:
         title=title,
         problem=problem,
         hint=hint,
+        searchable=bool(mark.get("total")),
     )
 
 

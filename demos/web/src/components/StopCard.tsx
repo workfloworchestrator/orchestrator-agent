@@ -2,20 +2,35 @@ import type { Interrupt } from "@ag-ui/core";
 import { useState } from "react";
 import { FileText } from "lucide-react";
 
-import type { ApprovalAnswer, ApprovalStop, AskAnswers, AskedQuestion, AskStop } from "../api/types";
+import type { ApprovalAnswer, ApprovalStop, AskAnswers, AskedQuestion, AskStop, FieldOption } from "../api/types";
+import { Combobox } from "./Combobox";
 import { Markdown } from "./Markdown";
 import { CHIP_OFF, CHIP_ON, FIELD, GHOST, PRIMARY } from "./classes";
 
 /** What a stop carries in its metadata: a form page's questions, or the start to approve. */
 type Stop = Partial<AskStop & ApprovalStop>;
 
-/** The answer to one question: the positions of the choices picked, or the text typed. */
-type Answer = number[] | string;
+/** The answer to one question: the positions of the choices picked, the text typed, or the options found by search. */
+type Answer = number[] | string | FieldOption[];
+
+/** A search for a question's options, as the stop card gets it from the chat. */
+export type Search = (field: string, words: string) => Promise<FieldOption[]>;
+
+/** The positions picked among a question's choices; none for any other kind of answer. */
+function positions(answer: Answer | undefined): number[] {
+  return Array.isArray(answer) ? answer.filter((item): item is number => typeof item === "number") : [];
+}
+
+/** The options found by search; none for any other kind of answer. */
+function found(answer: Answer | undefined): FieldOption[] {
+  return Array.isArray(answer) ? answer.filter((item): item is FieldOption => typeof item === "object") : [];
+}
 
 function picks(answer: Answer | undefined): (number | string)[] {
   if (answer === undefined) return [];
   if (typeof answer === "string") return answer.trim() ? [answer.trim()] : [];
-  return answer;
+  // A searched option is answered with its value, which the agent resolves exactly.
+  return answer.map((item) => (typeof item === "object" ? item.value : item));
 }
 
 function Choices({
@@ -27,7 +42,7 @@ function Choices({
   answer: Answer | undefined;
   onChange: (a: Answer) => void;
 }) {
-  const picked = Array.isArray(answer) ? answer : [];
+  const picked = positions(answer);
   const toggle = (index: number) => {
     if (question.multiple) {
       onChange(picked.includes(index) ? picked.filter((i) => i !== index) : [...picked, index]);
@@ -58,11 +73,13 @@ function Choices({
 function Questions({
   interrupt,
   busy,
+  search,
   onResolve,
   onCancel,
 }: {
   interrupt: Interrupt;
   busy: boolean;
+  search: Search;
   onResolve: (payload: unknown) => void;
   onCancel: () => void;
 }) {
@@ -82,7 +99,15 @@ function Questions({
           </div>
           {q.problem && <div className="text-xs leading-4 text-wfo-danger">{q.problem}</div>}
           {q.hint && <div className="text-xs leading-4 text-wfo-muted">{q.hint}</div>}
-          {q.choices && q.choices.length > 0 ? (
+          {q.searchable ? (
+            <Combobox
+              picked={found(answers[q.name])}
+              multiple={q.multiple === true}
+              placeholder="Type to search"
+              search={(words) => search(q.name, words)}
+              onChange={(picked) => set(q.name, picked)}
+            />
+          ) : q.choices && q.choices.length > 0 ? (
             <Choices question={q} answer={answers[q.name]} onChange={(a) => set(q.name, a)} />
           ) : (
             <input
@@ -148,11 +173,14 @@ function ApprovalCard({
 export function StopCard({
   interrupt,
   busy,
+  search,
   onResolve,
   onCancel,
 }: {
   interrupt: Interrupt;
   busy: boolean;
+  /** The options of a searchable question that typed words fit. */
+  search: Search;
   onResolve: (payload: unknown) => void;
   onCancel: () => void;
 }) {
@@ -175,7 +203,7 @@ export function StopCard({
         {approval ? (
           <ApprovalCard interrupt={interrupt} busy={busy} onResolve={onResolve} />
         ) : (
-          <Questions interrupt={interrupt} busy={busy} onResolve={onResolve} onCancel={onCancel} />
+          <Questions interrupt={interrupt} busy={busy} search={search} onResolve={onResolve} onCancel={onCancel} />
         )}
       </div>
     </div>

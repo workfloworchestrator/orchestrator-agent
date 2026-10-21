@@ -2,7 +2,7 @@ import type { Interrupt, Message, ResumeEntry } from "@ag-ui/core";
 import { useCallback, useEffect, useMemo, useRef } from "react";
 
 import { chatsUrlOf, describe } from "../api/client";
-import type { AgentContext, ChatSummary } from "../api/types";
+import type { AgentContext, ChatSummary, FieldOption } from "../api/types";
 import { uuid } from "../lib/uuid";
 import { useAgentClient } from "./useAgentClient";
 import { useChats } from "./useChats";
@@ -42,6 +42,8 @@ export interface WfoAgentHandle {
   listChats: () => Promise<void>;
   openChat: (threadId: string) => Promise<void>;
   deleteChat: (threadId: string) => Promise<void>;
+  /** The options of a searchable question of the pending form stop that the words fit, to pick from. */
+  searchOptions: (field: string, words: string) => Promise<FieldOption[]>;
 }
 
 /**
@@ -102,6 +104,11 @@ export function useWfoAgent({
     [chats, newChat, threadId],
   );
 
+  const searchOptions = useCallback(
+    (field: string, words: string) => chats.options(threadId, field, words),
+    [chats, threadId],
+  );
+
   // The tab's thread, as the agent has it: its messages and the form stop it waits on.
   const openedRef = useRef<string | null>(null);
   useEffect(() => {
@@ -128,5 +135,6 @@ export function useWfoAgent({
     listChats: chats.list,
     openChat,
     deleteChat,
+    searchOptions,
   };
 }

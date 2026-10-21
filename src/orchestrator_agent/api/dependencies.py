@@ -33,3 +33,9 @@ def get_agent(request: Request) -> WFOAgent:
         agent = build_agent(model, form_fill=build_form_fill_skill(model))
         request.app.state.agent = agent
     return agent
+
+
+def bearer_token(request: Request) -> str | None:
+    """The person's bearer token, as the request carries it; None when it carries none."""
+    auth_header = request.headers.get("authorization", "")
+    return auth_header.removeprefix("Bearer ") if auth_header.startswith("Bearer ") else None

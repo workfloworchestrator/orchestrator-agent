@@ -7,6 +7,7 @@ import os
 os.environ.setdefault("DATABASE_URI", "postgresql://test:test@localhost:5432/test")
 
 from datetime import UTC, datetime
+from types import SimpleNamespace
 from typing import Any
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -14,6 +15,7 @@ import pytest
 from ag_ui.core import ResumeEntry, RunAgentInput, UserMessage
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
+from orchestrator.core.schemas.mcp_tools import WorkflowFormPage
 from pydantic_ai.messages import ModelRequest, ModelResponse, TextPart, ToolCallPart, ToolReturnPart, UserPromptPart
 from pydantic_ai.run import AgentRunResultEvent
 from pydantic_ai.ui import StateDeps
@@ -30,6 +32,8 @@ from orchestrator_agent.adapters.ag_ui.interrupts import pause
 from orchestrator_agent.adapters.words import shown
 from orchestrator_agent.api.endpoints import chats
 from orchestrator_agent.artifacts import QueryArtifact
+from orchestrator_agent.form_fill.skill import FormFillSkill
+from orchestrator_agent.form_fill.widgets import Option, Widget
 from orchestrator_agent.persistence import StoredThread, dump_messages
 from orchestrator_agent.state import AskField, FormFillSession, Reply, SearchState
 
@@ -325,3 +329,73 @@ def test_forgetting_a_chat_deletes_it(client):
         response = client.delete("/chats/t1")
     assert response.status_code == 204
     assert deleted.call_args.args[1] == "t1"
+
+
+# --- a searchable question's options -------------------------------------------------------------------------
+
+
+class _CustomerWidget(Widget):
+    """A stand-in for the customer widget: three customers, narrowed like the real one."""
+
+    id = "customerId"
+
+    def matches(self, field):
+        return field.get("format") == "customerId"
+
+    async def fetch(self, field, ctx):
+        return [
+            Option("c-1", "Alder College (UA)"),
+            Option("c-2", "Birch University (UB)"),
+            Option("c-3", "Cedar Labs"),
+        ]
+
+
+def _searching_thread() -> StoredThread:
+    """A thread paused on a page whose customer field is a long list the person may search."""
+    page = WorkflowFormPage(
+        page=0,
+        complete=False,
+        status="next",
+        schema={"properties": {"customer_id": {"type": "string", "format": "customerId", "title": "Customer"}}},
+    )
+    session = FormFillSession(workflow_key="w", pages=[page])
+    asked = Reply(GATHERING.text, ask=[AskField(name="customer_id", question="Customer *", searchable=True)])
+    pause(asked, session)
+    return StoredThread("t3", AGENT_TYPE, datetime(2026, 10, 20, 11, 0, tzinfo=UTC), SearchState(form_fill=session))
+
+
+@pytest.fixture
+def searching_client(client):
+    client.app.state.form_fill = FormFillSkill(widgets=[_CustomerWidget()], graphql=AsyncMock())
+    client.app.state.core_toolset = SimpleNamespace(direct_call_tool=AsyncMock())
+    return client
+
+
+def test_the_options_a_search_fits_come_from_the_fields_widget(searching_client):
+    with patch("orchestrator_agent.api.endpoints.chats.load_thread", return_value=_searching_thread()):
+        response = searching_client.get("/chats/t3/options/customer_id?q=ua")
+    assert response.status_code == 200
+    assert response.json() == [{"value": "c-1", "label": "Alder College (UA)"}]
+
+
+def test_without_words_the_first_options_are_offered(searching_client):
+    with patch("orchestrator_agent.api.endpoints.chats.load_thread", return_value=_searching_thread()):
+        response = searching_client.get("/chats/t3/options/customer_id?limit=2")
+    assert [option["value"] for option in response.json()] == ["c-1", "c-2"]
+
+
+def test_the_search_runs_as_the_person_asking(searching_client):
+    with (
+        patch("orchestrator_agent.api.endpoints.chats.load_thread", return_value=_searching_thread()),
+        patch("orchestrator_agent.api.endpoints.chats.bind_outbound_token") as bound,
+    ):
+        searching_client.get("/chats/t3/options/customer_id?q=cedar", headers={"Authorization": "Bearer tok-1"})
+    assert bound.call_args.args == ("tok-1",)
+
+
+def test_only_a_searchable_question_of_the_pending_stop_is_searched(searching_client):
+    thread = _searching_thread()
+    with patch("orchestrator_agent.api.endpoints.chats.load_thread", return_value=thread):
+        assert searching_client.get("/chats/t3/options/port?q=a").status_code == 404
+    with patch("orchestrator_agent.api.endpoints.chats.load_thread", return_value=_threads()[0]):  # no form open
+        assert searching_client.get("/chats/t1/options/customer_id?q=a").status_code == 404

@@ -450,6 +450,7 @@ class TestWFOAgentExecutorHITL:
                     "title": "",
                     "problem": "",
                     "hint": "",
+                    "searchable": False,
                 }
             ],
         }

@@ -28,6 +28,8 @@ export type ToolCall = Schemas["ToolCall"];
 /** The payloads that resolve the two stops. */
 export type AskAnswers = Schemas["AskAnswers"];
 export type ApprovalAnswer = Schemas["ApprovalAnswer"];
+/** One option of a searchable question (``GET /chats/{thread}/options/{field}``); its value is the answer. */
+export type FieldOption = Schemas["FieldOption"];
 
 /** One thing the host page knows that the agent should too, as AG-UI carries it (``RunAgentInput.context``). */
 export type AgentContext = Context;

@@ -176,6 +176,7 @@ export function WfoChat({
                     <StopCard
                       interrupt={interrupt}
                       busy={chat.running}
+                      search={chat.searchOptions}
                       onResolve={(payload) =>
                         void chat.respond([{ interruptId: interrupt.id, status: "resolved", payload }])
                       }

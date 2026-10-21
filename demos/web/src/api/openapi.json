@@ -101,6 +101,48 @@
         }
       }
     },
+    "/chats/{thread_id}/options/{field}": {
+      "get": {
+        "tags": ["AG-UI"],
+        "summary": "Search Options",
+        "description": "The options of a searchable question of the chat's pending form stop that ``q`` fits.\n\nFor a client that lets the person search a long list instead of typing a name blind: the pick is\nanswered with the option's value. The options come from the field's widget, as the person asking.",
+        "operationId": "search_options_chats__thread_id__options__field__get",
+        "parameters": [
+          { "name": "thread_id", "in": "path", "required": true, "schema": { "type": "string", "title": "Thread Id" } },
+          { "name": "field", "in": "path", "required": true, "schema": { "type": "string", "title": "Field" } },
+          {
+            "name": "q",
+            "in": "query",
+            "required": false,
+            "schema": { "type": "string", "maxLength": 200, "default": "", "title": "Q" }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": { "type": "integer", "maximum": 50, "minimum": 1, "default": 20, "title": "Limit" }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": { "$ref": "#/components/schemas/FieldOption" },
+                  "title": "Response Search Options Chats  Thread Id  Options  Field  Get"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/HTTPValidationError" } } }
+          }
+        }
+      }
+    },
     "/.well-known/agent-card.json": {
       "get": {
         "tags": ["A2A: Agent Card"],
@@ -258,6 +300,16 @@
         "title": "ContentPart",
         "description": "One part of a message's content; only its text is read."
       },
+      "FieldOption": {
+        "properties": {
+          "value": { "anyOf": [{ "type": "string" }, { "type": "integer" }], "title": "Value" },
+          "label": { "type": "string", "title": "Label" }
+        },
+        "type": "object",
+        "required": ["value", "label"],
+        "title": "FieldOption",
+        "description": "One option of a searchable question: the value to answer with, and how the person sees it."
+      },
       "HTTPValidationError": {
         "properties": {
           "detail": { "items": { "$ref": "#/components/schemas/ValidationError" }, "type": "array", "title": "Detail" }
@@ -341,7 +393,8 @@
           "required": { "default": true, "title": "Required", "type": "boolean" },
           "title": { "default": "", "title": "Title", "type": "string" },
           "problem": { "default": "", "title": "Problem", "type": "string" },
-          "hint": { "default": "", "title": "Hint", "type": "string" }
+          "hint": { "default": "", "title": "Hint", "type": "string" },
+          "searchable": { "default": false, "title": "Searchable", "type": "boolean" }
         },
         "required": ["name", "question"],
         "title": "AskedQuestion",

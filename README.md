@@ -19,7 +19,7 @@ uv run uvicorn orchestrator_agent.app:app --port 8080
 | Path | Protocol | Description |
 | --- | --- | --- |
 | `POST /agui/` | AG-UI | The agent behind a frontend (the chat popup in `demos/web`); workflow forms through AG-UI interrupts |
-| `GET /chats/`, `GET /chats/{thread_id}`, `DELETE /chats/{thread_id}` | REST | The person's AG-UI chats: list them, read one (its last messages, its pending form stop), forget one |
+| `GET /chats/`, `GET /chats/{thread_id}`, `DELETE /chats/{thread_id}`, `GET /chats/{thread_id}/options/{field}` | REST | The person's AG-UI chats: list them, read one (its last messages, its pending form stop), forget one, search the options of a form question the stop asks |
 | `POST /` | A2A | Agent-to-agent JSON-RPC, protocol v1.0 (`SendMessage`, `SendStreamingMessage`) |
 | `GET /.well-known/agent-card.json` | A2A | Agent card discovery |
 | `POST /v1/chat/completions` | OpenAI chat completions | The agent as a chat model for LibreChat; workflow forms through its ask-user tool |

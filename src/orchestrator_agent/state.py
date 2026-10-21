@@ -63,6 +63,8 @@ class AskField:
     title: str = ""
     problem: str = ""  # core's message when it rejected the answer
     hint: str = ""  # one line shown with the question: how many options a long list has, what typed words matched
+    # A long list: a client that can search asks ``GET /chats/{thread}/options/{field}?q=`` and picks; typed words work too.
+    searchable: bool = False
 
 
 @dataclass(frozen=True)

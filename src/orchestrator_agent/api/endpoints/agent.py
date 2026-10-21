@@ -24,7 +24,7 @@ from structlog import get_logger
 from orchestrator_agent.adapters import AGUIWorker
 from orchestrator_agent.adapters.ag_ui import ThreadForbiddenError
 from orchestrator_agent.agent import WFOAgent
-from orchestrator_agent.api.dependencies import get_agent
+from orchestrator_agent.api.dependencies import bearer_token, get_agent
 from orchestrator_agent.security import subject_of
 
 router = APIRouter()
@@ -44,8 +44,7 @@ async def agent_conversation(
         logger.error("Invalid request body", error=str(e))
         raise HTTPException(status_code=400, detail=f"Invalid request body: {e}")
 
-    auth_header = request.headers.get("authorization", "")
-    auth_token = auth_header.removeprefix("Bearer ") if auth_header.startswith("Bearer ") else None
+    auth_token = bearer_token(request)
 
     try:
         stream = await AGUIWorker.run_request(

@@ -27,11 +27,11 @@ from orchestrator_agent.form_fill.widgets.resolve import (
 from .test_form_widgets import no_graphql, no_tool
 
 CUSTOMERS = (
-    Option("c-ut", "Universiteit Twente (UT)", aliases=("Universiteit Twente", "UT")),
-    Option("c-uu", "Universiteit Utrecht (UU)", aliases=("Universiteit Utrecht", "UU")),
+    Option("c-ua", "Universiteit Alder (UA)", aliases=("Universiteit Alder", "UA")),
+    Option("c-ub", "Universiteit Birch (UB)", aliases=("Universiteit Birch", "UB")),
     Option("c-ta", "Testaccount (TA)", aliases=("Testaccount", "TA")),
-    Option("c-x1", "SURF (SURF)", aliases=("SURF",)),
-    Option("c-x2", "SURF (SURF2)", aliases=("SURF", "SURF2")),
+    Option("c-x1", "Dune (DN)", aliases=("Dune",)),
+    Option("c-x2", "Dune (DN2)", aliases=("Dune", "DN2")),
     *(Option(f"c-{n}", f"Customer {n:02d}") for n in range(20)),
 )
 MANY = tuple(Option(f"c-{n}", f"Customer {n:03d}") for n in range(250))  # longer than the full read
@@ -82,8 +82,8 @@ class Refuses:
     [
         pytest.param("TESTACCOUNT", ["c-ta"], id="alias-any-case"),
         pytest.param("Testaccount (TA)", ["c-ta"], id="label"),
-        pytest.param("c-ut", ["c-ut"], id="value"),
-        pytest.param("surf", ["c-x1", "c-x2"], id="shared-name"),
+        pytest.param("c-ua", ["c-ua"], id="value"),
+        pytest.param("dune", ["c-x1", "c-x2"], id="shared-name"),
         pytest.param("test", [], id="part-of-a-name-is-no-exact-match"),
     ],
 )
@@ -96,15 +96,15 @@ async def test_an_exact_name_needs_no_model():
 
 
 async def test_exact_match_on_a_shared_name_offers_both():
-    resolution = await resolve_words(long_list(), "SURF", CTX, Refuses())
+    resolution = await resolve_words(long_list(), "Dune", CTX, Refuses())
     assert not resolution.resolved and [o.value for o in resolution.candidates] == ["c-x1", "c-x2"]
 
 
 @pytest.mark.parametrize(
     "picks,expected",
     [
-        pytest.param(["c-ut"], Resolution(value="c-ut", resolved=True), id="one-fits"),
-        pytest.param(["c-ut", "c-uu"], Resolution(candidates=(CUSTOMERS[0], CUSTOMERS[1])), id="several-fit"),
+        pytest.param(["c-ua"], Resolution(value="c-ua", resolved=True), id="one-fits"),
+        pytest.param(["c-ua", "c-ub"], Resolution(candidates=(CUSTOMERS[0], CUSTOMERS[1])), id="several-fit"),
         pytest.param([], Resolution(unmatched=("uni t",)), id="none-fits"),
         pytest.param(["made-up"], Resolution(unmatched=("uni t",)), id="outside-the-candidates"),
     ],
@@ -117,8 +117,8 @@ async def test_the_chooser_reads_the_words_over_the_candidates(picks, expected):
 
 
 async def test_a_chosen_value_outside_the_candidates_is_ignored():
-    resolution = await resolve_words(long_list(), "utwente", CTX, FakeChooser(["c-ut", "c-evil"]))
-    assert resolution == Resolution(value="c-ut", resolved=True)
+    resolution = await resolve_words(long_list(), "ualder", CTX, FakeChooser(["c-ua", "c-evil"]))
+    assert resolution == Resolution(value="c-ua", resolved=True)
 
 
 class OwnSearch:
@@ -184,19 +184,19 @@ async def test_a_search_returning_more_than_the_cap_is_cut_to_it():
 @pytest.mark.parametrize(
     "answer,multiple,expected",
     [
-        pytest.param("c-ut", False, Resolution(value="c-ut", resolved=True), id="a-picked-value-stands"),
-        pytest.param(["c-ut", "Testaccount"], True, Resolution(value=["c-ut", "c-ta"], resolved=True), id="list-items"),
+        pytest.param("c-ua", False, Resolution(value="c-ua", resolved=True), id="a-picked-value-stands"),
+        pytest.param(["c-ua", "Testaccount"], True, Resolution(value=["c-ua", "c-ta"], resolved=True), id="list-items"),
         pytest.param(
-            "UT, testaccount", True, Resolution(value=["c-ut", "c-ta"], resolved=True), id="list-typed-commas"
+            "UA, testaccount", True, Resolution(value=["c-ua", "c-ta"], resolved=True), id="list-typed-commas"
         ),
-        pytest.param("UT, nobody", True, Resolution(unmatched=("nobody",)), id="list-one-item-unmatched"),
+        pytest.param("UA, nobody", True, Resolution(unmatched=("nobody",)), id="list-one-item-unmatched"),
         pytest.param(
-            ["UT, testaccount"], True, Resolution(value=["c-ut", "c-ta"], resolved=True), id="typed-in-a-list"
+            ["UA, testaccount"], True, Resolution(value=["c-ua", "c-ta"], resolved=True), id="typed-in-a-list"
         ),
         pytest.param(
-            ["c-uu", "UT, testaccount"],
+            ["c-ub", "UA, testaccount"],
             True,
-            Resolution(value=["c-uu", "c-ut", "c-ta"], resolved=True),
+            Resolution(value=["c-ub", "c-ua", "c-ta"], resolved=True),
             id="pick-and-type",
         ),
         pytest.param(
@@ -223,18 +223,18 @@ def _scripted(picks):
 
 
 async def test_the_model_interpreter_chooses_among_the_given_options_only():
-    model, seen = _scripted(["c-ut"])
-    options = [("c-ut", "Universiteit Twente (UT)"), ("c-uu", "Universiteit Utrecht (UU)")]
-    assert await ModelInterpreter(model).choose("Customer", options, "twente") == ["c-ut"]
-    assert "Universiteit Twente (UT)" in seen["prompt"] and "twente" in seen["prompt"]
-    assert seen["schema"]["properties"]["values"]["items"]["enum"] == ["c-ut", "c-uu"]
+    model, seen = _scripted(["c-ua"])
+    options = [("c-ua", "Universiteit Alder (UA)"), ("c-ub", "Universiteit Birch (UB)")]
+    assert await ModelInterpreter(model).choose("Customer", options, "alder") == ["c-ua"]
+    assert "Universiteit Alder (UA)" in seen["prompt"] and "alder" in seen["prompt"]
+    assert seen["schema"]["properties"]["values"]["items"]["enum"] == ["c-ua", "c-ub"]
 
 
 @pytest.mark.parametrize(
     "value,expected",
     [
-        pytest.param("c-ut", "Universiteit Twente (UT)", id="one"),
-        pytest.param(["c-ut", "c-ta"], ["Universiteit Twente (UT)", "Testaccount (TA)"], id="list"),
+        pytest.param("c-ua", "Universiteit Alder (UA)", id="one"),
+        pytest.param(["c-ua", "c-ta"], ["Universiteit Alder (UA)", "Testaccount (TA)"], id="list"),
         pytest.param("c-gone", "c-gone", id="unknown-shown-as-is"),
     ],
 )

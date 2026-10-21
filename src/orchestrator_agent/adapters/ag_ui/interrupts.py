@@ -92,6 +92,8 @@ class AskedQuestion(BaseModel):
     title: str = ""
     problem: str = ""
     hint: str = ""
+    # The options are many: the client searches them (``GET /chats/{thread}/options/{field}?q=``) and picks one.
+    searchable: bool = False
 
 
 class AskStop(BaseModel):

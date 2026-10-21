@@ -88,6 +88,29 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
+  "/chats/{thread_id}/options/{field}": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /**
+     * Search Options
+     * @description The options of a searchable question of the chat's pending form stop that ``q`` fits.
+     *
+     *     For a client that lets the person search a long list instead of typing a name blind: the pick is
+     *     answered with the option's value. The options come from the field's widget, as the person asking.
+     */
+    get: operations["search_options_chats__thread_id__options__field__get"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
   "/.well-known/agent-card.json": {
     parameters: {
       query?: never;
@@ -272,6 +295,16 @@ export interface components {
       /** Text */
       text?: string | null;
     };
+    /**
+     * FieldOption
+     * @description One option of a searchable question: the value to answer with, and how the person sees it.
+     */
+    FieldOption: {
+      /** Value */
+      value: string | number;
+      /** Label */
+      label: string;
+    };
     /** HTTPValidationError */
     HTTPValidationError: {
       /** Detail */
@@ -384,6 +417,11 @@ export interface components {
        * @default
        */
       hint?: string;
+      /**
+       * Searchable
+       * @default false
+       */
+      searchable?: boolean;
     };
     /**
      * ChartData
@@ -849,6 +887,41 @@ export interface operations {
           [name: string]: unknown;
         };
         content?: never;
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  search_options_chats__thread_id__options__field__get: {
+    parameters: {
+      query?: {
+        q?: string;
+        limit?: number;
+      };
+      header?: never;
+      path: {
+        thread_id: string;
+        field: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["FieldOption"][];
+        };
       };
       /** @description Validation Error */
       422: {

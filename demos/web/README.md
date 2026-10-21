@@ -40,7 +40,12 @@ agent and allow the origin there.
 | `defaultOpen`  | Open on load.                                                                                  |
 
 `useWfoAgent` is the hook behind the component, for a host that wants its own chat surface: the thread,
-its interrupts, and `send`, `respond`, `stop`, `newChat`, `listChats`, `openChat`, `deleteChat`.
+its interrupts, and `send`, `respond`, `stop`, `newChat`, `listChats`, `openChat`, `deleteChat`,
+`searchOptions`.
+
+A form question with many options (a customer among hundreds) is searchable: the card shows a search box,
+the words typed fetch the options they fit from the agent (`GET /chats/{thread}/options/{field}?q=`), and
+the pick is the answer. A list question keeps every pick as a chip.
 
 ### Theming
 

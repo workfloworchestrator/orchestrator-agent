@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import { HttpError, describe, request } from "../api/client";
-import type { ChatDetail, ChatSummary } from "../api/types";
+import type { ChatDetail, ChatSummary, FieldOption } from "../api/types";
 
 export interface Chats {
   chats: ChatSummary[];
@@ -13,6 +13,8 @@ export interface Chats {
   load: (threadId: string) => Promise<ChatDetail | null>;
   /** Forget a chat; whether the agent did. */
   remove: (threadId: string) => Promise<boolean>;
+  /** The options of a searchable question of the chat's pending form stop that the words fit. */
+  options: (threadId: string, field: string, words: string) => Promise<FieldOption[]>;
 }
 
 /** The person's chats as the agent keeps them, through the chats API next to the AG-UI route. */
@@ -79,5 +81,18 @@ export function useChats({
     [get],
   );
 
-  return useMemo(() => ({ chats, loading, error, list, load, remove }), [chats, loading, error, list, load, remove]);
+  const options = useCallback(
+    async (id: string, field: string, words: string) => {
+      const query = new URLSearchParams({ q: words, limit: "20" });
+      return (
+        (await get<FieldOption[]>(`/${encodeURIComponent(id)}/options/${encodeURIComponent(field)}?${query}`)) ?? []
+      );
+    },
+    [get],
+  );
+
+  return useMemo(
+    () => ({ chats, loading, error, list, load, remove, options }),
+    [chats, loading, error, list, load, remove, options],
+  );
 }
