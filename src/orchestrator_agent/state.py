@@ -147,8 +147,6 @@ class FormFillSession(BaseModel):
 
     # widget field -> what the person's words resolved to: {"value": <option value>, "label": <its label>}
     resolved: dict[str, dict[str, Any]] = Field(default_factory=dict)
-    # cascade widget field -> the steps chosen before its value ({"node": <node>}): never sent to core
-    steps: dict[str, dict[str, Any]] = Field(default_factory=dict)
     # widget fields that waited for another value (``later``) at the last stop: asked once they have options
     waiting: list[str] = Field(default_factory=list)
     # accept fields: "<page>:<name>" -> the fingerprint of what the consent was given for (see the skill)

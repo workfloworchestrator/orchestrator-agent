@@ -6,7 +6,9 @@ license = "Apache-2.0"
 requires-python = ">=3.11,<3.14"
 dependencies = [
     "orchestrator-core>=5.5.0",
-    "pydantic-forms>=2.8.0rc1",  # core's form types the skill reads (``FormFieldError``)
+    # TODO: >=2.10.0 (``OptionsSource``) once released; until then the sibling checkout ../pydantic-forms is
+    # installed editable into the venv (``uv pip install -e ../pydantic-forms``) and runs use ``--no-sync``.
+    "pydantic-forms>=2.8.0rc1",  # core's form types the skill reads, and the option sources its fields declare
     "pydantic-ai-slim[mcp]>=2.0,<3",
     "ag-ui-protocol>=1.0.0,<2",  # interrupts (``RunFinishedEvent.outcome``, ``RunAgentInput.resume``): the AG-UI human-in-the-loop
     "a2a-sdk[http-server]>=1.1.5,<2",
