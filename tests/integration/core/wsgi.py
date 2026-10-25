@@ -5,4 +5,4 @@ from orchestrator.core import OrchestratorCore
 from orchestrator.core.settings import AppSettings
 
 app = OrchestratorCore(base_settings=AppSettings())
-app.register_graphql(query=demo.DemoQuery)
+app.include_router(demo.router)  # the route the demo form's fields point at

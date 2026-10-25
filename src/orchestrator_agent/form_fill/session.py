@@ -154,20 +154,6 @@ def drop_answer(session: FormFillSession, name: str) -> None:
     session.resolved.pop(name, None)
 
 
-def choose_step(session: FormFillSession, name: str, step: str, value: Any | None) -> None:
-    """A cascade field's step was answered: the choice is kept with the field's steps, the field itself has no value yet."""
-    session.values.pop(name, None)
-    if value is not None:
-        session.steps.setdefault(name, {})[step] = value
-
-
-def step_back(session: FormFillSession, name: str) -> None:
-    """A cascade field's steps are asked again, from the first."""
-    session.steps.pop(name, None)
-    session.values.pop(name, None)
-    session.resolved.pop(name, None)
-
-
 def begin_walk(session: FormFillSession) -> None:
     """A walk starts from page 0: this walk's pages only, so a regenerated form leaves no stale field behind."""
     session.pages = []
@@ -245,7 +231,6 @@ __all__ = [
     "Unanswered",
     "answer",
     "begin_walk",
-    "choose_step",
     "close",
     "consent",
     "drop_answer",
@@ -259,7 +244,6 @@ __all__ = [
     "opened",
     "paused",
     "saw_page",
-    "step_back",
     "stop_at",
     "transition",
 ]

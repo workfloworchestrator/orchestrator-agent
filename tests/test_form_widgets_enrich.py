@@ -15,7 +15,7 @@ from orchestrator_agent.form_fill.model import FieldSpec, fields_in, options_of
 from orchestrator_agent.form_fill.widgets import MAX_INLINE, Option, Widget, WidgetContext
 from orchestrator_agent.form_fill.widgets.enrich import enrich
 
-from .test_form_widgets import no_graphql, no_tool
+from .test_form_widgets import no_fetch, no_tool
 
 
 def fields_of_schema(schema: dict[str, Any]) -> dict[str, FieldSpec]:
@@ -78,7 +78,7 @@ class Customers(Widget):
         return self.result
 
 
-CTX = WidgetContext(call_tool=no_tool, graphql=no_graphql)
+CTX = WidgetContext(call_tool=no_tool, fetch=no_fetch)
 
 
 async def test_a_short_list_becomes_cores_own_choice_shape():

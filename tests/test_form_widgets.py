@@ -16,7 +16,6 @@ from orchestrator_agent.form_fill.widgets import (
     Option,
     Widget,
     WidgetContext,
-    field_hint,
     match_widget,
     narrow_options,
 )
@@ -45,11 +44,11 @@ async def no_tool(name: str, args: dict[str, Any]) -> Any:
     raise AssertionError(f"no tool call expected, got {name}")
 
 
-async def no_graphql(query: str, variables: Mapping[str, Any] | None = None) -> dict[str, Any]:
-    raise AssertionError("no GraphQL call expected")
+async def no_fetch(url: str) -> Any:
+    raise AssertionError(f"no fetch expected, got {url}")
 
 
-CTX = WidgetContext(call_tool=no_tool, graphql=no_graphql)
+CTX = WidgetContext(call_tool=no_tool, fetch=no_fetch)
 
 
 class TestNarrowing:
@@ -110,21 +109,6 @@ class TestNarrowing:
         assert await widget.options({}, CTX) == CUSTOMERS
         assert [o.value for o in await widget.options({}, CTX, search="alder")] == ["c-1"]
         assert await FormatWidget("later", "x", None).options({}, CTX, search="ua") is None
-
-
-@pytest.mark.parametrize(
-    "field,expected",
-    [
-        pytest.param({"extraProperties": {"productIds": ["a"]}}, ["a"], id="extra-properties"),
-        pytest.param({"uniforms": {"productIds": ["b"]}}, ["b"], id="uniforms"),
-        pytest.param(
-            {"extraProperties": {"productIds": ["a"]}, "uniforms": {"productIds": ["b"]}}, ["a"], id="extra-wins"
-        ),
-        pytest.param({}, None, id="none"),
-    ],
-)
-def test_a_hint_comes_from_extra_properties_then_uniforms(field, expected):
-    assert field_hint(field, "productIds") == expected
 
 
 class TestRegistry:

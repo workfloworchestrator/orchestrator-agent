@@ -13,10 +13,10 @@
 
 """What a widget is: the agent's counterpart of a pydantic-forms component matcher.
 
-The browser renders a field with the first component whose matcher accepts it, and a component such as the
-customer select fetches its own options. Core's page schema carries only the ``format`` marker and hints for
-those fields; a widget is what the agent knows about one such format — whether a property is one
-(``matches``) and the options it has (``options``), fetched from core as the person asking.
+The browser renders a field with the first component whose matcher accepts it, and a component such as a select
+fetches its own options. A widget is what the agent does for such a field: whether a property is one
+(``matches``) and the options it has (``options``), fetched as the person asking. The one the agent ships
+(``widgets.source``) reads the ``optionsSource`` a field carries; a deployment may add its own.
 """
 
 from __future__ import annotations
@@ -44,18 +44,18 @@ class Option:
     aliases: tuple[str, ...] = ()
 
 
-class GraphQL(Protocol):
-    """A query against core's GraphQL API as the person asking; the ``data`` of the answer."""
+class Fetch(Protocol):
+    """GET a JSON document from core's API as the person asking, by the URL a field's source wrote."""
 
-    async def __call__(self, query: str, variables: Mapping[str, Any] | None = None) -> dict[str, Any]: ...
+    async def __call__(self, url: str) -> Any: ...
 
 
 @dataclass(frozen=True)
 class WidgetContext:
-    """What a widget may use to find its options: core's two APIs, and the form values known so far."""
+    """What a widget may use to find its options: core's tools and API, and the form values known so far."""
 
     call_tool: CallTool
-    graphql: GraphQL
+    fetch: Fetch
     values: Mapping[str, Any] = field(default_factory=dict)
 
 
@@ -78,7 +78,8 @@ class FieldWidget(Protocol):
 class Widget(ABC):
     """A widget whose source returns the whole list: a search narrows what ``fetch`` returned.
 
-    A widget whose source can search on its own (thousands of subscriptions) implements ``options`` instead.
+    A widget whose source can search on its own (thousands of subscriptions) says so in ``can_search`` and
+    implements ``options`` for that case.
     """
 
     id: str
@@ -88,6 +89,10 @@ class Widget(ABC):
 
     @abstractmethod
     async def fetch(self, field: Mapping[str, Any], ctx: WidgetContext) -> Sequence[Option] | None: ...
+
+    def can_search(self, field: Mapping[str, Any]) -> bool:
+        """Whether this field's source narrows a list on the server, so a search is asked of it rather than made here."""
+        return False
 
     async def options(
         self, field: Mapping[str, Any], ctx: WidgetContext, search: str | None = None
@@ -131,22 +136,15 @@ def narrow_options(options: Sequence[Option], words: str, limit: int = MAX_CANDI
     return (by_word or by_text)[:limit]
 
 
-def field_hint(field: Mapping[str, Any], key: str) -> Any:
-    """A hint the form put on the field for its component (``extraProperties``, else the older ``uniforms``)."""
-    places = (field.get("extraProperties"), field.get("uniforms"))
-    return next((hints[key] for hints in places if isinstance(hints, Mapping) and key in hints), None)
-
-
 __all__ = [
     "MAX_CANDIDATES",
     "MAX_FULL_READ",
     "MAX_INLINE",
+    "Fetch",
     "FieldWidget",
-    "GraphQL",
     "Option",
     "Widget",
     "WidgetContext",
-    "field_hint",
     "names_of",
     "narrow_options",
 ]

@@ -39,10 +39,10 @@ from orchestrator_agent.form_fill.interpret import Chooser, Interpreter
 from orchestrator_agent.form_fill.model import ACCEPT, FieldSpec, askable, fields_of, form_schema, label_of, options_of
 from orchestrator_agent.form_fill.questions import offered, questions
 from orchestrator_agent.form_fill.verdicts import miscounted, picked, unanswerable
-from orchestrator_agent.form_fill.widgets import FieldWidget, GraphQL, WidgetContext
+from orchestrator_agent.form_fill.widgets import Fetch, FieldWidget, WidgetContext
 from orchestrator_agent.form_fill.widgets.enrich import EnrichedPage, LongList, enrich
 from orchestrator_agent.form_fill.widgets.resolve import Resolution, resolve_answer, shown_as
-from orchestrator_agent.form_fill.widgets.steps import goes_back, stepped, takes_only_option, waiting, waits
+from orchestrator_agent.form_fill.widgets.waiting import takes_only_option, waiting, waits
 from orchestrator_agent.state import Approval, AskField, FormFillSession, FormReply, Reply
 from orchestrator_agent.tool_names import GET_WORKFLOW_FORM_TOOL
 
@@ -63,8 +63,8 @@ class Walk:
 
     session: FormFillSession
     call_tool: CallTool
-    widgets: Sequence[FieldWidget] = ()  # the formats whose options core leaves to a frontend
-    graphql: GraphQL | None = None  # core's GraphQL API, for the widgets that read it
+    widgets: Sequence[FieldWidget] = ()  # the fields whose options core leaves to a client
+    fetch: Fetch | None = None  # core's API, where a field's source is fetched from
     choose: Chooser | None = None  # words a person typed for a widget field -> the options they fit
     interpret: Interpreter | None = None  # a person's answers core rejected -> the values the fields expect
 
@@ -97,8 +97,8 @@ def reply_of(session: FormFillSession, status: Any, **data: Any) -> Reply:
     return as_reply(FormReply(workflow_key=session.workflow_key, status=status, **data))
 
 
-async def _no_graphql(query: str, variables: Mapping[str, Any] | None = None) -> dict[str, Any]:
-    raise RuntimeError("no GraphQL endpoint of core is configured for the form-fill widgets")
+async def _no_fetch(url: str) -> Any:
+    raise RuntimeError("no API of core is configured to fetch a field's options from")
 
 
 # --- the walk ---------------------------------------------------------------------------------------------------
@@ -203,39 +203,33 @@ async def enriched(
     """The page with its widgets' options, its answered widget fields resolved; those that were not, by name.
 
     A widget reads the values known so far, so once resolving changed what it read — a typed name became
-    its option, a cascade step was chosen — the page is enriched and resolved once more (and only once).
+    its option, which another field's source depends on — the page is enriched and resolved once more (and only once).
     """
-    session = ctx.session
     wctx = widget_context(ctx, pages)
-    page = await enrich(schema, ctx.widgets, wctx, session.steps)
+    page = await enrich(schema, ctx.widgets, wctx)
     unresolved = await resolve(ctx, page.choices, wctx)
     resolved = widget_context(ctx, pages)
-    if resolved.values == wctx.values and not stepped(page.choices, session):
+    if resolved.values == wctx.values:
         return page, unresolved
-    page = await enrich(schema, ctx.widgets, resolved, session.steps)
+    page = await enrich(schema, ctx.widgets, resolved)
     return page, {**unresolved, **await resolve(ctx, page.choices, resolved)}
 
 
 def widget_context(ctx: Walk, pages: list[dict[str, Any]]) -> WidgetContext:
-    """What a widget may use on this page: core's APIs, and every value known so far."""
+    """What a widget may use on this page: core's tools and API, and every value known so far."""
     known = {name: value for page in pages for name, value in page.items()}
-    return WidgetContext(
-        call_tool=ctx.call_tool, graphql=ctx.graphql or _no_graphql, values={**known, **ctx.session.values}
-    )
+    return WidgetContext(call_tool=ctx.call_tool, fetch=ctx.fetch or _no_fetch, values={**known, **ctx.session.values})
 
 
 async def resolve(ctx: Walk, widget_choices: Mapping[str, LongList], wctx: WidgetContext) -> dict[str, Resolution]:
     """Each answered widget field of the page resolved to its options in place; those that were not, by name.
 
     Every widget field with options is resolved, chips included: core takes any string for some of them
-    (``CustomerId``), and a transport takes typed text next to the chips. A picked chip is one of the
-    options and stands without a model call. A resolved value replaces the words, so the next walk finds
-    it among the options and reads nothing again.
+    (a sourced field is a plain string to it), and a transport takes typed text next to the chips. A picked
+    chip is one of the options and stands without a model call. A resolved value replaces the words, so the
+    next walk finds it among the options and reads nothing again.
     """
     session = ctx.session
-    back = {name for name, choice in widget_choices.items() if goes_back(choice, session.values.get(name))}
-    for name in back:  # "Choose another node": the field's steps are asked again, from the first
-        fs.step_back(session, name)
     answered = {
         name: choice for name, choice in widget_choices.items() if session.values.get(name) not in (None, "", [])
     }
@@ -248,14 +242,8 @@ async def resolve(ctx: Walk, widget_choices: Mapping[str, LongList], wctx: Widge
 
 
 def record(session: FormFillSession, name: str, choice: LongList, outcome: Resolution) -> None:
-    """Keep what the words resolved to in place of the words; drop words that did not resolve (core never sees them).
-
-    The answer to a cascade field's step is that step's choice, kept with the field's steps: the field has no
-    value yet, and the next walk asks its next step or its value.
-    """
-    if choice.step is not None:
-        fs.choose_step(session, name, choice.step, outcome.value if outcome.resolved else None)
-    elif outcome.resolved:
+    """Keep what the words resolved to in place of the words; drop words that did not resolve (core never sees them)."""
+    if outcome.resolved:
         fs.keep_resolved(session, name, outcome.value, shown_as(choice, outcome.value))
     else:
         fs.drop_answer(session, name)

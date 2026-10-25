@@ -31,7 +31,7 @@ from orchestrator_agent.form_fill.model import FieldSpec, askable, options_of
 from orchestrator_agent.form_fill.verdicts import count_of
 from orchestrator_agent.form_fill.widgets import MAX_INLINE
 from orchestrator_agent.form_fill.widgets.resolve import Resolution
-from orchestrator_agent.form_fill.widgets.steps import CHANGE_STEP, waits
+from orchestrator_agent.form_fill.widgets.waiting import waits
 from orchestrator_agent.state import AskField, Reply
 
 _MISSING = "missing"  # pydantic's error type for a required field without a value: the question says so already
@@ -130,14 +130,11 @@ def question(field: FieldSpec, problem: str = "") -> AskField:
     hint = LONG_LIST_HINT.format(total=mark["total"]) if mark.get("total") else ""
     if "total" in mark and not mark["total"]:  # a widget field whose source has nothing to offer
         hint = NO_OPTIONS.format(title=title)
-    # The field's help text, where nothing else is said — a step's question asks for the step, not the field.
-    if not mark.get("total") and not mark.get("step") and field.description:
+    # The field's help text, where nothing else is said.
+    if not mark.get("total") and field.description:
         hint = " ".join(filter(None, (hint, field.description)))
     if count := count_of(field):  # a list's size is known from the schema: said up front, not learnt from core
         hint = " ".join(filter(None, (hint, f"{count}.")))
-    if stepped := mark.get("stepped"):  # its options follow from steps chosen first: offer to choose again
-        change = CHANGE_STEP.format(step=" / ".join(stepped))
-        values, hint = (*values, change), " ".join(filter(None, (hint, f'Pick "{change}" to go back.')))
     return AskField(
         name=field.name,
         question=text,
@@ -153,12 +150,8 @@ def question(field: FieldSpec, problem: str = "") -> AskField:
 
 
 def _title(field: FieldSpec) -> str:
-    """The field's label, the schema's title; a cascade step keeps its own part ("Port — Node")."""
-    schema_title = field.title or field.name
-    stepped = " — " in schema_title and bool((field.widget or {}).get("step"))
-    step = schema_title.split(" — ", 1)[1] if stepped else None
-    label = schema_title.split(" — ", 1)[0]
-    return f"{label} — {step.capitalize()}" if step else label
+    """The field's label: the schema's title."""
+    return field.title or field.name
 
 
 def unique_choices(options: Sequence[Any], shown: Mapping[str, str]) -> tuple[str, ...]:
@@ -195,7 +188,6 @@ def _offer(field: AskField, outcome: Resolution | None) -> AskField:
 
 
 __all__ = [
-    "CHANGE_STEP",
     "LONG_LIST_HINT",
     "NOTHING_FIT",
     "NO_OPTIONS",

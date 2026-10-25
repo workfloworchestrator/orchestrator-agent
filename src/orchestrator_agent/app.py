@@ -26,7 +26,7 @@ from orchestrator_agent.adapters.ag_ui.contract import openapi_with_the_agui_con
 from orchestrator_agent.agent import build_agent
 from orchestrator_agent.api.api import api_router
 from orchestrator_agent.form_fill import build_form_fill_skill
-from orchestrator_agent.form_fill.widgets import CoreGraphQL
+from orchestrator_agent.form_fill.widgets import CoreApi
 from orchestrator_agent.mcp_client import build_core_toolset, verify_tool_contract
 from orchestrator_agent.observability import configure_langfuse, shutdown_langfuse
 from orchestrator_agent.security import AuthMiddleware, create_auth_manager
@@ -67,8 +67,8 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     stack = AsyncExitStack()
     await stack.__aenter__()
     await stack.enter_async_context(mcp_app)
-    if isinstance(form_fill.graphql, CoreGraphQL):
-        stack.push_async_callback(form_fill.graphql.aclose)
+    if isinstance(form_fill.fetch, CoreApi):
+        stack.push_async_callback(form_fill.fetch.aclose)
 
     logger.info(
         "Agent adapters started",

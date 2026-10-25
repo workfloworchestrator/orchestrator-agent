@@ -20,7 +20,7 @@ from orchestrator_agent.form_fill.interpret import ModelInterpreter
 from orchestrator_agent.form_fill.pending import pending_of
 from orchestrator_agent.form_fill.questions import NOTHING_FIT, SEVERAL_FIT, TOO_MANY_FIT
 from orchestrator_agent.form_fill.skill import FormFillSkill
-from orchestrator_agent.form_fill.widgets import CoreGraphQL, FieldWidget, Option, Widget, WidgetContext
+from orchestrator_agent.form_fill.widgets import CoreApi, FieldWidget, Option, Widget, WidgetContext
 from orchestrator_agent.state import AskField, FormFillSession, Reply, SearchState
 
 from .test_form_fill import (
@@ -405,8 +405,8 @@ def test_kagent_shows_the_hint_after_the_question():
     assert payload.questions[0].question == "Customer (`customer_id`, required) — Type a name — 23 options."
 
 
-def test_the_skill_is_built_with_the_builtins_and_one_model_reading_and_choosing():
+def test_the_skill_is_built_with_the_one_widget_and_one_model_reading_and_choosing():
     skill = build_form_fill_skill("test")
-    assert [widget.id for widget in skill.widgets] == ["customerId", "productId"]
+    assert [widget.id for widget in skill.widgets] == ["optionsSource"]
     assert isinstance(skill.interpret, ModelInterpreter) and skill.choose is skill.interpret
-    assert isinstance(skill.graphql, CoreGraphQL) and skill.graphql.url.endswith("/api/graphql")
+    assert isinstance(skill.fetch, CoreApi) and skill.fetch.base == "http://localhost:8080"  # the MCP URL's origin

@@ -73,7 +73,7 @@ def _is_session(node: ast.AST) -> bool:
 
 
 def _field_of(node: ast.AST) -> str | None:
-    """The session field an expression reaches into (``session.values[...]``, ``session.steps.setdefault(...)[...]``)."""
+    """The session field an expression reaches into (``session.values[...]``, ``session.resolved[...]``)."""
     while isinstance(node, (ast.Subscript, ast.Call, ast.Attribute)):
         if isinstance(node, ast.Attribute) and node.attr in FIELDS and _is_session(node.value):
             return node.attr

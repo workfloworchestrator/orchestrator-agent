@@ -24,7 +24,7 @@ from orchestrator_agent.form_fill.widgets.resolve import (
     shown_as,
 )
 
-from .test_form_widgets import no_graphql, no_tool
+from .test_form_widgets import no_fetch, no_tool
 
 CUSTOMERS = (
     Option("c-ua", "Universiteit Alder (UA)", aliases=("Universiteit Alder", "UA")),
@@ -36,7 +36,7 @@ CUSTOMERS = (
 )
 MANY = tuple(Option(f"c-{n}", f"Customer {n:03d}") for n in range(250))  # longer than the full read
 FOO = Option("c-foo", "Foo, Inc.")  # a name with a comma in it
-CTX = WidgetContext(call_tool=no_tool, graphql=no_graphql)
+CTX = WidgetContext(call_tool=no_tool, fetch=no_fetch)
 
 
 class Searchable(Widget):

@@ -1,4 +1,4 @@
-"""The built-in widgets and the skill against a real orchestrator-core: its GraphQL schema, its MCP tools, its forms."""
+"""The one widget and the skill against a real orchestrator-core: its routes, its MCP tools, its forms."""
 
 from __future__ import annotations
 
@@ -6,7 +6,7 @@ import pytest
 
 from orchestrator_agent.form_fill.model import fields_in, options_of
 from orchestrator_agent.form_fill.skill import FormFillSkill
-from orchestrator_agent.form_fill.widgets import BUILTIN_WIDGETS, CoreGraphQL, CustomerIdWidget, ProductIdWidget
+from orchestrator_agent.form_fill.widgets import CoreApi, OptionsSourceWidget
 from orchestrator_agent.form_fill.widgets.enrich import enrich
 from orchestrator_agent.state import Decision, SearchState
 
@@ -14,6 +14,13 @@ from ..test_form_fill import open_form, turn
 
 P1, P2 = "d8a3f9b0-1111-4000-8000-000000000001", "d8a3f9b0-1111-4000-8000-000000000002"
 KEY = "widget_demo"
+# As the demo core's fields declare them (tests/integration/core/demo.py).
+CUSTOMER = {
+    "type": "string",
+    "optionsSource": {"url": "/api/demo/customers", "value": "customer_id", "label": "{fullname} ({shortcode})"},
+}
+PRODUCT = {"type": "string", "optionsSource": {"url": "/api/products/", "value": "product_id", "label": "name"}}
+WIDGET = OptionsSourceWidget()
 
 
 class Chooser:
@@ -30,12 +37,12 @@ class Refuses:
         raise AssertionError("no model call expected")
 
 
-def skill(graphql, choose=None) -> FormFillSkill:
-    return FormFillSkill(widgets=list(BUILTIN_WIDGETS), graphql=graphql, choose=choose)
+def skill(fetch, choose=None) -> FormFillSkill:
+    return FormFillSkill(widgets=[WIDGET], fetch=fetch, choose=choose)
 
 
-async def test_customers_come_from_cores_graphql_schema(ctx):
-    options = await CustomerIdWidget().options({"type": "string", "format": "customerId"}, ctx)
+async def test_customers_come_from_the_route_the_field_names(ctx):
+    options = await WIDGET.options(CUSTOMER, ctx)
     assert len(options) == 30 and options[0].value == "cust-00" and options[0].label == "Customer 00 (C00)"
 
 
@@ -49,29 +56,28 @@ async def test_customers_come_from_cores_graphql_schema(ctx):
     ],
 )
 async def test_searching_the_customers(ctx, words, first):
-    options = await CustomerIdWidget().options({"type": "string", "format": "customerId"}, ctx, search=words)
+    options = await WIDGET.options(CUSTOMER, ctx, search=words)
     assert (options[0].value if options else None) == first
 
 
-async def test_products_come_from_list_products_restricted_to_the_fields_ids(ctx):
-    field = {"type": "string", "format": "productId", "extraProperties": {"productIds": [P1, P2]}}
-    options = await ProductIdWidget().options(field, ctx)
-    assert sorted(option.label for option in options) == ["Widget Port 10G", "Widget Port 1G"]
+async def test_products_come_from_cores_own_route(ctx):
+    options = await WIDGET.options(PRODUCT, ctx)
+    assert {"Widget Port 10G", "Widget Port 1G"} <= {option.label for option in options}
 
 
 async def test_the_real_page_is_enriched(core, ctx):
     page = await core.direct_call_tool("get_workflow_form", {"workflow_key": KEY, "page_inputs": []})
-    enriched = await enrich(page["schema"], BUILTIN_WIDGETS, ctx)
+    enriched = await enrich(page["schema"], [WIDGET], ctx)
     fields = {field.name: field for field in fields_in(enriched.schema)}
-    assert sorted(o.value for o in options_of(fields["product_id"]) or ()) == sorted([P1, P2])  # two products: chips
-    assert fields["customer_id"].widget == {"id": "customerId", "total": 30}  # thirty customers: typed
-    assert set(enriched.choices) == {"customer_id", "customers", "product_id"}  # every widget field with options
+    assert {P1, P2} <= {str(o.value) for o in options_of(fields["product_id"]) or ()}  # a few products: chips
+    assert fields["customer_id"].widget == {"id": "optionsSource", "total": 30}  # thirty customers: typed
+    assert set(enriched.choices) == {"customer_id", "customers", "product_id"}  # every sourced field with options
     assert {name for name, field in fields.items() if "total" in (field.widget or {})} == {"customer_id", "customers"}
     assert fields["note"].widget is None
 
 
-async def test_an_exact_name_walks_to_the_approval_and_core_runs_it(core, graphql):
-    state, form = SearchState(), skill(graphql, Refuses())
+async def test_an_exact_name_walks_to_the_approval_and_core_runs_it(core, fetch):
+    state, form = SearchState(), skill(fetch, Refuses())
     reply = await open_form(form, core.direct_call_tool, state, KEY, {"customer_id": "testaccount", "product_id": P1})
     assert reply.status == "confirming" and reply.values["customer_id"] == "cust-07"
     assert reply.labels["customer_id"] == "Testaccount (TA)" and reply.labels["product_id"] == "Widget Port 10G"
@@ -79,29 +85,29 @@ async def test_an_exact_name_walks_to_the_approval_and_core_runs_it(core, graphq
     assert started.status == "started" and started.process_id
 
 
-async def test_the_chooser_picks_among_the_candidates(core, graphql):
+async def test_the_chooser_picks_among_the_candidates(core, fetch):
     chooser = Chooser(["cust-12"])
     answers = {"customer_id": "twelve", "product_id": P1}
-    reply = await open_form(skill(graphql, chooser), core.direct_call_tool, SearchState(), KEY, answers)
+    reply = await open_form(skill(fetch, chooser), core.direct_call_tool, SearchState(), KEY, answers)
     assert reply.values["customer_id"] == "cust-12" and len(chooser.calls[0]) == 30  # all thirty: a short list
 
 
-async def test_several_fits_are_asked_again_as_chips(core, graphql):
+async def test_several_fits_are_asked_again_as_chips(core, fetch):
     chooser = Chooser(["cust-01", "cust-02"])
     answers = {"customer_id": "one or two", "product_id": P1}
-    reply = await open_form(skill(graphql, chooser), core.direct_call_tool, SearchState(), KEY, answers)
+    reply = await open_form(skill(fetch, chooser), core.direct_call_tool, SearchState(), KEY, answers)
     customer = reply.question("customer_id")
     assert reply.status == "gathering" and customer.values == ("cust-01", "cust-02")
 
 
-async def test_a_list_of_customers_resolves_each_item(core, graphql):
+async def test_a_list_of_customers_resolves_each_item(core, fetch):
     answers = {"customer_id": "C03", "customers": ["testaccount, C05"], "product_id": P2}  # as both transports send it
-    reply = await open_form(skill(graphql, Refuses()), core.direct_call_tool, SearchState(), KEY, answers)
+    reply = await open_form(skill(fetch, Refuses()), core.direct_call_tool, SearchState(), KEY, answers)
     assert reply.values["customers"] == ["cust-07", "cust-05"]
 
 
-async def test_unreachable_graphql_leaves_customer_free_text(core):
-    unreachable = CoreGraphQL("http://127.0.0.1:9/api/graphql", timeout=2)
+async def test_an_unreachable_source_leaves_customer_free_text(core):
+    unreachable = CoreApi("http://127.0.0.1:9", timeout=2)
     reply = await open_form(skill(unreachable), core.direct_call_tool, SearchState(), KEY, {"product_id": P1})
     customer = reply.question("customer_id")
     assert customer.choices == () and customer.hint == ""  # as before widgets: typed, nothing resolved

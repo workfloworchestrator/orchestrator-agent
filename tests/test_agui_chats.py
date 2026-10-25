@@ -366,7 +366,7 @@ def _searching_thread() -> StoredThread:
 
 @pytest.fixture
 def searching_client(client):
-    client.app.state.form_fill = FormFillSkill(widgets=[_CustomerWidget()], graphql=AsyncMock())
+    client.app.state.form_fill = FormFillSkill(widgets=[_CustomerWidget()], fetch=AsyncMock())
     client.app.state.core_toolset = SimpleNamespace(direct_call_tool=AsyncMock())
     return client
 

@@ -23,13 +23,7 @@ from pydantic_ai.models import Model
 from orchestrator_agent.form_fill.capability import FormFillCapability
 from orchestrator_agent.form_fill.interpret import Interpreter, ModelInterpreter
 from orchestrator_agent.form_fill.skill import CallTool, FormFillSkill
-from orchestrator_agent.form_fill.widgets import (
-    BUILTIN_WIDGETS,
-    CoreGraphQL,
-    FieldWidget,
-    GraphQL,
-    graphql_url,
-)
+from orchestrator_agent.form_fill.widgets import CoreApi, Fetch, FieldWidget, OptionsSourceWidget, api_base
 from orchestrator_agent.settings import agent_settings
 from orchestrator_agent.state import Approval, AskField, FormInput, FormReply, Reply
 
@@ -38,20 +32,20 @@ def build_form_fill_skill(
     model: Model | str | None = None,
     *,
     widgets: Sequence[FieldWidget] | None = None,
-    graphql: GraphQL | None = None,
+    fetch: Fetch | None = None,
 ) -> FormFillSkill:
     """The skill as configured, with ``model`` reading what a person typed where a value was expected.
 
     ``model`` interprets typed answers core rejected and chooses the option typed words mean for a long-list
-    widget field. The widgets are the built-ins (``customerId``, ``productId``); they read core's GraphQL API beside
-    its MCP endpoint unless configured otherwise.
+    widget field. The one widget reads the ``optionsSource`` a field carries and fetches it from core's API,
+    the origin of its MCP endpoint unless configured otherwise, as the person asking.
     """
     reader = ModelInterpreter(model) if model is not None else None
+    base = api_base(agent_settings.WFO_CORE_MCP_URL, agent_settings.WFO_CORE_API_URL)
     return FormFillSkill(
         interpret=reader,
-        widgets=list(BUILTIN_WIDGETS) if widgets is None else list(widgets),
-        graphql=graphql
-        or CoreGraphQL(graphql_url(agent_settings.WFO_CORE_MCP_URL, agent_settings.WFO_CORE_GRAPHQL_URL)),
+        widgets=[OptionsSourceWidget()] if widgets is None else list(widgets),
+        fetch=fetch or CoreApi(base, allowed_hosts=agent_settings.WFO_OPTIONS_HOSTS),
         choose=reader,
     )
 
