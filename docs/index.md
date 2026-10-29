@@ -9,7 +9,8 @@ products, workflows and processes, and starts workflows from a conversation, wit
 anything changes. It is a thin service on top of the search index and the MCP server of
 [Orchestrator Core](https://workfloworchestrator.org/orchestrator-core/), and it needs a running Orchestrator Core to work.
 
-To see what it can do read [What the agent can do](https://workfloworchestrator.org/learn/orchestrator-agent/).
+To see what it can do and how to get from a first try to production, read
+[Orchestrator Agent: from first question to production](https://workfloworchestrator.org/learn/orchestrator-agent/).
 
 ## Protocols
 
@@ -35,8 +36,8 @@ See [Endpoints and protocols](reference/endpoints.md) for the details.
     - [Start workflows from chat](guides/workflows-from-chat.md)
     - [Use your own LLM](guides/own-llm.md)
     - [Teach the agent your domain](guides/domain-context.md)
+    - [Add your own tools, services and agents](guides/own-tools.md)
     - [Security and observability](guides/security-observability.md)
-    - [Enable AI search and embeddings](guides/ai-search.md)
     - [Benchmark prompt and model changes](guides/evals.md)
 - **[Architecture](architecture/index.md)**: how the agent works and why
 - **Reference**: [endpoints](reference/endpoints.md), [configuration](reference/configuration.md),

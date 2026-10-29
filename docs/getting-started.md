@@ -9,8 +9,19 @@ instead, follow the [tutorial on the example orchestrator](https://workfloworche
   [MCP server reference](https://workfloworchestrator.org/orchestrator-core/reference-docs/mcp/).
 - Network access to the Orchestrator Core database, because the agent connects to it with `DATABASE_URI`.
 - An API key for an LLM, or an OpenAI-compatible endpoint of your own. See [Use your own LLM](guides/own-llm.md).
-- A search index that is built. Without embeddings the agent uses fuzzy search, see
-  [Enable AI search and embeddings](guides/ai-search.md).
+- (optional) AI search and embeddings enabled in Orchestrator Core, see
+  [Running AI search](https://workfloworchestrator.org/orchestrator-core/reference-docs/ai-search/#running-it).
+
+!!! tip "Why enable embeddings"
+    The search index and the embeddings live in Orchestrator Core, so you set them up there and not in the agent.
+    The agent works without them: it then matches on fuzzy keywords and structured filters, and needs no other
+    configuration.
+
+    With embeddings, the agent can also search on meaning. A question such as *Which subscriptions are about
+    customer connectivity?* finds subscriptions that don't contain those words, and a search for `amsterdam router`
+    finds a subscription described as "AMS core node". The agent then picks a retriever per question: hybrid for
+    identifiers and names, semantic for descriptive questions, and fuzzy otherwise. See
+    [Teach the agent your domain](guides/domain-context.md#retrievers).
 
 ## 1. Run the agent
 
@@ -73,6 +84,7 @@ curl http://localhost:8080/v1/chat/completions \
 ## Next steps
 
 - [Connect LibreChat](guides/librechat.md) to chat with the agent.
-- [Enable AI search and embeddings](guides/ai-search.md) for semantic and hybrid search.
+- [Enable embeddings](https://workfloworchestrator.org/orchestrator-core/reference-docs/ai-search/#running-it) in
+  Orchestrator Core for semantic and hybrid search if you haven't already done so.
 - [Teach the agent your domain](guides/domain-context.md) with your identifiers and terminology.
 - [Endpoints and protocols](reference/endpoints.md) for the other ways to reach the agent.

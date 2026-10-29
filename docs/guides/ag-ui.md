@@ -33,4 +33,5 @@ uv run demos/agui_client.py "export them" <thread-id>
 
 ## Reference
 
-[Endpoints and protocols](../reference/endpoints.md#ag-ui)
+- [Endpoints and protocols](../reference/endpoints.md#ag-ui)
+- [AG-UI in pydantic-ai](https://pydantic.dev/docs/ai/integrations/ui/ag-ui/), for how events are mapped

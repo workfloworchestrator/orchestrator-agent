@@ -52,6 +52,37 @@ The agent then sends OpenTelemetry traces of every run: the model calls, and the
 If the extra is not installed or Langfuse cannot be configured, the agent starts without tracing. See the
 [Langfuse documentation](https://langfuse.com/docs) for the dashboard.
 
+### Trace with another OpenTelemetry backend
+
+The traces are standard OpenTelemetry spans from pydantic-ai, so you can send them to any OTLP backend, such as Jaeger,
+Grafana Tempo or Arize Phoenix. The agent only sets this up for Langfuse, so for another backend you do it yourself in
+a small module that wraps the app. Install `opentelemetry-sdk` and `opentelemetry-exporter-otlp-proto-http`, then
+create `traced_agent.py`:
+
+```python
+from opentelemetry import trace
+from opentelemetry.exporter.otlp.proto.http.trace_exporter import OTLPSpanExporter
+from opentelemetry.sdk.trace import TracerProvider
+from opentelemetry.sdk.trace.export import BatchSpanProcessor
+from pydantic_ai import Agent
+
+provider = TracerProvider()
+provider.add_span_processor(BatchSpanProcessor(OTLPSpanExporter()))
+trace.set_tracer_provider(provider)
+Agent.instrument_all()
+
+from orchestrator_agent.app import app  # noqa: E402
+```
+
+Leave `LANGFUSE_ENABLED` off, point the exporter at your backend with the standard OpenTelemetry variables and start
+this module instead of `orchestrator_agent.app`:
+
+```shell
+OTEL_EXPORTER_OTLP_ENDPOINT=http://localhost:4318
+OTEL_SERVICE_NAME=orchestrator-agent
+uv run uvicorn traced_agent:app --port 8080
+```
+
 ## Verify it works
 
 - Call an endpoint without a token while `OAUTH2_ACTIVE=true`. The agent should refuse the request. `GET /health` is

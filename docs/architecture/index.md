@@ -22,6 +22,21 @@ Every protocol is an adapter in front of the same agent. For each request the ag
 Orchestrator Core, lets the model call tools, and returns the answer in the format of the protocol. The model of the
 LLM is chosen with `AGENT_MODEL`, see [Use your own LLM](../guides/own-llm.md).
 
+pydantic-ai runs the agent. It also provides the AG-UI adapter and the MCP client, but not the other endpoints, which
+are built on the SDK of their own protocol:
+
+| Part | Built on | Documentation |
+| --- | --- | --- |
+| Agent loop and model calls | pydantic-ai | [pydantic-ai](https://pydantic.dev/docs/ai/) |
+| AG-UI endpoint | The AG-UI adapter of pydantic-ai | [AG-UI in pydantic-ai](https://pydantic.dev/docs/ai/integrations/ui/ag-ui/) |
+| Connection to Orchestrator Core | The MCP client of pydantic-ai | [MCP client](https://pydantic.dev/docs/ai/mcp/client/) |
+| A2A endpoint | The [A2A Python SDK](https://github.com/a2aproject/a2a-python) (`a2a-sdk`) | [A2A protocol](https://a2a-protocol.org/latest/) |
+| MCP endpoint | `FastMCP` from the [MCP Python SDK](https://github.com/modelcontextprotocol/python-sdk) | [MCP](https://modelcontextprotocol.io/) |
+| OpenAI chat completions endpoint | The agent itself, using the types of the OpenAI SDK | [Chat API](https://platform.openai.com/docs/api-reference/chat) |
+
+The MCP server of Orchestrator Core is a separate server, built on the [`fastmcp`](https://gofastmcp.com/) package, see
+[MCP server](https://workfloworchestrator.org/orchestrator-core/reference-docs/mcp/).
+
 ## Orchestrator Core: search index and MCP server
 
 The search infrastructure lives in Orchestrator Core: the query engine, filters, retrievers, indexing and the database
@@ -44,7 +59,7 @@ them in that group, at `http://<core>/api/docs#/agent-exposed`. For each route y
 `operationId`), the description the model reads (the docstring) and the parameters.
 
 The default set is listed in the [MCP server reference](https://workfloworchestrator.org/orchestrator-core/reference-docs/mcp/#usage). To add
-a tool of your own, see [Give the agent your own tools](../guides/own-tools.md).
+a tool of your own, see [Add your own tools, services and agents](../guides/own-tools.md).
 
 ## Read tools and write tools
 
@@ -117,7 +132,7 @@ The MCP and AG-UI endpoints run without this skill, so they have neither the wor
   network, see [Use your own LLM](../guides/own-llm.md).
 - **To Orchestrator Core.** The tool calls, with the token of the user when authentication is on.
 - **To the embedding provider.** Not by the agent. Embeddings are made by Orchestrator Core, see
-  [Enable AI search and embeddings](../guides/ai-search.md).
+  [AI / Hybrid Search](https://workfloworchestrator.org/orchestrator-core/reference-docs/ai-search/#running-it).
 - **To Langfuse or any other observability platform.** Only when you enable it, and then the traces contain the
   prompts and tool results. See
   [Security and observability](../guides/security-observability.md).

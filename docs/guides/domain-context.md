@@ -31,7 +31,8 @@ The agent also chooses how to match for each question:
 | Semantic | Descriptive questions in sentences |
 | Fuzzy | Exact tokens, and whenever embeddings are not available |
 
-Semantic and hybrid retrieval need embeddings, see [Enable AI search and embeddings](ai-search.md). Without
+Semantic and hybrid retrieval need embeddings in Orchestrator Core, see
+[Running AI search](https://workfloworchestrator.org/orchestrator-core/reference-docs/ai-search/#running-it). Without
 them the agent uses fuzzy search and does not offer the other two.
 
 ### Changing the behaviour further
@@ -40,7 +41,7 @@ The behaviour of each capability is a Markdown prompt in the [plugins](../refere
 a prompt or add a plugin, fork the agent, edit or add a file in `capabilities/plugins/` and restart. Plugins are not
 loaded from outside the agent, and they describe intent rather than tool names. How a tool is used is described by the
 tool descriptions in Orchestrator Core. To give the agent data that no tool serves yet, see
-[Give the agent your own tools](own-tools.md).
+[Add your own tools, services and agents](own-tools.md).
 
 ## Verify it works
 
