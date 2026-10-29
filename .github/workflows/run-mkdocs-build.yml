@@ -1,0 +1,19 @@
+name: Test mkdocs build
+
+on:
+  push:
+  workflow_call:
+
+jobs:
+  mkdocs-build:
+    name: Test mkdocs build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+        with:
+          python-version: "3.13"
+      - name: Install the docs dependencies
+        run: uv sync --no-dev --group docs
+      - name: Build the documentation with --strict
+        run: uv run --no-sync mkdocs build --strict

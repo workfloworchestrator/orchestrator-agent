@@ -4,6 +4,9 @@
 
 Standalone WFO search agent for deployment. Exposes the orchestration search agent via AG-UI, A2A, and MCP protocols, and as an OpenAI-compatible chat model for LibreChat.
 
+Documentation: <https://workfloworchestrator.org/orchestrator-agent/>. The sources are in [`docs/`](docs/) and are
+published as a sub-project of workfloworchestrator.org; preview them with `uv run --group docs mkdocs serve`.
+
 ## Quick Start
 
 ```bash

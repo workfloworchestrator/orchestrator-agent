@@ -1,0 +1,36 @@
+# Build a frontend with AG-UI
+
+!!! info "Goal"
+    Connect a web frontend to the agent over [AG-UI](https://docs.ag-ui.com/), so that answers stream into your own
+    interface.
+
+## Steps
+
+1. Point your AG-UI client at `POST /agui` of the agent. The response is a stream of server-sent events.
+2. Send a thread id with each request. A follow-up on the same thread keeps its history, so *export them* can refer
+   to the results of the previous question.
+3. When authentication is on, send the bearer token in the `Authorization` header.
+4. Render the events. Besides text, the stream carries the results of searches and aggregations as structured data:
+   a query result for a table or chart, a data artifact for a single entity and an export artifact with a download
+   URL. The agent also puts a rendered table or chart in the text of the answer, so a client that only shows text
+   still shows the result.
+
+The AG-UI endpoint runs the agent without the workflow form-fill skill, and the write tools of Orchestrator Core stay
+reachable only through that skill. To start workflows from chat, see
+[Start workflows from chat](workflows-from-chat.md).
+
+## Verify it works
+
+Use the demo client of the agent repository:
+
+```shell
+# stream a search query
+uv run demos/agui_client.py "find active subscriptions"
+
+# follow-up on the same thread
+uv run demos/agui_client.py "export them" <thread-id>
+```
+
+## Reference
+
+[Endpoints and protocols](../reference/endpoints.md#ag-ui)
