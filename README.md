@@ -131,53 +131,12 @@ Capabilities are always-on (`defer_loading=False`). The domain capabilities — 
 
 ### Tool access and mutation opt-in
 
-On every interface, automatically discovered Core tools must explicitly declare `readOnlyHint: true` as a
-boolean in their MCP annotations. New read-only tools become available without an agent-side list of names.
-Tools marked as writes, missing annotations, and null or malformed declarations are blocked. The known workflow
-write tools (`create_workflow`, `resume_workflow_process`, `abort_workflow_process`) stay blocked during automatic
-discovery even if mislabeled. Frontend/external tools are excluded.
+Core tools are discovered automatically and must declare `readOnlyHint: true`. Write tools and missing or
+malformed declarations are blocked. Endpoint authors are responsible for accurate annotations.
 
-This policy trusts the Core server configured by `WFO_CORE_MCP_URL`. Endpoint authors must ensure that a tool
-declared read-only does not change business state; the agent does not inspect endpoint implementations. Read
-tools can be called without human confirmation, and conversation/query persistence still writes operational data.
-On Core routes, use `agent-exposed` with `openapi_extra=READONLY_TOOL` for read-only tools.
-
-Trusted Python capabilities can explicitly expose selected local or Core mutations using
-`allow_capability_mutations` from their `get_toolset()`:
-
-```python
-from typing import Any
-
-from pydantic_ai.capabilities import AbstractCapability
-
-from orchestrator_agent.mcp_client import build_core_toolset
-from orchestrator_agent.tool_policy import allow_capability_mutations
-
-
-class ProcessMaintenanceCapability(AbstractCapability[Any]):
-    id = "process-maintenance"
-    description = "Resume processes under the deployment's maintenance policy."
-
-    def __init__(self):
-        self.core = build_core_toolset()
-
-    def get_toolset(self):
-        return allow_capability_mutations(
-            self.core,
-            tool_names={"resume_workflow_process"},
-        )
-```
-
-Register the capability with the agent, for example using `capabilities=[ProcessMaintenanceCapability()]` on
-`agent.run()`. The same helper works with a local `FunctionToolset`. Only the selected names bypass the policy,
-and only while their registered capability is active; deferred capabilities must be loaded first. Passing the
-wrapper as an ordinary agent/run toolset grants no bypass. Markdown plugin ownership alone grants no mutation
-access, and reserved local orchestration names cannot be selected.
-
-**The capability author must enforce any required approval and authorization.** The helper permits direct model
-invocation; it does not add a confirmation step or bypass Core's existing authorization checks. The built-in
-workflow form capability retains its structured approval path. There is no environment variable to disable this
-policy or grant mutation access; opt-in is explicit in capability code.
+A registered capability can override this restriction for selected tools using `allow_capability_mutations`
+in its `get_toolset()`. The capability owns approval and authorization; built-in workflow forms keep their
+existing approval step. This override is configured in capability code, not through an environment variable.
 
 ### Plugins
 
