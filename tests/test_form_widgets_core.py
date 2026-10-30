@@ -22,7 +22,7 @@ from orchestrator_agent.tool_names import LIST_PRODUCTS_TOOL
 CUSTOMERS = {
     "customers": {
         "page": [
-            {"customerId": "c-1", "fullname": "Universiteit Twente", "shortcode": "UT"},
+            {"customerId": "c-1", "fullname": "Universiteit Alder", "shortcode": "UA"},
             {"customerId": "c-2", "fullname": "Testaccount", "shortcode": ""},
         ]
     }
@@ -71,7 +71,7 @@ async def test_customers_come_from_core_graphql_labelled_with_their_shortcode():
     channels = Channels()
     options = await CustomerIdWidget().options({"type": "string", "format": "customerId"}, channels.context())
     assert options == [
-        Option("c-1", "Universiteit Twente (UT)", aliases=("Universiteit Twente", "UT")),
+        Option("c-1", "Universiteit Alder (UA)", aliases=("Universiteit Alder", "UA")),
         Option("c-2", "Testaccount", aliases=("Testaccount",)),
     ]
     ((query, _),) = channels.queries

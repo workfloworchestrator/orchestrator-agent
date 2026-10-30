@@ -165,7 +165,7 @@ ACCEPT = field("confirm", format="accept")
 ACCEPT_PAGE = ("Dry run", [ACCEPT])
 # The last page of a form that ends in core's summary form (``base_summary``): tables to show, nothing to fill.
 SUMMARY_TABLE = {
-    "columns": [["SURF", "10 Gbit/s", "Protected"]],
+    "columns": [["Dune", "10 Gbit/s", "Protected"]],
     "headers": [],
     "labels": ["customer_name", "speed", "redundancy"],
 }
@@ -282,7 +282,7 @@ class FakeCore:
 
 
 APPROVE, REJECT = Decision.START, Decision.CANCEL  # the human's decision on the start, as the transport hands it over
-FULL = {"customer_name": "UT", "speed": "10000", "redundancy": "protected"}
+FULL = {"customer_name": "UA", "speed": "10000", "redundancy": "protected"}
 
 
 class Stop:
@@ -456,18 +456,18 @@ class TestQuestions:
 
     def test_only_what_is_rejected_or_unanswered_is_asked(self):
         verdicts = errors({"speed": "Input should be '1000', '10000' or '100000'"})
-        asked = questions(specs(LIGHTPATH_FIELDS), {"customer_name": "UT"}, verdicts)
+        asked = questions(specs(LIGHTPATH_FIELDS), {"customer_name": "UA"}, verdicts)
         assert [q.name for q in asked] == ["speed", "speed_policer"]  # the name was accepted: not asked again
         assert asked[0].question.endswith("— Input should be '1000', '10000' or '100000'")
 
     def test_a_rejection_core_pins_on_no_field_asks_the_page_again_with_what_core_said(self):
         verdicts = [FormFieldError(loc=["__root__"], msg="ports must differ", type="value_error")]
-        asked = questions(specs(LIGHTPATH_FIELDS), {"customer_name": "UT", "speed": "1000"}, verdicts)
+        asked = questions(specs(LIGHTPATH_FIELDS), {"customer_name": "UA", "speed": "1000"}, verdicts)
         assert [q.name for q in asked] == ["customer_name", "speed", "speed_policer"]
         assert asked[0].question.endswith("— ports must differ") and "—" not in asked[1].question
         # A refusal that is no form verdict at all is asked the same way, with the refusal as it came.
         asked = questions(
-            specs(LIGHTPATH_FIELDS), {"customer_name": "UT", "speed": "1000"}, [], "HTTP error 502: Bad Gateway"
+            specs(LIGHTPATH_FIELDS), {"customer_name": "UA", "speed": "1000"}, [], "HTTP error 502: Bad Gateway"
         )
         assert [q.name for q in asked] == ["customer_name", "speed", "speed_policer"]
         assert asked[0].question.endswith("— HTTP error 502: Bad Gateway")
@@ -560,7 +560,7 @@ class TestWalk:
         assert reply.question("customer_name").question == "Customer Name *"  # the "*" says it is missing
         assert reply.values == {"product": PRODUCT, "speed": "10000", "speed_policer": True}
         # 3. Page 2 (10 Gbit/s -> redundancy): a choice shown by label, and the optional ticket offered along.
-        reply = await turn(skill, core, state, {"customer_name": "Universiteit Twente"})
+        reply = await turn(skill, core, state, {"customer_name": "Universiteit Alder"})
         assert reply.page == 2 and rejected(reply) == ["redundancy"] and reply.asked == ["redundancy", "ticket_id"]
         redundancy = reply.question("redundancy")
         assert redundancy.choices == ("Protected", "Unprotected") and redundancy.values == ("protected", "unprotected")
@@ -584,7 +584,7 @@ class TestWalk:
             "workflow_key": "create_demo_lightpath",
             "json_data": [
                 {"product": PRODUCT},
-                {"customer_name": "Universiteit Twente", "speed": "10000", "speed_policer": True},
+                {"customer_name": "Universiteit Alder", "speed": "10000", "speed_policer": True},
                 {"redundancy": "protected", "ticket_id": "JIRA-4821"},
             ],
         }
@@ -593,7 +593,7 @@ class TestWalk:
         core, state = FakeCore(), SearchState()
         reply = await open_form(make_skill(), core, state, "create_demo_lightpath", FULL)
         assert reply.status == "confirming"
-        assert reply.values == {"product": PRODUCT, "customer_name": "UT", "speed": "10000", "redundancy": "protected"}
+        assert reply.values == {"product": PRODUCT, "customer_name": "UA", "speed": "10000", "redundancy": "protected"}
         assert reply.defaults == {
             "speed_policer": False,
             "ticket_id": "",
@@ -607,7 +607,7 @@ class TestWalk:
         # The summary page asks nothing, so it is no stop of its own: it is submitted as it is.
         assert reply.status == "confirming" and state.form_fill.page_inputs[-1] == {}
         assert reply.summary == [SUMMARY_TABLE]
-        assert reply.values["customer_name"] == "UT"  # the values as they will be sent are still on the reply
+        assert reply.values["customer_name"] == "UA"  # the values as they will be sent are still on the reply
 
     async def test_a_changed_answer_rewalks_and_regenerates_later_pages(self):
         core, state = FakeCore(), SearchState()
@@ -622,7 +622,7 @@ class TestWalk:
         assert reply.status == "confirming" and reply.values["speed"] == "1000" and "redundancy" not in reply.values
         assert state.form_fill.page_inputs == [
             {"product": PRODUCT},
-            {"customer_name": "UT", "speed": "1000", "speed_policer": True},
+            {"customer_name": "UA", "speed": "1000", "speed_policer": True},
             {},
         ]
 
@@ -646,7 +646,7 @@ class TestWalk:
     async def test_read_only_single_option_field_is_never_submitted(self):
         core, state = FakeCore(), SearchState()
         skill = make_skill()
-        await open_form(skill, core, state, "create_demo_lightpath", {**self.VALUES, "customer_name": "UT"})
+        await open_form(skill, core, state, "create_demo_lightpath", {**self.VALUES, "customer_name": "UA"})
         assert "locked" not in state.form_fill.page_inputs[1] and "locked" not in state.form_fill.values
 
     async def test_a_value_for_another_field_does_not_touch_the_subscription(self):
@@ -684,13 +684,13 @@ class TestWalk:
         message = "Input should be '1000', '10000' or '100000'"
         core, state = FakeCore(reject=(2, {"speed": message})), SearchState()
         skill = make_skill()
-        reply = await open_form(skill, core, state, "create_demo_lightpath", {**self.VALUES, "customer_name": "UT"})
+        reply = await open_form(skill, core, state, "create_demo_lightpath", {**self.VALUES, "customer_name": "UA"})
         assert reply.status == "gathering" and reply.title == "Demo Lightpath" and reply.page == 1
         assert verdict(reply) == [("speed", message, "value_error")] and reply.reason is None
         assert reply.asked == ["speed"] and reply.question("speed").question.endswith(f"— {message}")
         assert reply.values == {
             "product": PRODUCT,
-            "customer_name": "UT",
+            "customer_name": "UA",
             "speed_policer": True,
         }  # the rejected value is not
         assert state.form_fill.status == "gathering" and state.form_fill.page_inputs == [{"product": PRODUCT}]
@@ -699,14 +699,14 @@ class TestWalk:
         # A passing failure in core must not cost the human the form: the page is asked again, with what core said.
         core, state = FakeCore(reject=(2, "Error calling tool: something else entirely")), SearchState()
         skill = make_skill()
-        reply = await open_form(skill, core, state, "create_demo_lightpath", {**self.VALUES, "customer_name": "UT"})
+        reply = await open_form(skill, core, state, "create_demo_lightpath", {**self.VALUES, "customer_name": "UA"})
         assert reply.status == "gathering" and reply.rejected == [] and reply.page == 1
         assert reply.reason == "Error calling tool: something else entirely"
         assert reply.asked == ["customer_name", "speed", "speed_policer"]
         assert reply.question("customer_name").question.endswith("— Error calling tool: something else entirely")
         assert state.form_fill.status == "gathering" and state.form_fill.page_inputs == [{"product": PRODUCT}]
         core.reject = None  # core is back: answering again goes on
-        reply = await turn(skill, core, state, {"customer_name": "UT"})
+        reply = await turn(skill, core, state, {"customer_name": "UA"})
         assert reply.page == 2 and reply.asked == ["redundancy", "ticket_id"]
 
     async def test_accept_field_is_asked_and_only_an_explicit_accept_fills_it(self):
@@ -838,7 +838,7 @@ class TestHandoff:
         assert state.form_fill.status == "gathering" and rejected(reply) == ["customer_name", "speed"]
 
     async def test_open_walks_the_first_pages_with_nothing_prefilled(self):
-        state = SearchState(user_input='create a lightpath for UT {"customer_name": "UT"}')
+        state = SearchState(user_input='create a lightpath for UT {"customer_name": "UA"}')
         await handoff(state, "create_demo_lightpath")
         reply = data(await make_skill().open(state, FakeCore()))
         assert state.form_fill.status == "gathering"

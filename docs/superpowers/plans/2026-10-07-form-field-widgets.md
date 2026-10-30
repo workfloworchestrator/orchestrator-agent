@@ -124,8 +124,8 @@ from orchestrator_agent.form_fill.widgets import (
 )
 
 CUSTOMERS = [
-    Option("c-1", "Universiteit Twente (UT)", aliases=("Universiteit Twente", "UT")),
-    Option("c-2", "Universiteit Utrecht (UU)", aliases=("Universiteit Utrecht", "UU")),
+    Option("c-1", "Universiteit Alder (UA)", aliases=("Universiteit Alder", "UA")),
+    Option("c-2", "Universiteit Birch (UB)", aliases=("Universiteit Birch", "UB")),
     Option("c-3", "Testaccount (TA)", aliases=("Testaccount", "TA")),
 ]
 
@@ -158,13 +158,13 @@ class TestNarrowing:
     @pytest.mark.parametrize(
         "words,expected",
         [
-            pytest.param("ut", ["c-1"], id="alias-token"),
+            pytest.param("ua", ["c-1"], id="alias-token"),
             pytest.param("universiteit", ["c-1", "c-2"], id="shared-token"),
-            pytest.param("universiteit utrecht", ["c-2", "c-1"], id="most-words-first"),
-            pytest.param("utrecht", ["c-2"], id="label-token"),
+            pytest.param("universiteit birch", ["c-2", "c-1"], id="most-words-first"),
+            pytest.param("birch", ["c-2"], id="label-token"),
             pytest.param("testacc", ["c-3"], id="substring"),
             pytest.param("c-3", ["c-3"], id="value"),
-            pytest.param("delft", [], id="nothing"),
+            pytest.param("elm", [], id="nothing"),
             pytest.param("  ", [], id="blank"),
         ],
     )
@@ -178,8 +178,8 @@ class TestNarrowing:
     async def test_options_narrows_what_fetch_returned(self):
         widget = FormatWidget("customer", "customerId", CUSTOMERS)
         assert await widget.options({}, CTX) == CUSTOMERS
-        assert [o.value for o in await widget.options({}, CTX, search="twente")] == ["c-1"]
-        assert await FormatWidget("later", "x", None).options({}, CTX, search="ut") is None
+        assert [o.value for o in await widget.options({}, CTX, search="alder")] == ["c-1"]
+        assert await FormatWidget("later", "x", None).options({}, CTX, search="ua") is None
 
 
 @pytest.mark.parametrize(
@@ -683,7 +683,7 @@ from orchestrator_agent.tool_names import ALL_TOOL_NAMES, LIST_PRODUCTS_TOOL
 CUSTOMERS = {
     "customers": {
         "page": [
-            {"customerId": "c-1", "fullname": "Universiteit Twente", "shortcode": "UT"},
+            {"customerId": "c-1", "fullname": "Universiteit Alder", "shortcode": "UA"},
             {"customerId": "c-2", "fullname": "Testaccount", "shortcode": ""},
         ]
     }
@@ -737,7 +737,7 @@ async def test_customers_come_from_core_graphql_labelled_with_their_shortcode():
     channels = Channels()
     options = await CustomerIdWidget().options({"type": "string", "format": "customerId"}, channels.context())
     assert options == [
-        Option("c-1", "Universiteit Twente (UT)", aliases=("Universiteit Twente", "UT")),
+        Option("c-1", "Universiteit Alder (UA)", aliases=("Universiteit Alder", "UA")),
         Option("c-2", "Testaccount", aliases=("Testaccount",)),
     ]
     ((query, _),) = channels.queries
@@ -1253,11 +1253,11 @@ from orchestrator_agent.form_fill.widgets.resolve import Resolution, exact_optio
 from .test_form_widgets import no_graphql, no_tool
 
 CUSTOMERS = (
-    Option("c-ut", "Universiteit Twente (UT)", aliases=("Universiteit Twente", "UT")),
-    Option("c-uu", "Universiteit Utrecht (UU)", aliases=("Universiteit Utrecht", "UU")),
+    Option("c-ua", "Universiteit Alder (UA)", aliases=("Universiteit Alder", "UA")),
+    Option("c-ub", "Universiteit Birch (UB)", aliases=("Universiteit Birch", "UB")),
     Option("c-ta", "Testaccount (TA)", aliases=("Testaccount", "TA")),
-    Option("c-x1", "SURF (SURF)", aliases=("SURF",)),
-    Option("c-x2", "SURF (SURF2)", aliases=("SURF", "SURF2")),
+    Option("c-x1", "Dune (DN)", aliases=("Dune",)),
+    Option("c-x2", "Dune (DN2)", aliases=("Dune", "DN2")),
     *(Option(f"c-{n}", f"Customer {n:02d}") for n in range(20)),
 )
 CTX = WidgetContext(call_tool=no_tool, graphql=no_graphql)
@@ -1305,7 +1305,7 @@ class Refuses:
     [
         pytest.param("TESTACCOUNT", ["c-ta"], id="alias-any-case"),
         pytest.param("Testaccount (TA)", ["c-ta"], id="label"),
-        pytest.param("c-ut", ["c-ut"], id="value"),
+        pytest.param("c-ua", ["c-ua"], id="value"),
         pytest.param("surf", ["c-x1", "c-x2"], id="shared-name"),
         pytest.param("test", [], id="part-of-a-name-is-no-exact-match"),
     ],
@@ -1326,8 +1326,8 @@ async def test_exact_match_on_a_shared_name_offers_both():
 @pytest.mark.parametrize(
     "picks,expected",
     [
-        pytest.param(["c-ut"], Resolution(value="c-ut", resolved=True), id="one-fits"),
-        pytest.param(["c-ut", "c-uu"], Resolution(candidates=(CUSTOMERS[0], CUSTOMERS[1])), id="several-fit"),
+        pytest.param(["c-ua"], Resolution(value="c-ua", resolved=True), id="one-fits"),
+        pytest.param(["c-ua", "c-ub"], Resolution(candidates=(CUSTOMERS[0], CUSTOMERS[1])), id="several-fit"),
         pytest.param([], Resolution(unmatched=("uni t",)), id="none-fits"),
         pytest.param(["made-up"], Resolution(unmatched=("uni t",)), id="outside-the-candidates"),
     ],
@@ -1340,8 +1340,8 @@ async def test_the_chooser_reads_the_words_over_the_candidates(picks, expected):
 
 
 async def test_a_chosen_value_outside_the_candidates_is_ignored():
-    resolution = await resolve_words(long_list(), "utwente", CTX, FakeChooser(["c-ut", "c-evil"]))
-    assert resolution == Resolution(value="c-ut", resolved=True)
+    resolution = await resolve_words(long_list(), "ualder", CTX, FakeChooser(["c-ua", "c-evil"]))
+    assert resolution == Resolution(value="c-ua", resolved=True)
 
 
 async def test_a_list_longer_than_the_full_read_is_searched_first():
@@ -1373,12 +1373,12 @@ async def test_without_a_chooser_only_exact_names_resolve(words, expected):
 @pytest.mark.parametrize(
     "answer,multiple,expected",
     [
-        pytest.param("c-ut", False, Resolution(value="c-ut", resolved=True), id="a-picked-value-stands"),
+        pytest.param("c-ua", False, Resolution(value="c-ua", resolved=True), id="a-picked-value-stands"),
         pytest.param(
-            ["c-ut", "Testaccount"], True, Resolution(value=["c-ut", "c-ta"], resolved=True), id="list-items"
+            ["c-ua", "Testaccount"], True, Resolution(value=["c-ua", "c-ta"], resolved=True), id="list-items"
         ),
         pytest.param(
-            "UT, testaccount", True, Resolution(value=["c-ut", "c-ta"], resolved=True), id="list-typed-commas"
+            "UT, testaccount", True, Resolution(value=["c-ua", "c-ta"], resolved=True), id="list-typed-commas"
         ),
         pytest.param("UT, nobody", True, Resolution(unmatched=("nobody",)), id="list-one-item-unmatched"),
     ],
@@ -1399,11 +1399,11 @@ def _scripted(picks):
 
 
 async def test_the_model_interpreter_chooses_among_the_given_options_only():
-    model, seen = _scripted(["c-ut"])
-    options = [("c-ut", "Universiteit Twente (UT)"), ("c-uu", "Universiteit Utrecht (UU)")]
-    assert await ModelInterpreter(model).choose("Customer", options, "twente") == ["c-ut"]
-    assert "Universiteit Twente (UT)" in seen["prompt"] and "twente" in seen["prompt"]
-    assert seen["schema"]["properties"]["values"]["items"]["enum"] == ["c-ut", "c-uu"]
+    model, seen = _scripted(["c-ua"])
+    options = [("c-ua", "Universiteit Alder (UA)"), ("c-ub", "Universiteit Birch (UB)")]
+    assert await ModelInterpreter(model).choose("Customer", options, "alder") == ["c-ua"]
+    assert "Universiteit Alder (UA)" in seen["prompt"] and "alder" in seen["prompt"]
+    assert seen["schema"]["properties"]["values"]["items"]["enum"] == ["c-ua", "c-ub"]
 ```
 
 - [ ] **Step 2: Run the tests to verify they fail**
@@ -1568,8 +1568,8 @@ with this test in `tests/test_form_widgets_resolve.py` (import `shown_as`):
 @pytest.mark.parametrize(
     "value,expected",
     [
-        pytest.param("c-ut", "Universiteit Twente (UT)", id="one"),
-        pytest.param(["c-ut", "c-ta"], ["Universiteit Twente (UT)", "Testaccount (TA)"], id="list"),
+        pytest.param("c-ua", "Universiteit Alder (UA)", id="one"),
+        pytest.param(["c-ua", "c-ta"], ["Universiteit Alder (UA)", "Testaccount (TA)"], id="list"),
         pytest.param("c-gone", "c-gone", id="unknown-shown-as-is"),
     ],
 )
@@ -1655,8 +1655,8 @@ PAGE = {
     "title": "Customer",
     "type": "object",
 }
-UT = Option("c-ut", "Universiteit Twente (UT)", aliases=("Universiteit Twente", "UT"))
-UU = Option("c-uu", "Universiteit Utrecht (UU)", aliases=("Universiteit Utrecht", "UU"))
+UT = Option("c-ua", "Universiteit Alder (UA)", aliases=("Universiteit Alder", "UA"))
+UU = Option("c-ub", "Universiteit Birch (UB)", aliases=("Universiteit Birch", "UB"))
 TA = Option("c-ta", "Testaccount (TA)", aliases=("Testaccount", "TA"))
 MANY = (TA, UT, UU, *(Option(f"c-{n}", f"Customer {n:02d}") for n in range(20)))
 KEY = "widget_demo"
@@ -1724,15 +1724,15 @@ async def test_an_exact_name_is_its_option_without_a_model():
 
 
 async def test_words_that_fit_one_option_are_that_option():
-    core, chooser = WidgetCore(), Chooser(["c-ut"])
-    reply = await open_form(make(choose=chooser), core, SearchState(), KEY, {"customer_id": "twente"})
-    assert reply.status == "confirming" and reply.values["customer_id"] == "c-ut" and chooser.calls == ["twente"]
+    core, chooser = WidgetCore(), Chooser(["c-ua"])
+    reply = await open_form(make(choose=chooser), core, SearchState(), KEY, {"customer_id": "alder"})
+    assert reply.status == "confirming" and reply.values["customer_id"] == "c-ua" and chooser.calls == ["alder"]
 
 
 @pytest.mark.parametrize(
     "picks,choices,hint",
     [
-        pytest.param(["c-ut", "c-uu"], (UT.label, UU.label), SEVERAL_FIT, id="several-fit"),
+        pytest.param(["c-ua", "c-ub"], (UT.label, UU.label), SEVERAL_FIT, id="several-fit"),
         pytest.param([], (), NOTHING_FIT.format(words="'uni'"), id="nothing-fits"),
     ],
 )
@@ -1745,11 +1745,11 @@ async def test_unresolved_words_are_never_submitted(picks, choices, hint):
 
 
 async def test_a_picked_candidate_continues_and_is_not_read_again():
-    core, state, chooser = WidgetCore(), SearchState(), Chooser(["c-ut", "c-uu"])
+    core, state, chooser = WidgetCore(), SearchState(), Chooser(["c-ua", "c-ub"])
     skill = make(choose=chooser)
     await open_form(skill, core, state, KEY, {"customer_id": "uni"})
-    reply = await turn(skill, core, state, {"customer_id": "c-uu"})  # the chip's value, as the transport maps it
-    assert reply.status == "confirming" and reply.labels == {"customer_id": "Universiteit Utrecht (UU)"}
+    reply = await turn(skill, core, state, {"customer_id": "c-ub"})  # the chip's value, as the transport maps it
+    assert reply.status == "confirming" and reply.labels == {"customer_id": "Universiteit Birch (UB)"}
     await turn(skill, core, state, {"note": "hello"})  # another walk: the picked value stands
     assert chooser.calls == ["uni"]
 
@@ -1757,7 +1757,7 @@ async def test_a_picked_candidate_continues_and_is_not_read_again():
 async def test_a_short_list_is_chips_and_a_single_option_is_taken():
     reply = await open_form(make(options=(UT, UU)), WidgetCore(), SearchState(), KEY)
     customer = reply.question("customer_id")
-    assert customer.choices == (UT.label, UU.label) and customer.values == ("c-ut", "c-uu") and customer.hint == ""
+    assert customer.choices == (UT.label, UU.label) and customer.values == ("c-ua", "c-ub") and customer.hint == ""
     only = await open_form(make(options=(TA,)), WidgetCore(), SearchState(), KEY)  # plain core: one default customer
     assert only.status == "confirming" and only.values["customer_id"] == "c-ta"
 
@@ -1769,7 +1769,7 @@ async def test_a_field_waiting_for_another_value_is_not_asked():
 
 async def test_core_rejecting_a_picked_option_is_not_reinterpreted():
     skill = make(choose=Refuses(), interpret=Refuses())
-    reply = await open_form(skill, WidgetCore(refuse="c-ut"), SearchState(), KEY, {"customer_id": "UT"})
+    reply = await open_form(skill, WidgetCore(refuse="c-ua"), SearchState(), KEY, {"customer_id": "UA"})
     assert reply.question("customer_id").problem == "Customer not allowed"
 
 

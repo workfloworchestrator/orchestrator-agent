@@ -64,7 +64,7 @@ class FakeInterpreter:
         return {name: value for name, value in self.values.items() if name in words}
 
 
-REQUEST = {"customer_name": "UT", "speed": "ten gig", "speed_policer": "yes please"}  # what the person typed
+REQUEST = {"customer_name": "UA", "speed": "ten gig", "speed_policer": "yes please"}  # what the person typed
 
 
 class TestSkillReinterpretsRejectedAnswers:
@@ -181,6 +181,6 @@ class TestModelInterpreter:
     async def test_words_that_fit_more_than_one_option_or_none_leave_the_field_open(self):
         # "fast" names two speeds: picking one would be a guess, so the person is asked again.
         for fits in (["10000", "100000"], []):
-            model, _ = _scripted({"speed": fits, "customer_name": "UT"})
+            model, _ = _scripted({"speed": fits, "customer_name": "UA"})
             words = {"speed": "fast", "customer_name": "for UT"}
-            assert await ModelInterpreter(model).answers(LIGHTPATH, words) == {"customer_name": "UT"}
+            assert await ModelInterpreter(model).answers(LIGHTPATH, words) == {"customer_name": "UA"}

@@ -20,18 +20,28 @@ using core's own ``visualization`` hint to pick the diagram type. Adapters injec
 into the answer when the model didn't already include a chart, so charting is guaranteed for
 every text-only client (kagent, native LibreChat) regardless of model behaviour.
 
-The renderer is a pure function (``aggregate_to_mermaid``) over the ``AggregateToolResponse``
-JSON shape: ``{visualization: str, results: [{group_values: {...}, aggregations: {...}}]}``.
-It returns ``None`` for ungrouped/scalar results (one number, no categories — nothing to chart).
+The chart is first read as data (``aggregate_to_chart``: a ``ChartData`` a client such as the popup draws
+itself) from the ``AggregateToolResponse`` JSON shape: ``{visualization: str, results: [{group_values:
+{...}, aggregations: {...}}]}``; ``chart_to_mermaid`` renders that data, and ``aggregate_to_mermaid`` is
+the two together. All return ``None`` for ungrouped/scalar results (one number, no categories — nothing
+to chart).
 """
 
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, Literal
+
+from orchestrator_agent.artifacts import ChartData, ChartPoint
 
 
 def aggregate_to_mermaid(payload: Any) -> str | None:
-    """Render an ``aggregate`` tool result as Mermaid diagram source, or ``None``.
+    """Render an ``aggregate`` tool result as Mermaid diagram source, or ``None`` when it is not a chart."""
+    chart = aggregate_to_chart(payload)
+    return chart_to_mermaid(chart) if chart is not None else None
+
+
+def aggregate_to_chart(payload: Any) -> ChartData | None:
+    """Read an ``aggregate`` tool result as the chart's data, or ``None``.
 
     Returns ``None`` when the result is not a grouped distribution (no rows, or a scalar
     aggregate with no ``group_values`` — a single number that no chart would clarify).
@@ -63,10 +73,19 @@ def aggregate_to_mermaid(payload: Any) -> str | None:
     group_keys = _group_key_names(rows)
     title = f"{metric} by {group_keys}" if group_keys else metric
     visualization = str(payload.get("visualization", "")).lower()
-    if visualization == "pie":
-        return _pie(title, pairs)
-    series = "line" if visualization == "line" else "bar"
-    return _xychart(title, metric, pairs, series)
+    kind: Literal["pie", "bar", "line"] = (
+        "pie" if visualization == "pie" else "line" if visualization == "line" else "bar"
+    )
+    points = [ChartPoint(label=label, value=value) for label, value in pairs]
+    return ChartData(kind=kind, title=title, metric=metric, points=points)
+
+
+def chart_to_mermaid(chart: ChartData) -> str:
+    """The chart's data as Mermaid diagram source: a pie, or an xychart with bars or a line."""
+    pairs = [(point.label, point.value) for point in chart.points]
+    if chart.kind == "pie":
+        return _pie(chart.title, pairs)
+    return _xychart(chart.title, chart.metric, pairs, chart.kind)
 
 
 # --- helpers -------------------------------------------------------------------------------
@@ -134,4 +153,4 @@ def _xychart(title: str, metric: str, pairs: list[tuple[str, float | int]], seri
     return "\n".join(lines)
 
 
-__all__ = ["aggregate_to_mermaid"]
+__all__ = ["aggregate_to_chart", "aggregate_to_mermaid", "chart_to_mermaid"]

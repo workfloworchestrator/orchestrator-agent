@@ -47,8 +47,8 @@ PAGE = {
     "title": "Customer",
     "type": "object",
 }
-UT = Option("c-ut", "Universiteit Twente (UT)", aliases=("Universiteit Twente", "UT"))
-UU = Option("c-uu", "Universiteit Utrecht (UU)", aliases=("Universiteit Utrecht", "UU"))
+UT = Option("c-ua", "Universiteit Alder (UA)", aliases=("Universiteit Alder", "UA"))
+UU = Option("c-ub", "Universiteit Birch (UB)", aliases=("Universiteit Birch", "UB"))
 TA = Option("c-ta", "Testaccount (TA)", aliases=("Testaccount", "TA"))
 MANY = (TA, UT, UU, *(Option(f"c-{n}", f"Customer {n:02d}") for n in range(20)))
 KEY = "widget_demo"
@@ -123,15 +123,15 @@ async def test_an_exact_name_is_its_option_without_a_model():
 
 
 async def test_words_that_fit_one_option_are_that_option():
-    core, chooser = WidgetCore(), Chooser(["c-ut"])
-    reply = await open_form(make(choose=chooser), core, SearchState(), KEY, {"customer_id": "twente"})
-    assert reply.status == "confirming" and reply.values["customer_id"] == "c-ut" and chooser.calls == ["twente"]
+    core, chooser = WidgetCore(), Chooser(["c-ua"])
+    reply = await open_form(make(choose=chooser), core, SearchState(), KEY, {"customer_id": "alder"})
+    assert reply.status == "confirming" and reply.values["customer_id"] == "c-ua" and chooser.calls == ["alder"]
 
 
 @pytest.mark.parametrize(
     "picks,choices,hint",
     [
-        pytest.param(["c-ut", "c-uu"], (UT.label, UU.label), SEVERAL_FIT, id="several-fit"),
+        pytest.param(["c-ua", "c-ub"], (UT.label, UU.label), SEVERAL_FIT, id="several-fit"),
         pytest.param([o.value for o in MANY[3:14]], (), TOO_MANY_FIT, id="too-many-fit"),
         pytest.param([], (), NOTHING_FIT.format(words="'uni'"), id="nothing-fits"),
     ],
@@ -145,11 +145,11 @@ async def test_unresolved_words_are_never_submitted(picks, choices, hint):
 
 
 async def test_a_picked_candidate_continues_and_is_not_read_again():
-    core, state, chooser = WidgetCore(), SearchState(), Chooser(["c-ut", "c-uu"])
+    core, state, chooser = WidgetCore(), SearchState(), Chooser(["c-ua", "c-ub"])
     skill = make(choose=chooser)
     await open_form(skill, core, state, KEY, {"customer_id": "uni"})
-    reply = await turn(skill, core, state, {"customer_id": "c-uu"})  # the chip's value, as the transport maps it
-    assert reply.status == "confirming" and reply.labels == {"customer_id": "Universiteit Utrecht (UU)"}
+    reply = await turn(skill, core, state, {"customer_id": "c-ub"})  # the chip's value, as the transport maps it
+    assert reply.status == "confirming" and reply.labels == {"customer_id": "Universiteit Birch (UB)"}
     await turn(skill, core, state, {"note": "hello"})  # another walk: the picked value stands
     assert chooser.calls == ["uni"]
 
@@ -157,7 +157,7 @@ async def test_a_picked_candidate_continues_and_is_not_read_again():
 async def test_a_short_list_is_chips_and_a_single_option_is_still_asked():
     reply = await open_form(make(options=(UT, UU)), WidgetCore(), SearchState(), KEY)
     customer = reply.question("customer_id")
-    assert customer.choices == (UT.label, UU.label) and customer.values == ("c-ut", "c-uu") and customer.hint == ""
+    assert customer.choices == (UT.label, UU.label) and customer.values == ("c-ua", "c-ub") and customer.hint == ""
     # A widget's options are what the source has now (one customer, one free port): the person chooses, always.
     only = await open_form(make(options=(TA,)), WidgetCore(), SearchState(), KEY)
     assert only.status == "gathering" and only.question("customer_id").values == ("c-ta",)
@@ -176,8 +176,8 @@ async def test_typed_words_for_a_short_list_are_never_submitted():
 @pytest.mark.parametrize(
     "answer,value,label",
     [
-        pytest.param("UT", "c-ut", UT.label, id="a-typed-exact-name"),
-        pytest.param("c-uu", "c-uu", UU.label, id="a-picked-chip"),
+        pytest.param("UA", "c-ua", UT.label, id="a-typed-exact-name"),
+        pytest.param("c-ub", "c-ub", UU.label, id="a-picked-chip"),
     ],
 )
 async def test_a_short_list_answer_is_one_of_its_options_without_a_model(answer, value, label):
@@ -196,7 +196,7 @@ async def test_a_field_waiting_for_another_value_is_not_asked():
 
 async def test_core_rejecting_a_picked_option_is_not_reinterpreted():
     skill = make(choose=Refuses(), interpret=Refuses())
-    reply = await open_form(skill, WidgetCore(refuse="c-ut"), SearchState(), KEY, {"customer_id": "UT"})
+    reply = await open_form(skill, WidgetCore(refuse="c-ua"), SearchState(), KEY, {"customer_id": "UA"})
     assert reply.question("customer_id").problem == "Customer not allowed"
 
 
@@ -288,7 +288,7 @@ def test_a_session_persisted_before_widgets_still_loads():
 # --- a widget field that depends on another field (``WidgetContext.values``) -----------------------------
 
 JAN, PIET = Option("p-jan", "Jan de Vries"), Option("p-piet", "Piet Jansen")
-CONTACTS = {"c-ut": (JAN, PIET), "c-uu": (Option("p-anna", "Anna Smit"), Option("p-bob", "Bob Visser"))}
+CONTACTS = {"c-ua": (JAN, PIET), "c-ub": (Option("p-anna", "Anna Smit"), Option("p-bob", "Bob Visser"))}
 REQUIRED_CONTACT = {"format": "contactPerson", "title": "Contact", "type": "string"}
 OPTIONAL_CONTACTS = {
     "default": [],
@@ -320,7 +320,7 @@ def with_contact(contact: dict[str, Any], *, required: bool) -> dict[str, Any]:
     return page_of(fields, ["customer_id", "contact"] if required else ["customer_id"])
 
 
-@pytest.mark.parametrize("customer", [pytest.param("UT", id="typed-name"), pytest.param("c-ut", id="picked-value")])
+@pytest.mark.parametrize("customer", [pytest.param("UA", id="typed-name"), pytest.param("c-ua", id="picked-value")])
 @pytest.mark.parametrize(
     "contact,required,answer",
     [
@@ -340,7 +340,7 @@ async def test_a_field_waiting_for_the_customer_is_asked_with_its_options_once_i
     asked = reply.question("contact")
     assert asked.values == ("p-jan", "p-piet") and asked.choices == (JAN.label, PIET.label)
     done = await turn(skill, core, state, {"contact": answer})
-    assert done.status == "confirming" and done.values == {"customer_id": "c-ut", "contact": answer}
+    assert done.status == "confirming" and done.values == {"customer_id": "c-ua", "contact": answer}
     assert all(page.get("contact") in (None, answer) for page in core.submitted)
 
 
@@ -362,7 +362,7 @@ async def test_a_stop_of_waiting_fields_only_asks_them_as_typed_text_and_never_s
 async def test_a_value_of_a_field_that_waits_again_is_never_submitted():
     core, state = WidgetCore(pages=[with_contact(REQUIRED_CONTACT, required=True)]), SearchState()
     skill = make(also=[Contacts()])
-    await open_form(skill, core, state, KEY, {"customer_id": "c-ut"})
+    await open_form(skill, core, state, KEY, {"customer_id": "c-ua"})
     assert (await turn(skill, core, state, {"contact": "p-jan"})).status == "confirming"
     again = await turn(skill, core, state, {"customer_id": "c-ta"})  # a customer without contact persons
     assert again.status == "gathering" and again.asked == ["contact"]

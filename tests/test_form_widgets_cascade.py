@@ -129,10 +129,10 @@ async def test_then_the_free_ports_of_that_node_and_only_the_port_reaches_core(n
 async def test_words_that_are_no_node_are_asked_again_and_never_submitted():
     core, state, skill = PortCore(), SearchState(), make()
     await open_form(skill, core, state, KEY)
-    again = await turn(skill, core, state, {"port_id": "delft"})
+    again = await turn(skill, core, state, {"port_id": "elm"})
     node = again.question("port_id")
-    assert node.title == "Port Id — Node" and "delft" in node.hint
-    assert "delft" not in str(core.submitted)
+    assert node.title == "Port Id — Node" and "elm" in node.hint
+    assert "elm" not in str(core.submitted)
 
 
 async def test_a_port_that_is_no_option_of_the_node_is_asked_again():

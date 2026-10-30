@@ -111,7 +111,7 @@ class TestCards:
         assert session.unseen is False  # a card is shown as soon as it is sent
         # What is remembered is what the skill asked, nothing of LibreChat's: it survives the session's JSON
         # round trip, and the same cards come out of it again.
-        assert session.pending == pending.model_dump(mode="json")
+        assert session.pending == pending.model_dump(mode="json", exclude_none=True)
         restored = pending_of(FormFillSession.model_validate(session.model_dump(mode="json")))
         assert restored is not None and [q.name for q in restored.questions] == [f.name for f in PAGE]
         assert [ask_card(restored, session, card) for card in range(2)] == cards
@@ -323,8 +323,18 @@ class TestShown:
             "|---|---|",
             "| product | SN8 10G |",  # an id is shown as the label the form has for it
             "| vlan | 20 |",
-            "",
-            "Defaults that apply: policer = true",
+            "| policer | true *(default)* |",  # what the form fills in by itself, in the same table
+        ]
+
+    def test_an_empty_default_reads_as_none(self):
+        reply = Reply(
+            '{"workflow_key":"create_port","status":"confirming","values":{"vlan":20},'
+            '"defaults":{"native_vlan":null,"contacts":[],"ticket_id":""}}'
+        )
+        assert shown(reply).splitlines()[-3:] == [
+            "| native_vlan | none *(default)* |",
+            "| contacts | none *(default)* |",
+            "| ticket_id | none *(default)* |",
         ]
 
     def test_the_approval_adds_the_workflows_own_summary_when_its_form_has_one(self):

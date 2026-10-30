@@ -22,8 +22,8 @@ from orchestrator_agent.form_fill.widgets import (
 )
 
 CUSTOMERS = [
-    Option("c-1", "Universiteit Twente (UT)", aliases=("Universiteit Twente", "UT")),
-    Option("c-2", "Universiteit Utrecht (UU)", aliases=("Universiteit Utrecht", "UU")),
+    Option("c-1", "Universiteit Alder (UA)", aliases=("Universiteit Alder", "UA")),
+    Option("c-2", "Universiteit Birch (UB)", aliases=("Universiteit Birch", "UB")),
     Option("c-3", "Testaccount (TA)", aliases=("Testaccount", "TA")),
 ]
 
@@ -56,13 +56,13 @@ class TestNarrowing:
     @pytest.mark.parametrize(
         "words,expected",
         [
-            pytest.param("ut", ["c-1"], id="alias-token"),
+            pytest.param("ua", ["c-1"], id="alias-token"),
             pytest.param("universiteit", ["c-1", "c-2"], id="shared-token"),
-            pytest.param("universiteit utrecht", ["c-2", "c-1"], id="most-words-first"),
-            pytest.param("utrecht", ["c-2"], id="label-token"),
+            pytest.param("universiteit birch", ["c-2", "c-1"], id="most-words-first"),
+            pytest.param("birch", ["c-2"], id="label-token"),
             pytest.param("testacc", ["c-3"], id="substring"),
             pytest.param("c-3", ["c-3"], id="value"),
-            pytest.param("delft", [], id="nothing"),
+            pytest.param("elm", [], id="nothing"),
             pytest.param("  ", [], id="blank"),
         ],
     )
@@ -73,26 +73,26 @@ class TestNarrowing:
         "options,words,expected",
         [
             pytest.param(
-                [Option("a", "Hogeschool-Utrecht"), Option("b", "Avans Hogeschool")],
-                "hogeschool utrecht",
+                [Option("a", "Hogeschool-Birch"), Option("b", "Cedar Hogeschool")],
+                "hogeschool birch",
                 ["a", "b"],
                 id="spaced-search-finds-hyphenated-name",
             ),
             pytest.param(
-                [Option("a", "Hogeschool Utrecht"), Option("b", "Avans Hogeschool")],
-                "hogeschool-utrecht",
+                [Option("a", "Hogeschool Birch"), Option("b", "Cedar Hogeschool")],
+                "hogeschool-birch",
                 ["a", "b"],
                 id="hyphenated-search-finds-spaced-name",
             ),
             pytest.param(
-                [Option("a", "Hogeschool-Utrecht"), Option("b", "Hogeschool Utrecht"), Option("c", "Avans Hogeschool")],
-                "hogeschool-utrecht",
+                [Option("a", "Hogeschool-Birch"), Option("b", "Hogeschool Birch"), Option("c", "Cedar Hogeschool")],
+                "hogeschool-birch",
                 ["a", "b", "c"],
                 id="same-spelling-first",
             ),
             pytest.param(
-                [Option("a", "Hogeschool Utrecht")],
-                "hogeschool-utrecht",
+                [Option("a", "Hogeschool Birch")],
+                "hogeschool-birch",
                 ["a"],
                 id="only-hyphenated-search",
             ),
@@ -108,8 +108,8 @@ class TestNarrowing:
     async def test_options_narrows_what_fetch_returned(self):
         widget = FormatWidget("customer", "customerId", CUSTOMERS)
         assert await widget.options({}, CTX) == CUSTOMERS
-        assert [o.value for o in await widget.options({}, CTX, search="twente")] == ["c-1"]
-        assert await FormatWidget("later", "x", None).options({}, CTX, search="ut") is None
+        assert [o.value for o in await widget.options({}, CTX, search="alder")] == ["c-1"]
+        assert await FormatWidget("later", "x", None).options({}, CTX, search="ua") is None
 
 
 @pytest.mark.parametrize(

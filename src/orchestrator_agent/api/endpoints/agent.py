@@ -22,8 +22,10 @@ from starlette.responses import Response, StreamingResponse
 from structlog import get_logger
 
 from orchestrator_agent.adapters import AGUIWorker
+from orchestrator_agent.adapters.ag_ui import ThreadForbiddenError
 from orchestrator_agent.agent import WFOAgent
-from orchestrator_agent.api.dependencies import get_agent
+from orchestrator_agent.api.dependencies import bearer_token, get_agent
+from orchestrator_agent.security import subject_of
 
 router = APIRouter()
 logger = get_logger(__name__)
@@ -42,10 +44,16 @@ async def agent_conversation(
         logger.error("Invalid request body", error=str(e))
         raise HTTPException(status_code=400, detail=f"Invalid request body: {e}")
 
-    auth_header = request.headers.get("authorization", "")
-    auth_token = auth_header.removeprefix("Bearer ") if auth_header.startswith("Bearer ") else None
+    auth_token = bearer_token(request)
 
-    stream = await AGUIWorker.run_request(
-        agent=agent, run_input=run_input, db_session=db.session, auth_token=auth_token
-    )
+    try:
+        stream = await AGUIWorker.run_request(
+            agent=agent,
+            run_input=run_input,
+            db_session=db.session,
+            auth_token=auth_token,
+            owner=subject_of(request),
+        )
+    except ThreadForbiddenError as exc:
+        raise HTTPException(status_code=403, detail=str(exc))
     return StreamingResponse(stream, media_type=SSE_CONTENT_TYPE)

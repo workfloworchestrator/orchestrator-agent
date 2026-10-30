@@ -8,7 +8,7 @@ dependencies = [
     "orchestrator-core>=5.5.0",
     "pydantic-forms>=2.8.0rc1",  # core's form types the skill reads (``FormFieldError``)
     "pydantic-ai-slim[mcp]>=2.0,<3",
-    "ag-ui-protocol==0.1.10",
+    "ag-ui-protocol>=1.0.0,<2",  # interrupts (``RunFinishedEvent.outcome``, ``RunAgentInput.resume``): the AG-UI human-in-the-loop
     "a2a-sdk[http-server]>=1.1.5,<2",
     "mcp>=1.28.1,<2",
     "uvicorn[standard]>=0.30.0",

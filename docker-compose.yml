@@ -4,3 +4,16 @@ services:
     env_file: .env
     network_mode: host
     restart: unless-stopped
+
+  # The chat popup demo: nginx serves the page and proxies /agui/ to the agent, so the browser sees one origin.
+  web:
+    build:
+      context: demos/web
+      dockerfile: demo/Dockerfile
+    network_mode: host
+    environment:
+      PORT: ${WEB_PORT:-3001}
+      AGENT_URL: ${AGENT_URL:-http://127.0.0.1:8080}
+    depends_on:
+      - agent
+    restart: unless-stopped
