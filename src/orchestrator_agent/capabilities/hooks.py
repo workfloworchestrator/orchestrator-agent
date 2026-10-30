@@ -21,8 +21,8 @@ across all tools:
 - ``FilterPathGuard`` — a filtered/grouped call must follow ``discover_filter_paths``. It self-scopes
   by tool *schema* (any tool exposing ``filters``/``group_by``), so it is one cross-cutting instance,
   not something each filtering plugin owns a copy of.
-- ``WriteToolGate`` — where the form-fill skill runs (A2A), core's write tools (start/resume/abort a
-  workflow) are hidden from the model; writes happen only through the deterministic skill (``form_fill``).
+- ``WriteToolGate`` — Core discovery is read-only on every interface. A registered capability can
+  explicitly opt selected tools into mutation access; the built-in form skill keeps its approval path.
 - ``ProcessHistory`` — sliding-window history trimming, agent-wide.
 
 Per-tool *result* behavior (mapping a tool's JSON into rich artifacts) is owned by the plugins
@@ -47,6 +47,7 @@ from orchestrator_agent.tool_names import (
     START_WORKFLOW_FORM_TOOL,
     WRITE_TOOL_NAMES,
 )
+from orchestrator_agent.tool_policy import LOCAL_TOOL_NAMES, is_capability_mutation_tool, is_read_only_core_tool
 
 
 def needs_form_fill(spec: PluginSpec) -> bool:
@@ -59,14 +60,14 @@ def build_capabilities(
 ) -> list[AbstractCapability[Any]]:
     """Build the agent's capability list: one capability per plugin, plus the cross-cutting hooks.
 
-    The full MCP toolset is passed to the Agent; a plugin's instructions hide when it is deferred,
+    The MCP toolset filtered by read-only annotations is passed to the Agent; plugin instructions hide when deferred,
     and ``DeferredToolGate`` hides that plugin's *tools* until the model loads it (both revealed by
     one ``load_capability`` call). ``FilterPathGuard`` and history trimming are the other cross-cutting
-    hooks. Tools owned by no plugin are always available (auto-appear).
+    hooks. Allowed tools owned by no plugin are always available.
 
     ``form_fill`` says the form-fill skill runs in this agent: only then is the plugin that hands off to
-    it loaded (its tool exists nowhere else) and are core's write tools hidden from the model
-    (``WriteToolGate``). Without it the agent is what it was before the skill existed.
+    it loaded (its tool exists nowhere else). Core's write tools stay hidden on every interface unless
+    a registered capability explicitly provides selected tools through the mutation bypass.
     """
     resolved = [
         spec for spec in (specs if specs is not None else load_plugin_specs()) if form_fill or not needs_form_fill(spec)
@@ -75,7 +76,7 @@ def build_capabilities(
     return [
         *plugin_caps,
         DeferredToolGate(resolved),
-        *([WriteToolGate()] if form_fill else []),
+        WriteToolGate(),
         FilterPathGuard(),
         ProcessHistory[Any](processor=trim_history),
     ]
@@ -92,7 +93,7 @@ class DeferredToolGate(AbstractCapability[Any]):
     is hidden — a contradiction that makes it pick a fully-documented tool instead. This
     ``prepare_tools`` hook drops any tool owned by a deferred plugin that is not yet in
     ``ctx.loaded_capability_ids``; ``load_capability`` then reveals the tool and its instructions
-    together. Always-on plugins and unowned tools are never touched.
+    together. Always-on plugins and unowned tools are still subject to ``WriteToolGate``.
     """
 
     def __init__(self, specs: list[PluginSpec]) -> None:
@@ -121,17 +122,17 @@ class DeferredToolGate(AbstractCapability[Any]):
         ]
 
 
-# --- Writes never go through the model -------------------------------------------------------
+# --- Read-only discovery and explicit capability mutation access -----------------------------
 
 
 class WriteToolGate(AbstractCapability[Any]):
-    """Hide core's write tools from the model (in the agent the form-fill skill runs in).
+    """Enforce declared reads, with an explicit per-tool exception for registered capabilities.
 
     Starting a workflow is done by the deterministic form-fill skill (``orchestrator_agent.form_fill``),
     which walks the form, has the calling agent confirm, and calls ``create_workflow`` from code. The model
-    only ever reads, so it cannot start a workflow on a half-filled form or on a confirmation it inferred —
-    the write tools are simply not in its toolset. Resuming and aborting processes are hidden for the same
-    reason and are not offered through the agent yet (a follow-up for the skill).
+    cannot discover those workflow writes, even if Core mislabels them as read-only. A custom capability
+    may expose selected mutations through ``allow_capability_mutations`` and must enforce its own
+    approval rules. Ordinary Core tools must declare readOnlyHint=True; their authors must label them accurately.
     """
 
     def __init__(self, hidden: tuple[str, ...] = WRITE_TOOL_NAMES) -> None:
@@ -142,7 +143,15 @@ class WriteToolGate(AbstractCapability[Any]):
         return None  # Not spec-serializable (behaviour, not data).
 
     async def prepare_tools(self, ctx: RunContext[Any], tool_defs: list[ToolDefinition]) -> list[ToolDefinition]:
-        return [td for td in tool_defs if td.name not in self._hidden]
+        return [
+            td
+            for td in tool_defs
+            if td.kind != "external"
+            and (
+                is_capability_mutation_tool(ctx, td)
+                or (td.name not in self._hidden and (td.name in LOCAL_TOOL_NAMES or is_read_only_core_tool(td)))
+            )
+        ]
 
 
 # --- Deterministic search flow (discover filter paths before searching) --------------------

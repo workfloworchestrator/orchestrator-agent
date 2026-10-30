@@ -34,6 +34,7 @@ from orchestrator_agent.capabilities.loader import load_system_prompt
 from orchestrator_agent.form_fill import FormFillCapability
 from orchestrator_agent.mcp_client import build_core_toolset
 from orchestrator_agent.state import SearchState
+from orchestrator_agent.tool_policy import is_read_only_core_tool
 
 if TYPE_CHECKING:
     from pydantic_ai.models import KnownModelName, Model
@@ -51,8 +52,8 @@ def build_agent(model: "Model | KnownModelName | str", *, form_fill: "FormFillSk
     Args:
         model: A pydantic-ai model or model name/string.
         form_fill: The workflow form-fill skill to run in front of the model (A2A); it shares the
-            agent's core MCP session. Only with it does the model get the handoff to the skill and
-            lose core's write tools.
+            agent's core MCP session. Only with it does the model get the handoff to the skill.
+            The model's Core tools must be explicitly annotated read-only with or without the skill.
 
     Returns:
         A plain ``Agent`` ready to run inside ``async with agent:``.
@@ -66,7 +67,7 @@ def build_agent(model: "Model | KnownModelName | str", *, form_fill: "FormFillSk
         model=model,
         deps_type=StateDeps[SearchState],
         instructions=load_system_prompt(),
-        toolsets=[core_toolset],
+        toolsets=[core_toolset.filtered(lambda _ctx, tool: is_read_only_core_tool(tool))],
         capabilities=capabilities,
         retries=2,
     )
