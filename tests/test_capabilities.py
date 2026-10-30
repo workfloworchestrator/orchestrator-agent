@@ -244,10 +244,10 @@ class TestDeferredToolGate:
 
 
 class TestWriteToolGate:
-    """Core's write tools never reach the model; the form-fill skill is the only writer."""
+    """Core writes stay hidden by default; opt-in paths have separate integration coverage."""
 
     DEFS = [
-        ToolDefinition(name=n)
+        ToolDefinition(name=n, metadata={"annotations": {"readOnlyHint": True}})
         for n in (SEARCH_TOOL, CREATE_WORKFLOW_TOOL, "resume_workflow_process", "abort_workflow_process")
     ]
 
@@ -255,16 +255,16 @@ class TestWriteToolGate:
         names = {t.name for t in await WriteToolGate().prepare_tools(SimpleNamespace(), list(self.DEFS))}
         assert names == {SEARCH_TOOL}
 
-    def test_the_gate_and_the_handoff_plugin_come_with_the_form_fill_skill_only(self):
+    def test_every_interface_has_the_gate_but_only_forms_have_the_handoff_plugin(self):
         def parts(capabilities):
             gated = any(isinstance(c, WriteToolGate) for c in capabilities)
             return gated, {getattr(c, "id", None) for c in capabilities}
 
         gated, ids = parts(build_capabilities(form_fill=True))
         assert gated and "workflow" in ids
-        # Without the skill (MCP, AG-UI) the agent is what it was: no handoff to a tool that is not there.
+        # MCP and AG-UI have no form handoff, but must still prevent model-selected mutations.
         gated, ids = parts(build_capabilities())
-        assert not gated and "workflow" not in ids and "search" in ids
+        assert gated and "workflow" not in ids and "search" in ids
 
 
 class TestArtifactMapping:

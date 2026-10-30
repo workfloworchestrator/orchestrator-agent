@@ -19,15 +19,20 @@ as ``instructions``.
 
 The spec's fields project onto a pydantic-ai ``Capability`` (``id``/``description``/``instructions``/
 ``defer_loading``, via ``behavior.build_plugin_capability``) and, when advertised, an A2A
-``AgentSkill``. The full MCP toolset is passed directly to the Agent — the MCP server (via
-AgentTag.EXPOSED) is the single gate on what the model can call.
+``AgentSkill``. Core's MCP tools are filtered by read-only annotations. Plugin ownership does not
+grant mutation access; trusted Python capabilities opt in by supplying tools via ``get_toolset()``,
+or operators can list exact tool names in ``AGENT_TOOL_BYPASS``.
 """
 
 from __future__ import annotations
 
 from enum import StrEnum
+from typing import TYPE_CHECKING
 
 from pydantic import BaseModel, ConfigDict, Field
+
+if TYPE_CHECKING:
+    from a2a.types import AgentSkill
 
 
 class ArtifactType(StrEnum):
@@ -70,7 +75,7 @@ class PluginSpec(BaseModel):
         description="Tool-name constants from tool_names.py this plugin OWNS (e.g. SEARCH_TOOL). Ownership "
         "drives artifact mapping (its results -> the declared artifact) and DeferredToolGate (these tools "
         "hide with the plugin when deferred). Prompts do not name tools; the model binds intent from the "
-        "tool's description.",
+        "tool's description. Ownership does not bypass the read-only tool policy.",
     )
     artifact: ArtifactType | None = Field(
         default=None,
@@ -79,7 +84,7 @@ class PluginSpec(BaseModel):
     )
 
 
-def skills_from_specs() -> list:
+def skills_from_specs() -> list[AgentSkill]:
     """Project advertised plugin specs into A2A AgentSkill objects."""
     from a2a.types import AgentSkill
 
