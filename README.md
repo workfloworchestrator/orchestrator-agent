@@ -118,16 +118,66 @@ This text is injected verbatim as a `## Domain Knowledge` section appended to th
 
 ## Architecture
 
-This repo is a thin MCP client. The agent is a plain pydantic-ai `Agent` configured with **capabilities** (`capabilities/`). The full orchestrator-core MCP toolset (`WFO_CORE_MCP_URL`) is passed to the `Agent`; each plugin **declares the tools it owns** via `tools:`. When a plugin is deferred, the cross-cutting `DeferredToolGate` hides its owned tools (and `defer_loading` hides its instructions) until the model calls `load_capability` — so the model can't bypass a multi-step skill by calling its tool without the guidance. Tools owned by no plugin (the filtering tools, any new server tool) are always available, so they appear automatically. The search infrastructure (query engine, filters, retrievers, indexing, DB models) lives in `orchestrator-core`.
+This repo is a thin MCP client. The agent is a plain pydantic-ai `Agent` configured with **capabilities** (`capabilities/`). The orchestrator-core MCP toolset (`WFO_CORE_MCP_URL`) is filtered by read-only annotations before reaching the model; each plugin **declares the tools it owns** via `tools:`. When a plugin is deferred, the cross-cutting `DeferredToolGate` hides its owned tools (and `defer_loading` hides its instructions) until the model calls `load_capability` — so the model can't bypass a multi-step skill by calling its tool without the guidance. New tools explicitly declared read-only are discovered automatically, including tools owned by no plugin. Mutation access requires an explicit capability opt-in, described below. The search infrastructure (query engine, filters, retrievers, indexing, DB models) lives in `orchestrator-core`.
 
 ```
 Request ──► AG-UI adapter ──► async with Agent: ──► run_stream_events()
-         ──► A2A adapter  ──►   (full MCP toolset; gate hides deferred plugins' tools)
+         ──► A2A adapter  ──►   (read-only Core discovery; explicit capability mutation opt-in)
          ──► chat adapter ──►   (the A2A agent, called by LibreChat as its model)
          ──► MCP adapter  ──►   └─► MCPToolset ──► orchestrator-core /mcp
 ```
 
-Capabilities are always-on (`defer_loading=False`). The domain capabilities — **search**, **aggregate**, **entity** (details/lookup), **export**, **workflow** (start a workflow via its input form) — are **plugins**: authored Markdown files loaded at startup (see [Plugins](#plugins) below). Each plugin becomes one pydantic-ai capability that bundles its instructions and, when it declares `artifact:`, the matching behaviour — mapping *its* tools' JSON results into `QueryArtifact` / `DataArtifact` / `ExportArtifact` metadata for the AG-UI/A2A transport (`capabilities/behavior/`). Three hooks remain cross-cutting (single invariants across all tools, not plugin-owned): `FilterPathGuard` enforces that any `filters`/`group_by` call is preceded by `discover_filter_paths` (paths are DB-specific and must not be guessed), `WriteToolGate` hides core's write tools from the model (starting a workflow is the deterministic form-fill skill's job — see [Workflow form-fill](#workflow-form-fill-a2a-deterministic-jev-decided)), and `ProcessHistory` does sliding-window history trimming. Grouped aggregations and search results are rendered deterministically in code (a Mermaid chart / Markdown table carried as a `RenderedBlock`) and injected into the answer, so they appear even on text-only clients. MCP tools require an open session, so every run happens inside `async with agent:`.
+Capabilities are always-on (`defer_loading=False`). The domain capabilities — **search**, **aggregate**, **entity** (details/lookup), **export**, **workflow** (start a workflow via its input form) — are **plugins**: authored Markdown files loaded at startup (see [Plugins](#plugins) below). Each plugin becomes one pydantic-ai capability that bundles its instructions and, when it declares `artifact:`, the matching behaviour — mapping *its* tools' JSON results into `QueryArtifact` / `DataArtifact` / `ExportArtifact` metadata for the AG-UI/A2A transport (`capabilities/behavior/`). Three hooks remain cross-cutting (single invariants across all tools, not plugin-owned): `FilterPathGuard` enforces that any `filters`/`group_by` call is preceded by `discover_filter_paths` (paths are DB-specific and must not be guessed), `WriteToolGate` enforces declared reads with an explicit selected-tool exception for active registered capabilities (see below), and `ProcessHistory` does sliding-window history trimming. Grouped aggregations and search results are rendered deterministically in code (a Mermaid chart / Markdown table carried as a `RenderedBlock`) and injected into the answer, so they appear even on text-only clients. MCP tools require an open session, so every run happens inside `async with agent:`.
+
+### Tool access and mutation opt-in
+
+On every interface, automatically discovered Core tools must explicitly declare `readOnlyHint: true` as a
+boolean in their MCP annotations. New read-only tools become available without an agent-side list of names.
+Tools marked as writes, missing annotations, and null or malformed declarations are blocked. The known workflow
+write tools (`create_workflow`, `resume_workflow_process`, `abort_workflow_process`) stay blocked during automatic
+discovery even if mislabeled. Frontend/external tools are excluded.
+
+This policy trusts the Core server configured by `WFO_CORE_MCP_URL`. Endpoint authors must ensure that a tool
+declared read-only does not change business state; the agent does not inspect endpoint implementations. Read
+tools can be called without human confirmation, and conversation/query persistence still writes operational data.
+On Core routes, use `agent-exposed` with `openapi_extra=READONLY_TOOL` for read-only tools.
+
+Trusted Python capabilities can explicitly expose selected local or Core mutations using
+`allow_capability_mutations` from their `get_toolset()`:
+
+```python
+from typing import Any
+
+from pydantic_ai.capabilities import AbstractCapability
+
+from orchestrator_agent.mcp_client import build_core_toolset
+from orchestrator_agent.tool_policy import allow_capability_mutations
+
+
+class ProcessMaintenanceCapability(AbstractCapability[Any]):
+    id = "process-maintenance"
+    description = "Resume processes under the deployment's maintenance policy."
+
+    def __init__(self):
+        self.core = build_core_toolset()
+
+    def get_toolset(self):
+        return allow_capability_mutations(
+            self.core,
+            tool_names={"resume_workflow_process"},
+        )
+```
+
+Register the capability with the agent, for example using `capabilities=[ProcessMaintenanceCapability()]` on
+`agent.run()`. The same helper works with a local `FunctionToolset`. Only the selected names bypass the policy,
+and only while their registered capability is active; deferred capabilities must be loaded first. Passing the
+wrapper as an ordinary agent/run toolset grants no bypass. Markdown plugin ownership alone grants no mutation
+access, and reserved local orchestration names cannot be selected.
+
+**The capability author must enforce any required approval and authorization.** The helper permits direct model
+invocation; it does not add a confirmation step or bypass Core's existing authorization checks. The built-in
+workflow form capability retains its structured approval path. There is no environment variable to disable this
+policy or grant mutation access; opt-in is explicit in capability code.
 
 ### Plugins
 
@@ -201,7 +251,7 @@ exists for when the capability set grows large enough that on-demand loading is 
 
 ### Workflow form-fill (A2A, human in the loop)
 
-Starting a workflow is **not done by the model**, and never on the strength of chat text. It is a
+In the built-in workflow capability, starting a workflow is **not done by the model**, and never on the strength of chat text. It is a
 deterministic skill (`form_fill/`) that runs inside the agent as a pydantic-ai capability and is answered
 by a person through native pauses — kagent's human-in-the-loop extension over A2A. Every stop of the
 skill is an `input-required` task that carries the questions of a form page, or the start to approve;
@@ -271,10 +321,11 @@ and its tool arguments are built from core's request models (the agent depends o
 the skill never picks keys out of a dict; only the page schema itself, written for a browser form, is
 read here, and that half of the bridge goes once core's form tool returns a field spec.
 
-In the agent the skill runs in (A2A) the model never sees core's write tools (`WriteToolGate` hides
-`create_workflow` / `resume_workflow_process` / `abort_workflow_process`), so writes only ever go through
-this skill; the MCP and AG-UI agents run without the skill, so they get neither the gate nor the
-`workflow` plugin and behave as before. Routing in front of the model and prefilling pages from the
+The built-in form skill starts workflows only after structured approval. Core's write tools stay hidden during
+automatic discovery on every interface, including MCP and AG-UI, which have no built-in workflow form plugin.
+Custom capabilities may deliberately expose selected writes through the explicit
+[mutation opt-in](#tool-access-and-mutation-opt-in) and must enforce their own approval rules.
+Routing in front of the model and prefilling pages from the
 conversation with a typed decision engine (Jev) live on a separate branch; a handed-off key core does not
 know is a tool retry, so the model corrects itself.
 
