@@ -20,15 +20,19 @@ as ``instructions``.
 The spec's fields project onto a pydantic-ai ``Capability`` (``id``/``description``/``instructions``/
 ``defer_loading``, via ``behavior.build_plugin_capability``) and, when advertised, an A2A
 ``AgentSkill``. Core's MCP tools are filtered by read-only annotations. Plugin ownership does not
-grant mutation access; trusted capability code can explicitly expose selected writes with
-``allow_capability_mutations``.
+grant mutation access; trusted Python capabilities opt in by supplying tools via ``get_toolset()``,
+or operators can list exact tool names in ``AGENT_TOOL_BYPASS``.
 """
 
 from __future__ import annotations
 
 from enum import StrEnum
+from typing import TYPE_CHECKING
 
 from pydantic import BaseModel, ConfigDict, Field
+
+if TYPE_CHECKING:
+    from a2a.types import AgentSkill
 
 
 class ArtifactType(StrEnum):
@@ -80,7 +84,7 @@ class PluginSpec(BaseModel):
     )
 
 
-def skills_from_specs() -> list:
+def skills_from_specs() -> list[AgentSkill]:
     """Project advertised plugin specs into A2A AgentSkill objects."""
     from a2a.types import AgentSkill
 

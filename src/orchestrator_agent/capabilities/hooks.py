@@ -21,8 +21,8 @@ across all tools:
 - ``FilterPathGuard`` — a filtered/grouped call must follow ``discover_filter_paths``. It self-scopes
   by tool *schema* (any tool exposing ``filters``/``group_by``), so it is one cross-cutting instance,
   not something each filtering plugin owns a copy of.
-- ``WriteToolGate`` — Core discovery is read-only on every interface. A registered capability can
-  explicitly opt selected tools into mutation access; the built-in form skill keeps its approval path.
+- ``WriteToolGate`` — tools are read-only by default on every interface, with opt-in through a Python
+  capability or an exact-name bypass list; the built-in form skill keeps its approval path.
 - ``ProcessHistory`` — sliding-window history trimming, agent-wide.
 
 Per-tool *result* behavior (mapping a tool's JSON into rich artifacts) is owned by the plugins
@@ -31,6 +31,7 @@ instead, in ``behavior/``.
 
 from __future__ import annotations
 
+from collections.abc import Collection
 from typing import Any
 
 from pydantic_ai.capabilities import AbstractCapability, ProcessHistory
@@ -47,7 +48,12 @@ from orchestrator_agent.tool_names import (
     START_WORKFLOW_FORM_TOOL,
     WRITE_TOOL_NAMES,
 )
-from orchestrator_agent.tool_policy import LOCAL_TOOL_NAMES, is_capability_mutation_tool, is_read_only_core_tool
+from orchestrator_agent.tool_policy import (
+    LOCAL_TOOL_NAMES,
+    is_bypassed_tool,
+    is_capability_tool,
+    is_read_only_core_tool,
+)
 
 
 def needs_form_fill(spec: PluginSpec) -> bool:
@@ -56,18 +62,18 @@ def needs_form_fill(spec: PluginSpec) -> bool:
 
 
 def build_capabilities(
-    specs: list[PluginSpec] | None = None, *, form_fill: bool = False
+    specs: list[PluginSpec] | None = None, *, form_fill: bool = False, tool_bypass: Collection[str] = ()
 ) -> list[AbstractCapability[Any]]:
     """Build the agent's capability list: one capability per plugin, plus the cross-cutting hooks.
 
-    The MCP toolset filtered by read-only annotations is passed to the Agent; plugin instructions hide when deferred,
+    The MCP toolset filtered by read-only annotations and the bypass list is passed to the Agent; instructions hide when deferred,
     and ``DeferredToolGate`` hides that plugin's *tools* until the model loads it (both revealed by
     one ``load_capability`` call). ``FilterPathGuard`` and history trimming are the other cross-cutting
     hooks. Allowed tools owned by no plugin are always available.
 
     ``form_fill`` says the form-fill skill runs in this agent: only then is the plugin that hands off to
     it loaded (its tool exists nowhere else). Core's write tools stay hidden on every interface unless
-    a registered capability explicitly provides selected tools through the mutation bypass.
+    a capability supplies them through ``get_toolset()`` or their names are in ``tool_bypass``.
     """
     resolved = [
         spec for spec in (specs if specs is not None else load_plugin_specs()) if form_fill or not needs_form_fill(spec)
@@ -76,7 +82,7 @@ def build_capabilities(
     return [
         *plugin_caps,
         DeferredToolGate(resolved),
-        WriteToolGate(),
+        WriteToolGate(bypass=tool_bypass),
         FilterPathGuard(),
         ProcessHistory[Any](processor=trim_history),
     ]
@@ -122,21 +128,23 @@ class DeferredToolGate(AbstractCapability[Any]):
         ]
 
 
-# --- Read-only discovery and explicit capability mutation access -----------------------------
+# --- Read-only discovery, capability tools and the bypass list -------------------------------
 
 
 class WriteToolGate(AbstractCapability[Any]):
-    """Enforce declared reads, with an explicit per-tool exception for registered capabilities.
+    """Allow declared reads, tools supplied by capabilities, and names in the bypass list.
 
     Starting a workflow is done by the deterministic form-fill skill (``orchestrator_agent.form_fill``),
     which walks the form, has the calling agent confirm, and calls ``create_workflow`` from code. The model
-    cannot discover those workflow writes, even if Core mislabels them as read-only. A custom capability
-    may expose selected mutations through ``allow_capability_mutations`` and must enforce its own
-    approval rules. Ordinary Core tools must declare readOnlyHint=True; their authors must label them accurately.
+    cannot automatically discover those workflow writes, even if Core mislabels them as read-only.
+    A custom capability may supply mutations through ``get_toolset()``; an operator may also opt in
+    by listing exact names in the bypass list. These paths must enforce any required approval themselves.
+    Ordinary Core tools must declare readOnlyHint=True; their authors must label them accurately.
     """
 
-    def __init__(self, hidden: tuple[str, ...] = WRITE_TOOL_NAMES) -> None:
+    def __init__(self, hidden: tuple[str, ...] = WRITE_TOOL_NAMES, *, bypass: Collection[str] = ()) -> None:
         self._hidden = frozenset(hidden)
+        self._bypass = frozenset(bypass)
 
     @classmethod
     def get_serialization_name(cls) -> str | None:
@@ -148,7 +156,8 @@ class WriteToolGate(AbstractCapability[Any]):
             for td in tool_defs
             if td.kind != "external"
             and (
-                is_capability_mutation_tool(ctx, td)
+                is_capability_tool(ctx, td)
+                or (td.capability_id is None and is_bypassed_tool(td, self._bypass))
                 or (td.name not in self._hidden and (td.name in LOCAL_TOOL_NAMES or is_read_only_core_tool(td)))
             )
         ]

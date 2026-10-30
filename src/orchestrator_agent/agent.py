@@ -33,8 +33,9 @@ from orchestrator_agent.capabilities.hooks import build_capabilities
 from orchestrator_agent.capabilities.loader import load_system_prompt
 from orchestrator_agent.form_fill import FormFillCapability
 from orchestrator_agent.mcp_client import build_core_toolset
+from orchestrator_agent.settings import agent_settings
 from orchestrator_agent.state import SearchState
-from orchestrator_agent.tool_policy import is_read_only_core_tool
+from orchestrator_agent.tool_policy import is_bypassed_tool, is_read_only_core_tool
 
 if TYPE_CHECKING:
     from pydantic_ai.models import KnownModelName, Model
@@ -53,13 +54,14 @@ def build_agent(model: "Model | KnownModelName | str", *, form_fill: "FormFillSk
         model: A pydantic-ai model or model name/string.
         form_fill: The workflow form-fill skill to run in front of the model (A2A); it shares the
             agent's core MCP session. Only with it does the model get the handoff to the skill.
-            The model's Core tools must be explicitly annotated read-only with or without the skill.
+            Core discovery requires a read-only annotation or an exact name in AGENT_TOOL_BYPASS.
 
     Returns:
         A plain ``Agent`` ready to run inside ``async with agent:``.
     """
     core_toolset = build_core_toolset()
-    capabilities = build_capabilities(form_fill=form_fill is not None)
+    bypass = frozenset(agent_settings.AGENT_TOOL_BYPASS)
+    capabilities = build_capabilities(form_fill=form_fill is not None, tool_bypass=bypass)
     if form_fill is not None:
         capabilities.append(FormFillCapability(form_fill, core_toolset))
     logger.debug("Building WFO agent", model=str(model), capability_count=len(capabilities))
@@ -67,7 +69,9 @@ def build_agent(model: "Model | KnownModelName | str", *, form_fill: "FormFillSk
         model=model,
         deps_type=StateDeps[SearchState],
         instructions=load_system_prompt(),
-        toolsets=[core_toolset.filtered(lambda _ctx, tool: is_read_only_core_tool(tool))],
+        toolsets=[
+            core_toolset.filtered(lambda _ctx, tool: is_read_only_core_tool(tool) or is_bypassed_tool(tool, bypass))
+        ],
         capabilities=capabilities,
         retries=2,
     )

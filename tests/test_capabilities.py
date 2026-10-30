@@ -244,7 +244,7 @@ class TestDeferredToolGate:
 
 
 class TestWriteToolGate:
-    """Core's write tools never reach the model; the form-fill skill is the only writer."""
+    """Core writes stay hidden by default; opt-in paths have separate integration coverage."""
 
     DEFS = [
         ToolDefinition(name=n, metadata={"annotations": {"readOnlyHint": True}})

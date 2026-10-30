@@ -11,6 +11,7 @@ from pydantic_ai.ui.ag_ui import AGUIAdapter
 
 from orchestrator_agent.agent import build_agent, new_deps
 from orchestrator_agent.form_fill import FormFillSkill
+from orchestrator_agent.settings import agent_settings
 from orchestrator_agent.tool_names import WRITE_TOOL_NAMES
 
 
@@ -61,9 +62,13 @@ async def test_model_cannot_execute_writes_or_undeclared_tools(monkeypatch, form
 
 
 @pytest.mark.parametrize("attempted_tool", ["delete_customer", "get_process_status"])
-async def test_agui_frontend_cannot_supply_mutations_under_unknown_or_allowed_names(monkeypatch, attempted_tool):
+@pytest.mark.parametrize("bypass", [False, True])
+async def test_agui_frontend_cannot_supply_mutations_under_unknown_or_allowed_names(
+    monkeypatch, attempted_tool, bypass
+):
     core = FunctionToolset()
     monkeypatch.setattr("orchestrator_agent.agent.build_core_toolset", lambda: core)
+    monkeypatch.setattr(agent_settings, "AGENT_TOOL_BYPASS", [attempted_tool] if bypass else [])
     seen = []
 
     def model(messages, info):

@@ -15,8 +15,10 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from pydantic import Field, SecretStr
+from pydantic import Field, SecretStr, field_validator
 from pydantic_settings import BaseSettings
+
+from orchestrator_agent.tool_policy import LOCAL_TOOL_NAMES
 
 if TYPE_CHECKING:
     from pydantic_ai.models import Model
@@ -31,6 +33,11 @@ class AgentSettings(BaseSettings):
         default="http://localhost:8080/mcp",
         description="URL of orchestrator-core's MCP server that serves the domain tools "
         "(search, aggregate, entity lookup, export). The agent is a thin MCP client of this endpoint.",
+    )
+    AGENT_TOOL_BYPASS: list[str] = Field(
+        default_factory=list,
+        description="Exact tool names allowed without a read-only annotation or a capability. "
+        "Does not grant authorization or approval. Frontend tools remain excluded.",
     )
     AGENT_MODEL: str = Field(default="openai:gpt-4o", description="LLM model for the agent")
     AGENT_API_BASE: str | None = Field(
@@ -54,6 +61,14 @@ class AgentSettings(BaseSettings):
         description="Enable Langfuse OpenTelemetry tracing. Requires the 'langfuse' extra and the "
         "LANGFUSE_PUBLIC_KEY / LANGFUSE_SECRET_KEY / LANGFUSE_HOST environment variables.",
     )
+
+    @field_validator("AGENT_TOOL_BYPASS")
+    @classmethod
+    def validate_tool_bypass(cls, names: list[str]) -> list[str]:
+        """Keep local orchestration names reserved for their built-in implementations."""
+        if reserved := set(names) & LOCAL_TOOL_NAMES:
+            raise ValueError(f"Local orchestration names cannot be bypassed: {sorted(reserved)}")
+        return names
 
     def create_model(self) -> str | Model:
         """Create a pydantic-ai model from settings.
