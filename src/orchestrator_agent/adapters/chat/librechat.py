@@ -58,6 +58,7 @@ from orchestrator_agent.form_fill.pending import (
     pending_ask,
     pending_of,
 )
+from orchestrator_agent.form_fill.session import paused
 from orchestrator_agent.state import (
     Approval,
     AskField,
@@ -111,8 +112,7 @@ def pause(reply: Reply, session: FormFillSession | None) -> PendingAsk | None:
         return None
     request_id = uuid.uuid4().hex
     pending = pending_approval(request_id) if reply.approval is not None else pending_ask(request_id, reply.ask or [])
-    session.pending = pending.model_dump(mode="json")
-    session.unseen = False
+    paused(session, pending, unseen=False)
     return pending
 
 
