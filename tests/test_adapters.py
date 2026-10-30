@@ -447,6 +447,7 @@ class TestWFOAgentExecutorHITL:
                     "required": True,
                     "title": "",
                     "problem": "",
+                    "hint": "",
                 }
             ],
         }

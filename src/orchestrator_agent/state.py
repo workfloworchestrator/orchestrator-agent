@@ -62,6 +62,7 @@ class AskField:
     required: bool = True
     title: str = ""
     problem: str = ""  # core's message when it rejected the answer
+    hint: str = ""  # one line shown with the question: how many options a long list has, what typed words matched
 
 
 @dataclass(frozen=True)
@@ -142,6 +143,12 @@ class FormFillSession(BaseModel):
         """Each page by its public keys (``schema``, not ``schema_``), so a persisted session validates back as it was."""
         return [page.model_dump(mode=info.mode, by_alias=True) for page in pages]
 
+    # widget field -> what the person's words resolved to: {"value": <option value>, "label": <its label>}
+    resolved: dict[str, dict[str, Any]] = Field(default_factory=dict)
+    # cascade widget field -> the steps chosen before its value ({"node": <node>}): never sent to core
+    steps: dict[str, dict[str, Any]] = Field(default_factory=dict)
+    # widget fields that waited for another value (``later``) at the last stop: asked once they have options
+    waiting: list[str] = Field(default_factory=list)
     # accept fields: "<page>:<name>" -> the fingerprint of what the consent was given for (see the skill)
     consents: dict[str, str] = Field(default_factory=dict)
     asked: list[str] = Field(default_factory=list)  # fields of optional-only pages already asked once

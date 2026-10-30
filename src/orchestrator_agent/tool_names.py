@@ -36,6 +36,8 @@ CREATE_WORKFLOW_TOOL = "create_workflow"
 RESUME_WORKFLOW_PROCESS_TOOL = "resume_workflow_process"
 ABORT_WORKFLOW_PROCESS_TOOL = "abort_workflow_process"
 SUBSCRIPTION_WORKFLOWS_TOOL = "get_subscription_available_workflows"
+# The options of a ``productId`` form field (form-fill widgets).
+LIST_PRODUCTS_TOOL = "list_products"
 # Local (non-MCP) tool: the model hands a workflow start to the form-fill skill; not in ALL_TOOL_NAMES.
 START_WORKFLOW_FORM_TOOL = "start_workflow_form"
 
@@ -62,6 +64,7 @@ ALL_TOOL_NAMES = (
     RESUME_WORKFLOW_PROCESS_TOOL,
     ABORT_WORKFLOW_PROCESS_TOOL,
     SUBSCRIPTION_WORKFLOWS_TOOL,
+    LIST_PRODUCTS_TOOL,
 )
 
 # Tools that change the orchestrator. Hidden from the model by ``WriteToolGate``; the deterministic form-fill
@@ -98,6 +101,7 @@ __all__ = [
     "EXPORT_QUERY_TOOL",
     "GET_VALID_OPERATORS_TOOL",
     "GET_WORKFLOW_FORM_TOOL",
+    "LIST_PRODUCTS_TOOL",
     "LIST_WORKFLOWS_TOOL",
     "PATH_CONSUMING_PARAMS",
     "RESOLVE_ENTITY_TOOL",

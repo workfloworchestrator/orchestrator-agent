@@ -24,6 +24,7 @@ from orchestrator_agent.adapters import A2AAdapter, ChatCompletionsAdapter, MCPA
 from orchestrator_agent.agent import build_agent
 from orchestrator_agent.api.api import api_router
 from orchestrator_agent.form_fill import build_form_fill_skill
+from orchestrator_agent.form_fill.widgets import CoreGraphQL
 from orchestrator_agent.mcp_client import build_core_toolset, verify_tool_contract
 from orchestrator_agent.observability import configure_langfuse, shutdown_langfuse
 from orchestrator_agent.security import AuthMiddleware, create_auth_manager
@@ -44,7 +45,8 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
 
     a2a_url = f"{agent_settings.BASE_URL}/"
     model = agent_settings.create_model()
-    a2a = A2AAdapter(build_agent(model, form_fill=build_form_fill_skill(model)), url=a2a_url)
+    form_fill = build_form_fill_skill(model)
+    a2a = A2AAdapter(build_agent(model, form_fill=form_fill), url=a2a_url)
     a2a.add_routes(app)
     # The same agent as an OpenAI-compatible chat model (LibreChat): forms through its ask-user tool.
     ChatCompletionsAdapter(a2a.agent).add_routes(app)
@@ -57,6 +59,8 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     stack = AsyncExitStack()
     await stack.__aenter__()
     await stack.enter_async_context(mcp_app)
+    if isinstance(form_fill.graphql, CoreGraphQL):
+        stack.push_async_callback(form_fill.graphql.aclose)
 
     logger.info(
         "Agent adapters started",
