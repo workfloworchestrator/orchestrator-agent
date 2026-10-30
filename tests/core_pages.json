@@ -1,0 +1,253 @@
+{
+ "page_2": {
+  "page": 2,
+  "complete": false,
+  "status": "next",
+  "title": "NL8 Service Port 400G",
+  "schema": {
+   "type": "object",
+   "title": "NL8 Service Port 400G",
+   "additionalProperties": false,
+   "properties": {
+    "port": {
+     "type": "string",
+     "enum": [
+      "AH001A",
+      "AMR001A",
+      "ASD002A"
+     ],
+     "options": {
+      "AH001A": "AH001A (400 Gbit/s)",
+      "AMR001A": "AMR001A (400 Gbit/s)",
+      "ASD002A": "ASD002A (400 Gbit/s)"
+     },
+     "title": "Port"
+    },
+    "port_mode": {
+     "type": "string",
+     "enum": [
+      "tagged",
+      "untagged",
+      "link_member"
+     ],
+     "options": {
+      "tagged": "Tagged",
+      "untagged": "Untagged",
+      "link_member": "Link member"
+     },
+     "title": "Port Mode"
+    },
+    "admin_state": {
+     "type": "string",
+     "enum": [
+      "enabled",
+      "disabled"
+     ],
+     "options": {
+      "enabled": "Enabled",
+      "disabled": "Disabled"
+     },
+     "title": "Admin State",
+     "default": "enabled"
+    },
+    "lldp": {
+     "type": "boolean",
+     "title": "Lldp",
+     "default": false
+    },
+    "ignore_l3_incompletes": {
+     "type": "boolean",
+     "title": "Ignore L3 Incompletes",
+     "default": false
+    },
+    "native_vlan": {
+     "anyOf": [
+      {
+       "type": "integer"
+      },
+      {
+       "type": "null"
+      }
+     ],
+     "title": "Native Vlan",
+     "default": null
+    },
+    "contact_persons": {
+     "type": "array",
+     "items": {
+      "type": "object",
+      "properties": {
+       "name": {
+        "type": "string",
+        "format": "contactPersonName",
+        "title": "Name"
+       },
+       "email": {
+        "type": "string",
+        "format": "email",
+        "title": "Email"
+       },
+       "phone": {
+        "type": "string",
+        "title": "Phone",
+        "default": ""
+       }
+      },
+      "required": [
+       "name",
+       "email"
+      ],
+      "title": "ContactPerson",
+      "default": null
+     },
+     "minItems": 0,
+     "title": "Contact Persons",
+     "default": []
+    },
+    "ticket_id": {
+     "type": "string",
+     "title": "Ticket Id",
+     "default": ""
+    }
+   },
+   "required": [
+    "port",
+    "port_mode"
+   ]
+  },
+  "errors": []
+ },
+ "page_2_rejected": {
+  "page": 2,
+  "complete": false,
+  "status": "rejected",
+  "title": "NL8 Service Port 400G",
+  "schema": {
+   "type": "object",
+   "title": "NL8 Service Port 400G",
+   "additionalProperties": false,
+   "properties": {
+    "port": {
+     "type": "string",
+     "enum": [
+      "AH001A",
+      "AMR001A",
+      "ASD002A"
+     ],
+     "options": {
+      "AH001A": "AH001A (400 Gbit/s)",
+      "AMR001A": "AMR001A (400 Gbit/s)",
+      "ASD002A": "ASD002A (400 Gbit/s)"
+     },
+     "title": "Port"
+    },
+    "port_mode": {
+     "type": "string",
+     "enum": [
+      "tagged",
+      "untagged",
+      "link_member"
+     ],
+     "options": {
+      "tagged": "Tagged",
+      "untagged": "Untagged",
+      "link_member": "Link member"
+     },
+     "title": "Port Mode"
+    },
+    "admin_state": {
+     "type": "string",
+     "enum": [
+      "enabled",
+      "disabled"
+     ],
+     "options": {
+      "enabled": "Enabled",
+      "disabled": "Disabled"
+     },
+     "title": "Admin State",
+     "default": "enabled"
+    },
+    "lldp": {
+     "type": "boolean",
+     "title": "Lldp",
+     "default": false
+    },
+    "ignore_l3_incompletes": {
+     "type": "boolean",
+     "title": "Ignore L3 Incompletes",
+     "default": false
+    },
+    "native_vlan": {
+     "anyOf": [
+      {
+       "type": "integer"
+      },
+      {
+       "type": "null"
+      }
+     ],
+     "title": "Native Vlan",
+     "default": null
+    },
+    "contact_persons": {
+     "type": "array",
+     "items": {
+      "type": "object",
+      "properties": {
+       "name": {
+        "type": "string",
+        "format": "contactPersonName",
+        "title": "Name"
+       },
+       "email": {
+        "type": "string",
+        "format": "email",
+        "title": "Email"
+       },
+       "phone": {
+        "type": "string",
+        "title": "Phone",
+        "default": ""
+       }
+      },
+      "required": [
+       "name",
+       "email"
+      ],
+      "title": "ContactPerson",
+      "default": null
+     },
+     "minItems": 0,
+     "title": "Contact Persons",
+     "default": []
+    },
+    "ticket_id": {
+     "type": "string",
+     "title": "Ticket Id",
+     "default": ""
+    }
+   },
+   "required": [
+    "port",
+    "port_mode"
+   ]
+  },
+  "errors": [
+   {
+    "loc": [
+     "port"
+    ],
+    "msg": "field required",
+    "type": "missing"
+   },
+   {
+    "loc": [
+     "port_mode"
+    ],
+    "msg": "Input should be 'tagged', 'untagged' or 'link_member'",
+    "type": "enum"
+   }
+  ]
+ }
+}

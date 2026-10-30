@@ -91,7 +91,6 @@ REJECT_LABEL = "Reject"
 APPROVAL_HEADER = "Approval"
 APPROVAL_NOTE = "Nothing is started until you approve. A typed answer is not read as a decision."
 SUMMARY_CAPTION = "The workflow's own summary:"
-UNTITLED = "unknown"  # pydantic-forms' title of a form page that was given none
 
 
 def call_id(pending: PendingAsk, card: int) -> str:
@@ -147,8 +146,7 @@ def _cards(pending: PendingAsk) -> int:
 
 def _header(session: FormFillSession) -> str:
     """What heads a card: the title of the page being asked, or the workflow when the form gave it none."""
-    title = session.pages[-1].get("title") if session.pages else None
-    return title if isinstance(title, str) and title and title != UNTITLED else session.workflow_key
+    return (session.pages[-1].title if session.pages else None) or session.workflow_key
 
 
 def _question(request_id: str, index: int, field: AskField, header: str) -> dict[str, Any]:
@@ -355,8 +353,7 @@ def shown(reply: Reply) -> str:
         return reply.text
     key = f"`{form.workflow_key}`"
     if form.status == "gathering":
-        titled = form.title and form.title != UNTITLED
-        return f"**Workflow form {key}**" + (f" — {form.title}" if titled else "")
+        return f"**Workflow form {key}**" + (f" — {form.title}" if form.title else "")
     if form.status == "confirming":
         tables = [line for table in form.summary for line in _summary_table(table)]
         summary = ["", SUMMARY_CAPTION, *tables] if tables else []
