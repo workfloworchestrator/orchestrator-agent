@@ -4,6 +4,7 @@ on:
   pull_request:
     paths:
       - 'uv.lock'
+      - 'evals/uv.lock'
 
 permissions:
   contents: read
