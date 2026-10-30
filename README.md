@@ -126,7 +126,8 @@ development setting.
 | `AGENT_API_KEY` | *(none)* | API key for the LLM provider |
 | `AGENT_API_VERSION` | *(none)* | API version for Azure OpenAI (e.g. `2024-12-01-preview`) |
 | `AGENT_DOMAIN_CONTEXT` | *(empty)* | Optional free-text domain knowledge appended to the agent system prompt (e.g. identifier conventions and their filter fields). Empty disables the section |
-| `WFO_CORE_GRAPHQL_URL` | *(derived)* | URL of orchestrator-core's GraphQL API, which form-fill widgets read options from (customers). Unset: `WFO_CORE_MCP_URL` with `/mcp` replaced by `/api/graphql` |
+| `WFO_CORE_API_URL` | *(derived)* | Base URL a form field's relative options source (`optionsSource.url`) is fetched from. Unset: the origin of `WFO_CORE_MCP_URL` |
+| `WFO_OPTIONS_HOSTS` | `[]` | Hosts besides core's that a form field's absolute options source may be fetched from, with the person's token |
 | `OAUTH2_ACTIVE` | `true` | Enable OIDC authentication on incoming requests (via `oauth2_lib`) |
 | `OAUTH2_OUTBOUND_ACTIVE` | *(unset)* | Enable OAuth2 client-credentials auth on outgoing requests to orchestrator-core. When unset, follows `OAUTH2_ACTIVE`; set to `true`/`false` to control outbound auth independently of incoming auth |
 | `OIDC_BASE_URL` | *(none)* | Base URL of the OIDC provider (required when `OAUTH2_ACTIVE=true`) |
@@ -345,21 +346,19 @@ skill, so it gets neither the gate nor the `workflow` plugin and behaves as befo
 conversation with a typed decision engine (Jev) live on a separate branch; a handed-off key core does not
 know is a tool retry, so the model corrects itself.
 
-**Form field widgets.** Some form fields carry no options in core's schema: core's `CustomerId` is a string
-with `format: customerId`, and the WFO frontend's customer select fetches the customers itself. The agent does
-the same through *widgets*, its counterpart of pydantic-forms' component matchers. Before a page is read, each
-field a widget matches gets its options from core (GraphQL or MCP, as the person asking) written into the page
-schema the way core writes a static choice (`enum` + `options`), so everything downstream works unchanged: up to
-ten are asked as options to pick; a longer list is typed, and what is typed is resolved to one of its options — an
-exact name directly, otherwise the agent's model reads the words over the candidates — before core sees it. Words
-that fit several options are asked again as those options; words that fit none are asked again. Typed text is
-never sent to core for such a field. A field whose options depend on another (the free ports of a node) is asked
-in steps, the node first.
-
-The agent ships widgets for the two formats orchestrator-core itself defines, `customerId` and `productId`,
-reading the customers from core's GraphQL API and the products from its `list_products` tool, which the startup
-tool-contract check (`verify_tool_contract`) therefore includes. A widget whose source fails leaves its field
-typed, as without it.
+**Form field widgets.** Some form fields carry no options in core's schema: the customers, locations or ports a
+person picks from are fetched when the form is shown. Since pydantic-forms 2.10 such a field says where
+(`optionsSource`: the URL, how the response is read, and for each `{name}` in the URL a pointer into the page's
+values). The agent has one widget for all of them, its counterpart of a pydantic-forms component matcher. Before a
+page is read, each sourced field gets its options fetched from core's API, as the person asking, and written into
+the page schema the way core writes a static choice (`enum` + `options`), so everything downstream works unchanged:
+up to ten are asked as options to pick; a longer list is typed, and what is typed is resolved to one of its options
+— an exact name directly, otherwise the agent's model reads the words over the candidates; a source that declares
+`search` is searched on the server — before core sees it. Words that fit several options are asked again as those
+options; words that fit none are asked again. Typed text is never sent to core for such a field. A field whose
+source depends on another value (the free ports of a node) has no options until that value is answered, and is
+offered once it has. A source that fails leaves its field typed, as without it. A relative URL is fetched from
+core's origin (`WFO_CORE_API_URL` to override); an absolute one only from a host in `WFO_OPTIONS_HOSTS`.
 
 **A2A protocol version.** The A2A endpoint speaks protocol v1.0 (a2a-sdk 1.x, protobuf types:
 `SendMessage`, `SendStreamingMessage`; the agent card is at `/.well-known/agent-card.json`; a v1 client

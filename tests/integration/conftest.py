@@ -9,7 +9,7 @@ os.environ.setdefault("DATABASE_URI", "postgresql://test:test@localhost:5432/tes
 import pytest
 from pydantic_ai.mcp import MCPToolset
 
-from orchestrator_agent.form_fill.widgets import CoreGraphQL, WidgetContext
+from orchestrator_agent.form_fill.widgets import CoreApi, WidgetContext
 
 CORE_URL = os.environ.get("WFO_INTEGRATION_CORE_URL")
 
@@ -25,7 +25,7 @@ def pytest_collection_modifyitems(config, items):
 
 @pytest.fixture(autouse=True)
 def authless(monkeypatch):
-    """The stack runs authless: no service token to fetch for GraphQL.
+    """The stack runs authless: no service token to fetch for the fields' sources.
 
     An environment default would come too late: the root conftest has built ``agent_settings`` by now.
     """
@@ -38,10 +38,10 @@ def core() -> MCPToolset:
 
 
 @pytest.fixture
-def graphql() -> CoreGraphQL:
-    return CoreGraphQL(f"{CORE_URL}/api/graphql")
+def fetch() -> CoreApi:
+    return CoreApi(str(CORE_URL))
 
 
 @pytest.fixture
-def ctx(core, graphql) -> WidgetContext:
-    return WidgetContext(call_tool=core.direct_call_tool, graphql=graphql)
+def ctx(core, fetch) -> WidgetContext:
+    return WidgetContext(call_tool=core.direct_call_tool, fetch=fetch)
