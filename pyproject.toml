@@ -130,6 +130,6 @@ index-url = "https://pypi.org/simple"
 # orchestrator-core (prod) requires pydantic~=2.13.0 / pydantic-settings~=2.15.0: keep every
 # dependency on the prod-supported versions.
 override-dependencies = [
-    "pydantic>=2.13,<2.14",
+    "pydantic[email]>=2.13,<2.14",
     "pydantic-settings>=2.15.0,<2.16",
 ]
