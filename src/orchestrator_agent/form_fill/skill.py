@@ -30,7 +30,7 @@ anything is submitted.
 from __future__ import annotations
 
 import time
-from collections.abc import Mapping, Sequence
+from collections.abc import Mapping
 from dataclasses import dataclass
 from dataclasses import field as dc_field
 from typing import Any
@@ -58,7 +58,7 @@ from orchestrator_agent.form_fill.walk import (
     walk,
     widget_context,
 )
-from orchestrator_agent.form_fill.widgets import Fetch, FieldWidget, Option, match_widget, widget_target
+from orchestrator_agent.form_fill.widgets import Fetch, Option, is_widget_field, source_options, widget_target
 from orchestrator_agent.state import SUBSCRIPTION_ID, Approval, FormFillSession, FormReply, Reply, SearchState
 from orchestrator_agent.tool_names import CREATE_WORKFLOW_TOOL, JSON_DATA_PARAM, LIST_WORKFLOWS_TOOL, WORKFLOW_KEY_PARAM
 
@@ -73,7 +73,6 @@ _WORKFLOWS_TTL = 300.0  # seconds the workflow catalogue is cached per skill ins
 @dataclass
 class FormFillSkill:
     interpret: Interpreter | None = None  # a person's answers core rejected -> the values the fields expect
-    widgets: Sequence[FieldWidget] = ()  # the fields whose options core leaves to a client (``form_fill.widgets``)
     fetch: Fetch | None = None  # core's API, where a field's source is fetched from
     choose: Chooser | None = None  # words a person typed for a widget field -> the options they fit
     _catalogue: dict[str, str] | None = dc_field(default=None, init=False, repr=False)
@@ -148,16 +147,15 @@ class FormFillSkill:
         """
         page = session.pages[-1] if session.pages else None
         prop: Mapping[str, Any] | None = ((page.schema_ or {}).get("properties") or {}).get(field) if page else None
-        widget = match_widget(self.widgets, prop) if prop else None
-        if widget is None or prop is None:
+        if prop is None or not is_widget_field(prop):
             return None
         ctx = widget_context(self._walk(session, call_tool), session.page_inputs)
-        options = await widget.options(widget_target(prop), ctx, search=words.strip() or None)
+        options = await source_options(widget_target(prop), ctx, search=words.strip() or None)
         return list(options or ())[:limit]
 
     def _walk(self, session: FormFillSession, call_tool: CallTool) -> Walk:
         """A walk over this session with the skill's collaborators."""
-        return Walk(session, call_tool, self.widgets, self.fetch, self.choose, self.interpret)
+        return Walk(session, call_tool, self.fetch, self.choose, self.interpret)
 
     @staticmethod
     def _finish(state: SearchState, session: FormFillSession, reply: Reply) -> Reply:

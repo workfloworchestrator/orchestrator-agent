@@ -6,7 +6,7 @@ import pytest
 
 from orchestrator_agent.form_fill.model import fields_in, options_of
 from orchestrator_agent.form_fill.skill import FormFillSkill
-from orchestrator_agent.form_fill.widgets import CoreApi, OptionsSourceWidget
+from orchestrator_agent.form_fill.widgets import CoreApi, source_options
 from orchestrator_agent.form_fill.widgets.enrich import enrich
 from orchestrator_agent.state import Decision, SearchState
 
@@ -20,7 +20,6 @@ CUSTOMER = {
     "optionsSource": {"url": "/api/demo/customers", "value": "customer_id", "label": "{fullname} ({shortcode})"},
 }
 PRODUCT = {"type": "string", "optionsSource": {"url": "/api/products/", "value": "product_id", "label": "name"}}
-WIDGET = OptionsSourceWidget()
 
 
 class Chooser:
@@ -38,11 +37,11 @@ class Refuses:
 
 
 def skill(fetch, choose=None) -> FormFillSkill:
-    return FormFillSkill(widgets=[WIDGET], fetch=fetch, choose=choose)
+    return FormFillSkill(fetch=fetch, choose=choose)
 
 
 async def test_customers_come_from_the_route_the_field_names(ctx):
-    options = await WIDGET.options(CUSTOMER, ctx)
+    options = await source_options(CUSTOMER, ctx)
     assert len(options) == 30 and options[0].value == "cust-00" and options[0].label == "Customer 00 (C00)"
 
 
@@ -56,18 +55,18 @@ async def test_customers_come_from_the_route_the_field_names(ctx):
     ],
 )
 async def test_searching_the_customers(ctx, words, first):
-    options = await WIDGET.options(CUSTOMER, ctx, search=words)
+    options = await source_options(CUSTOMER, ctx, search=words)
     assert (options[0].value if options else None) == first
 
 
 async def test_products_come_from_cores_own_route(ctx):
-    options = await WIDGET.options(PRODUCT, ctx)
+    options = await source_options(PRODUCT, ctx)
     assert {"Widget Port 10G", "Widget Port 1G"} <= {option.label for option in options}
 
 
 async def test_the_real_page_is_enriched(core, ctx):
     page = await core.direct_call_tool("get_workflow_form", {"workflow_key": KEY, "page_inputs": []})
-    enriched = await enrich(page["schema"], [WIDGET], ctx)
+    enriched = await enrich(page["schema"], ctx)
     fields = {field.name: field for field in fields_in(enriched.schema)}
     assert {P1, P2} <= {str(o.value) for o in options_of(fields["product_id"]) or ()}  # a few products: chips
     assert fields["customer_id"].widget == {"id": "optionsSource", "total": 30}  # thirty customers: typed

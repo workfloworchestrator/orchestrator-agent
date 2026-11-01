@@ -33,11 +33,12 @@ from orchestrator_agent.adapters.words import shown
 from orchestrator_agent.api.endpoints import chats
 from orchestrator_agent.artifacts import QueryArtifact
 from orchestrator_agent.form_fill.skill import FormFillSkill
-from orchestrator_agent.form_fill.widgets import Option, Widget
+from orchestrator_agent.form_fill.widgets import Option
 from orchestrator_agent.persistence import StoredThread, dump_messages
 from orchestrator_agent.state import AskField, FormFillSession, Reply, SearchState
 
 from .conftest import mock_event_stream
+from .test_form_widgets import Fetches, rows
 
 RUN_ID = "00000000-0000-0000-0000-000000000042"
 GATHERING = Reply(
@@ -334,20 +335,8 @@ def test_forgetting_a_chat_deletes_it(client):
 # --- a searchable question's options -------------------------------------------------------------------------
 
 
-class _CustomerWidget(Widget):
-    """A stand-in for the customer widget: three customers, narrowed like the real one."""
-
-    id = "customerId"
-
-    def matches(self, field):
-        return field.get("format") == "customerId"
-
-    async def fetch(self, field, ctx):
-        return [
-            Option("c-1", "Alder College (UA)"),
-            Option("c-2", "Birch University (UB)"),
-            Option("c-3", "Cedar Labs"),
-        ]
+CUSTOMERS = [Option("c-1", "Alder College (UA)"), Option("c-2", "Birch University (UB)"), Option("c-3", "Cedar Labs")]
+CUSTOMER_SOURCE = {"url": "/customers", "value": "value", "label": "label"}
 
 
 def _searching_thread() -> StoredThread:
@@ -356,7 +345,9 @@ def _searching_thread() -> StoredThread:
         page=0,
         complete=False,
         status="next",
-        schema={"properties": {"customer_id": {"type": "string", "format": "customerId", "title": "Customer"}}},
+        schema={
+            "properties": {"customer_id": {"type": "string", "optionsSource": CUSTOMER_SOURCE, "title": "Customer"}}
+        },
     )
     session = FormFillSession(workflow_key="w", pages=[page])
     asked = Reply(GATHERING.text, ask=[AskField(name="customer_id", question="Customer *", searchable=True)])
@@ -366,7 +357,7 @@ def _searching_thread() -> StoredThread:
 
 @pytest.fixture
 def searching_client(client):
-    client.app.state.form_fill = FormFillSkill(widgets=[_CustomerWidget()], fetch=AsyncMock())
+    client.app.state.form_fill = FormFillSkill(fetch=Fetches({"/customers": rows(CUSTOMERS)}))
     client.app.state.core_toolset = SimpleNamespace(direct_call_tool=AsyncMock())
     return client
 

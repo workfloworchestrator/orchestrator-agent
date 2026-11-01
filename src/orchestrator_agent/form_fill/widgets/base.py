@@ -11,18 +11,16 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""What a widget is: the agent's counterpart of a pydantic-forms component matcher.
+"""What the agent knows about a form field whose options core leaves to a client.
 
-The browser renders a field with the first component whose matcher accepts it, and a component such as a select
-fetches its own options. A widget is what the agent does for such a field: whether a property is one
-(``matches``) and the options it has (``options``), fetched as the person asking. The one the agent ships
-(``widgets.source``) reads the ``optionsSource`` a field carries; a deployment may add its own.
+The browser renders such a field with a component that fetches its own options; here the field's ``optionsSource``
+says where they are (``widgets.source``), fetched as the person asking. This module holds what every part shares:
+an option, the context a fetch runs in, and how a long list is narrowed to the options some words could mean.
 """
 
 from __future__ import annotations
 
 import re
-from abc import ABC, abstractmethod
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any, Protocol
@@ -57,50 +55,6 @@ class WidgetContext:
     call_tool: CallTool
     fetch: Fetch
     values: Mapping[str, Any] = field(default_factory=dict)
-
-
-class FieldWidget(Protocol):
-    """A format the agent knows: whether a property is one, and its options.
-
-    ``options(search=None)`` is every option; with ``search``, at most ``MAX_CANDIDATES`` the words could
-    mean. None means the options depend on a value not known yet: the field waits for it.
-    """
-
-    id: str
-
-    def matches(self, field: Mapping[str, Any]) -> bool: ...
-
-    async def options(
-        self, field: Mapping[str, Any], ctx: WidgetContext, search: str | None = None
-    ) -> Sequence[Option] | None: ...
-
-
-class Widget(ABC):
-    """A widget whose source returns the whole list: a search narrows what ``fetch`` returned.
-
-    A widget whose source can search on its own (thousands of subscriptions) says so in ``can_search`` and
-    implements ``options`` for that case.
-    """
-
-    id: str
-
-    @abstractmethod
-    def matches(self, field: Mapping[str, Any]) -> bool: ...
-
-    @abstractmethod
-    async def fetch(self, field: Mapping[str, Any], ctx: WidgetContext) -> Sequence[Option] | None: ...
-
-    def can_search(self, field: Mapping[str, Any]) -> bool:
-        """Whether this field's source narrows a list on the server, so a search is asked of it rather than made here."""
-        return False
-
-    async def options(
-        self, field: Mapping[str, Any], ctx: WidgetContext, search: str | None = None
-    ) -> Sequence[Option] | None:
-        fetched = await self.fetch(field, ctx)
-        if fetched is None or search is None:
-            return fetched
-        return narrow_options(fetched, search)
 
 
 def names_of(option: Option) -> tuple[str, ...]:
@@ -141,9 +95,7 @@ __all__ = [
     "MAX_FULL_READ",
     "MAX_INLINE",
     "Fetch",
-    "FieldWidget",
     "Option",
-    "Widget",
     "WidgetContext",
     "names_of",
     "narrow_options",

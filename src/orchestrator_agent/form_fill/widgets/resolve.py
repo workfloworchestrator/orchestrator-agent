@@ -29,12 +29,12 @@ from orchestrator_agent.form_fill.widgets.base import (
     MAX_CANDIDATES,
     MAX_FULL_READ,
     Option,
-    Widget,
     WidgetContext,
     names_of,
     narrow_options,
 )
 from orchestrator_agent.form_fill.widgets.enrich import LongList
+from orchestrator_agent.form_fill.widgets.source import can_search, source_options
 
 
 @dataclass(frozen=True)
@@ -56,16 +56,14 @@ def exact_options(options: Sequence[Option], words: str) -> list[Option]:
 async def _candidates(long_list: LongList, words: str, ctx: WidgetContext) -> tuple[Option, ...]:
     """What the words are read against: a short enough list in full, else the options a search finds.
 
-    A list that was fetched whole is searched here, in the options already in hand; asking the widget would
-    fetch them again. Only a widget whose source searches on its own (``can_search``, or a ``FieldWidget`` of a
-    deployment's own) is asked.
+    A list that was fetched whole is searched here, in the options already in hand; fetching it again would
+    find the same. Only a source that searches on its own (``search``) is asked.
     """
     if len(long_list.options) <= MAX_FULL_READ:
         return long_list.options
-    widget = long_list.widget
-    if isinstance(widget, Widget) and not widget.can_search(long_list.field):
+    if not can_search(long_list.field):
         return tuple(narrow_options(long_list.options, words))
-    return tuple(await widget.options(long_list.field, ctx, search=words) or ())[:MAX_CANDIDATES]
+    return tuple(await source_options(long_list.field, ctx, search=words) or ())[:MAX_CANDIDATES]
 
 
 async def resolve_words(long_list: LongList, words: str, ctx: WidgetContext, chooser: Chooser | None) -> Resolution:

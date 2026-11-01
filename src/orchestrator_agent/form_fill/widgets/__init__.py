@@ -5,14 +5,12 @@ from orchestrator_agent.form_fill.widgets.base import (
     MAX_FULL_READ,
     MAX_INLINE,
     Fetch,
-    FieldWidget,
     Option,
-    Widget,
     WidgetContext,
     names_of,
     narrow_options,
 )
-from orchestrator_agent.form_fill.widgets.enrich import EnrichedPage, LongList, enrich, match_widget, widget_target
+from orchestrator_agent.form_fill.widgets.enrich import EnrichedPage, LongList, enrich, is_widget_field, widget_target
 from orchestrator_agent.form_fill.widgets.resolve import (
     Resolution,
     exact_options,
@@ -20,7 +18,14 @@ from orchestrator_agent.form_fill.widgets.resolve import (
     resolve_words,
     shown_as,
 )
-from orchestrator_agent.form_fill.widgets.source import CoreApi, OptionsSourceWidget, SourceError, api_base
+from orchestrator_agent.form_fill.widgets.source import (
+    CoreApi,
+    SourceError,
+    api_base,
+    can_search,
+    source_options,
+    sourced,
+)
 
 __all__ = [
     "MAX_CANDIDATES",
@@ -29,22 +34,22 @@ __all__ = [
     "CoreApi",
     "EnrichedPage",
     "Fetch",
-    "FieldWidget",
     "LongList",
     "Option",
-    "OptionsSourceWidget",
     "Resolution",
     "SourceError",
-    "Widget",
     "WidgetContext",
     "api_base",
+    "can_search",
     "enrich",
     "exact_options",
-    "match_widget",
+    "is_widget_field",
     "names_of",
     "narrow_options",
     "resolve_answer",
     "resolve_words",
     "shown_as",
+    "source_options",
+    "sourced",
     "widget_target",
 ]

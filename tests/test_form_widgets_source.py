@@ -12,12 +12,20 @@ import httpx
 import pytest
 
 from orchestrator_agent.form_fill.model import fields_in, options_of
-from orchestrator_agent.form_fill.widgets import CoreApi, OptionsSourceWidget, SourceError, WidgetContext, api_base
+from orchestrator_agent.form_fill.widgets import (
+    CoreApi,
+    SourceError,
+    WidgetContext,
+    api_base,
+    can_search,
+    source_options,
+    sourced,
+)
 from orchestrator_agent.form_fill.widgets.enrich import enrich
 from orchestrator_agent.form_fill.widgets.source import filled_url, options_in, searched, value_at
 from orchestrator_agent.mcp_client import bind_outbound_token
 
-from .test_form_widgets import no_tool
+from .test_form_widgets import Fetches, no_tool
 
 CUSTOMERS = {"url": "/api/customers", "value": "customer_id", "label": "{fullname} ({shortcode})"}
 ROWS = [
@@ -30,37 +38,25 @@ PORTS = {
     "label": "name",
     "dependsOn": {"node": "1/node", "speed": "/service_speed"},
 }
-WIDGET = OptionsSourceWidget()
-
-
-class Fetches:
-    """A ``Fetch`` answering from a table of URL -> document, remembering what was asked."""
-
-    def __init__(self, answers: dict[str, Any]) -> None:
-        self.answers, self.urls = answers, []
-
-    async def __call__(self, url: str) -> Any:
-        self.urls.append(url)
-        return self.answers[url]
 
 
 def ctx(fetch: Fetches, **values: Any) -> WidgetContext:
     return WidgetContext(call_tool=no_tool, fetch=fetch, values=values)
 
 
-def sourced(source: dict[str, Any], type_: str = "string") -> dict[str, Any]:
+def with_source(source: dict[str, Any], type_: str = "string") -> dict[str, Any]:
     return {"type": type_, "optionsSource": source}
 
 
 @pytest.mark.parametrize(
     "field,matched",
     [
-        pytest.param(sourced({"url": "/x"}), True, id="a-source"),
+        pytest.param(with_source({"url": "/x"}), True, id="a-source"),
         pytest.param({"type": "string", "format": "customerId"}, False, id="a-format-alone"),
     ],
 )
-def test_a_field_with_a_source_is_the_widgets(field, matched):
-    assert WIDGET.matches(field) is matched
+def test_a_field_with_a_source_is_a_widget_field(field, matched):
+    assert sourced(field) is matched
 
 
 class TestOnAPage:
@@ -88,9 +84,9 @@ class TestOnAPage:
     async def test_a_list_field_gets_its_items_options_wherever_the_source_sits(self, nodes):
         page = {"properties": {"location_code": {"type": "string"}, "nodes": nodes}, "required": ["nodes"]}
         fetch = Fetches({"/api/locations/AMS001/nodes": self.ROWS})
-        waiting = await enrich(page, [WIDGET], ctx(fetch))  # no location yet: the nodes wait
+        waiting = await enrich(page, ctx(fetch))  # no location yet: the nodes wait
         assert fields_in(waiting.schema)[1].widget == {"id": "optionsSource", "later": True} and fetch.urls == []
-        ready = await enrich(page, [WIDGET], ctx(fetch, location_code="AMS001"))
+        ready = await enrich(page, ctx(fetch, location_code="AMS001"))
         field = fields_in(ready.schema)[1]
         assert [(o.value, o.label) for o in options_of(field) or []] == [("n-1", "Node 1"), ("n-2", "Node 2")]
         assert ready.choices["nodes"].multiple is True and fetch.urls == ["/api/locations/AMS001/nodes"]
@@ -98,7 +94,7 @@ class TestOnAPage:
 
 class TestReadingTheResponse:
     async def test_a_list_of_objects_is_read_as_the_source_says(self):
-        options = await WIDGET.options(sourced(CUSTOMERS), ctx(Fetches({"/api/customers": ROWS})))
+        options = await source_options(with_source(CUSTOMERS), ctx(Fetches({"/api/customers": ROWS})))
         assert [(o.value, o.label) for o in options] == [
             ("c-1", "Universiteit Alder (UA)"),
             ("c-2", "Universiteit Birch (UB)"),
@@ -106,13 +102,13 @@ class TestReadingTheResponse:
 
     async def test_a_list_of_scalars_is_its_own_value_and_label(self):
         fetch = Fetches({"/api/locations": ["AMS001", "UTR001"]})
-        options = await WIDGET.options(sourced({"url": "/api/locations"}), ctx(fetch))
+        options = await source_options(with_source({"url": "/api/locations"}), ctx(fetch))
         assert [(o.value, o.label) for o in options] == [("AMS001", "AMS001"), ("UTR001", "UTR001")]
 
     async def test_the_list_may_sit_inside_the_response(self):
         fetch = Fetches({"/api/nodes": {"data": {"nodes": [{"id": 7, "name": "n7"}]}}})
         source = {"url": "/api/nodes", "items": "/data/nodes", "value": "id", "label": "name"}
-        (option,) = await WIDGET.options(sourced(source, "integer"), ctx(fetch))
+        (option,) = await source_options(with_source(source, "integer"), ctx(fetch))
         assert (option.value, option.label) == (7, "n7")
 
     @pytest.mark.parametrize(
@@ -131,12 +127,12 @@ class TestReadingTheResponse:
 class TestDependencies:
     async def test_the_url_is_filled_from_the_pages_values_url_encoded(self):
         fetch = Fetches({"/api/nodes/UT%20001/ports?speed=10000": [{"id": 1, "name": "p1"}]})
-        options = await WIDGET.options(sourced(PORTS, "integer"), ctx(fetch, node="UT 001", service_speed=10000))
+        options = await source_options(with_source(PORTS, "integer"), ctx(fetch, node="UT 001", service_speed=10000))
         assert [o.value for o in options] == [1] and fetch.urls == ["/api/nodes/UT%20001/ports?speed=10000"]
 
     async def test_a_field_whose_dependency_has_no_value_yet_waits(self):
         fetch = Fetches({})
-        assert await WIDGET.options(sourced(PORTS, "integer"), ctx(fetch, service_speed=10000)) is None
+        assert await source_options(with_source(PORTS, "integer"), ctx(fetch, service_speed=10000)) is None
         assert fetch.urls == []
 
     @pytest.mark.parametrize(
@@ -173,12 +169,12 @@ class TestSearching:
     async def test_a_source_that_searches_is_asked_with_the_words(self):
         source = {**CUSTOMERS, "url": "/api/customers?status=active", "search": "q"}
         fetch = Fetches({"/api/customers?status=active&q=alder": ROWS[:1]})
-        options = await WIDGET.options(sourced(source), ctx(fetch), search="alder")
-        assert [o.value for o in options] == ["c-1"] and WIDGET.can_search(sourced(source))
+        options = await source_options(with_source(source), ctx(fetch), search="alder")
+        assert [o.value for o in options] == ["c-1"] and can_search(with_source(source))
 
     async def test_a_source_that_cannot_search_is_narrowed_here(self):
-        options = await WIDGET.options(sourced(CUSTOMERS), ctx(Fetches({"/api/customers": ROWS})), search="birch")
-        assert [o.value for o in options] == ["c-2"] and not WIDGET.can_search(sourced(CUSTOMERS))
+        options = await source_options(with_source(CUSTOMERS), ctx(Fetches({"/api/customers": ROWS})), search="birch")
+        assert [o.value for o in options] == ["c-2"] and not can_search(with_source(CUSTOMERS))
 
     def test_the_search_parameter_joins_the_query_string(self):
         assert searched("/a", "q", "x y") == "/a?q=x%20y"

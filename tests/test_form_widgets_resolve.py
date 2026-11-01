@@ -6,7 +6,7 @@ import os
 
 os.environ.setdefault("DATABASE_URI", "postgresql://test:test@localhost:5432/test")
 
-from collections.abc import Mapping, Sequence
+from collections.abc import Sequence
 from typing import Any
 
 import pytest
@@ -14,7 +14,7 @@ from pydantic_ai.messages import ModelResponse, ToolCallPart
 from pydantic_ai.models.function import AgentInfo, FunctionModel
 
 from orchestrator_agent.form_fill.interpret import ModelInterpreter
-from orchestrator_agent.form_fill.widgets import Option, Widget, WidgetContext
+from orchestrator_agent.form_fill.widgets import Option, WidgetContext
 from orchestrator_agent.form_fill.widgets.enrich import LongList
 from orchestrator_agent.form_fill.widgets.resolve import (
     Resolution,
@@ -24,7 +24,7 @@ from orchestrator_agent.form_fill.widgets.resolve import (
     shown_as,
 )
 
-from .test_form_widgets import no_fetch, no_tool
+from .test_form_widgets import Fetches, no_fetch, no_tool, rows
 
 CUSTOMERS = (
     Option("c-ua", "Universiteit Alder (UA)", aliases=("Universiteit Alder", "UA")),
@@ -39,27 +39,17 @@ FOO = Option("c-foo", "Foo, Inc.")  # a name with a comma in it
 CTX = WidgetContext(call_tool=no_tool, fetch=no_fetch)
 
 
-class Searchable(Widget):
-    id = "customerId"
-
-    def __init__(self, options: Sequence[Option] = CUSTOMERS) -> None:
-        self._options = options
-        self.searches: list[str | None] = []
-
-    def matches(self, field: Mapping[str, Any]) -> bool:
-        return True
-
-    async def fetch(self, field: Mapping[str, Any], ctx: WidgetContext) -> Sequence[Option] | None:
-        return self._options
-
-    async def options(self, field, ctx, search=None):
-        self.searches.append(search)
-        return await super().options(field, ctx, search)
+SOURCE = {"url": "/customers", "value": "value", "label": "label"}
+SEARCHING = {**SOURCE, "search": "q"}  # a source that searches on its own (thousands of subscriptions)
+SEARCHED = "/customers?q=customer%207"
 
 
-def long_list(options: Sequence[Option] = CUSTOMERS, *, widget: Widget | None = None, multiple=False) -> LongList:
-    field = {"format": "customerId", "type": "string"}
-    return LongList(widget or Searchable(options), field, tuple(options), "Customer", multiple)
+def long_list(options: Sequence[Option] = CUSTOMERS, *, source: dict[str, Any] = SOURCE, multiple=False) -> LongList:
+    return LongList({"type": "string", "optionsSource": source}, tuple(options), "Customer", multiple)
+
+
+def searching(fetch: Fetches) -> WidgetContext:
+    return WidgetContext(call_tool=no_tool, fetch=fetch)
 
 
 class FakeChooser:
@@ -121,35 +111,19 @@ async def test_a_chosen_value_outside_the_candidates_is_ignored():
     assert resolution == Resolution(value="c-ua", resolved=True)
 
 
-class OwnSearch:
-    """A widget whose source searches on its own (thousands of subscriptions): it implements ``options``."""
-
-    id = "subscriptionId"
-
-    def __init__(self, options: Sequence[Option]) -> None:
-        self._options = options
-        self.searches: list[str | None] = []
-
-    def matches(self, field: Mapping[str, Any]) -> bool:
-        return True
-
-    async def options(self, field, ctx, search=None):
-        self.searches.append(search)
-        return self._options if search is None else self._options[:80]  # its own search: more than the cap
-
-
 @pytest.mark.parametrize(
-    "widget,searched",
+    "source,searched",
     [
-        pytest.param(Searchable(MANY), [], id="whole-list-widget-narrowed-locally"),
-        pytest.param(OwnSearch(MANY), ["customer 7"], id="own-search-widget-asked"),
+        pytest.param(SOURCE, [], id="whole-list-narrowed-locally"),
+        pytest.param(SEARCHING, [SEARCHED], id="own-search-asked"),
     ],
 )
-async def test_a_list_longer_than_the_full_read_is_searched_first(widget, searched):
+async def test_a_list_longer_than_the_full_read_is_searched_first(source, searched):
+    fetch = Fetches({SEARCHED: rows(MANY[:80])})  # its own search: more than the cap
     chooser = FakeChooser(["c-7"])
-    resolution = await resolve_words(long_list(MANY, widget=widget), "customer 7", CTX, chooser)
+    resolution = await resolve_words(long_list(MANY, source=source), "customer 7", searching(fetch), chooser)
     assert resolution == Resolution(value="c-7", resolved=True)
-    assert widget.searches == searched and len(chooser.calls[0][1]) <= 50  # capped either way
+    assert fetch.urls == searched and len(chooser.calls[0][1]) <= 50  # capped either way
 
 
 @pytest.mark.parametrize(
@@ -162,22 +136,15 @@ async def test_a_list_longer_than_the_full_read_is_searched_first(widget, search
     ],
 )
 async def test_blank_words_match_nothing_without_a_search_or_a_model(words, options):
-    widget = Searchable(options)
-    resolution = await resolve_words(long_list(options, widget=widget), words, CTX, Refuses())
-    assert resolution == Resolution(unmatched=(words,)) and widget.searches == []
-
-
-class Unbounded(Searchable):
-    """A widget whose search ignores the cap and returns every option."""
-
-    async def options(self, field, ctx, search=None):
-        self.searches.append(search)
-        return self._options
+    fetch = Fetches({})
+    resolution = await resolve_words(long_list(options, source=SEARCHING), words, searching(fetch), Refuses())
+    assert resolution == Resolution(unmatched=(words,)) and fetch.urls == []
 
 
 async def test_a_search_returning_more_than_the_cap_is_cut_to_it():
+    fetch = Fetches({SEARCHED: rows(MANY)})  # a search that ignores the cap
     chooser = FakeChooser(["c-7"])
-    resolution = await resolve_words(long_list(MANY, widget=Unbounded(MANY)), "customer 7", CTX, chooser)
+    resolution = await resolve_words(long_list(MANY, source=SEARCHING), "customer 7", searching(fetch), chooser)
     assert resolution == Resolution(value="c-7", resolved=True) and len(chooser.calls[0][1]) == 50
 
 

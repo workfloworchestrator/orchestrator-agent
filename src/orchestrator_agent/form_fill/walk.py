@@ -39,7 +39,7 @@ from orchestrator_agent.form_fill.interpret import Chooser, Interpreter
 from orchestrator_agent.form_fill.model import ACCEPT, FieldSpec, askable, fields_of, form_schema, label_of, options_of
 from orchestrator_agent.form_fill.questions import offered, questions
 from orchestrator_agent.form_fill.verdicts import miscounted, picked, unanswerable
-from orchestrator_agent.form_fill.widgets import Fetch, FieldWidget, WidgetContext
+from orchestrator_agent.form_fill.widgets import Fetch, WidgetContext
 from orchestrator_agent.form_fill.widgets.enrich import EnrichedPage, LongList, enrich
 from orchestrator_agent.form_fill.widgets.resolve import Resolution, resolve_answer, shown_as
 from orchestrator_agent.form_fill.widgets.waiting import takes_only_option, waiting, waits
@@ -59,11 +59,10 @@ class CallTool(Protocol):
 
 @dataclass(frozen=True)
 class Walk:
-    """One walk's collaborators: the session walked, core's tools, and the widgets and models its pages may need."""
+    """One walk's collaborators: the session walked, core's tools, and the API and models its pages may need."""
 
     session: FormFillSession
     call_tool: CallTool
-    widgets: Sequence[FieldWidget] = ()  # the fields whose options core leaves to a client
     fetch: Fetch | None = None  # core's API, where a field's source is fetched from
     choose: Chooser | None = None  # words a person typed for a widget field -> the options they fit
     interpret: Interpreter | None = None  # a person's answers core rejected -> the values the fields expect
@@ -206,12 +205,12 @@ async def enriched(
     its option, which another field's source depends on — the page is enriched and resolved once more (and only once).
     """
     wctx = widget_context(ctx, pages)
-    page = await enrich(schema, ctx.widgets, wctx)
+    page = await enrich(schema, wctx)
     unresolved = await resolve(ctx, page.choices, wctx)
     resolved = widget_context(ctx, pages)
     if resolved.values == wctx.values:
         return page, unresolved
-    page = await enrich(schema, ctx.widgets, resolved)
+    page = await enrich(schema, resolved)
     return page, {**unresolved, **await resolve(ctx, page.choices, resolved)}
 
 

@@ -1,4 +1,4 @@
-"""The widget layer's own parts: options, narrowing a long list, which widget a property gets."""
+"""The widget layer's own parts: options, narrowing a long list, which properties are widget fields."""
 
 from __future__ import annotations
 
@@ -6,7 +6,7 @@ import os
 
 os.environ.setdefault("DATABASE_URI", "postgresql://test:test@localhost:5432/test")
 
-from collections.abc import Mapping, Sequence
+from collections.abc import Sequence
 from typing import Any
 
 import pytest
@@ -14,10 +14,10 @@ import pytest
 from orchestrator_agent.form_fill.widgets import (
     MAX_CANDIDATES,
     Option,
-    Widget,
     WidgetContext,
-    match_widget,
+    is_widget_field,
     narrow_options,
+    source_options,
 )
 
 CUSTOMERS = [
@@ -27,17 +27,24 @@ CUSTOMERS = [
 ]
 
 
-class FormatWidget(Widget):
-    """A widget matching one ``format``, with fixed options."""
+class Fetches:
+    """A ``Fetch`` answering from a table of URL -> document, remembering what was asked."""
 
-    def __init__(self, id: str, fmt: str, options: Sequence[Option] | None = ()) -> None:
-        self.id, self.fmt, self._options = id, fmt, options
+    def __init__(self, answers: dict[str, Any]) -> None:
+        self.answers, self.urls = answers, []
 
-    def matches(self, field: Mapping[str, Any]) -> bool:
-        return field.get("format") == self.fmt
+    async def __call__(self, url: str) -> Any:
+        self.urls.append(url)
+        return self.answers[url]
 
-    async def fetch(self, field: Mapping[str, Any], ctx: WidgetContext) -> Sequence[Option] | None:
-        return self._options
+
+def rows(options: Sequence[Option]) -> list[dict[str, Any]]:
+    """Options as a source's response lists them."""
+    return [{"value": option.value, "label": option.label} for option in options]
+
+
+SOURCE = {"url": "/customers", "value": "value", "label": "label"}
+CUSTOMER = {"type": "string", "optionsSource": SOURCE}
 
 
 async def no_tool(name: str, args: dict[str, Any]) -> Any:
@@ -105,27 +112,29 @@ class TestNarrowing:
         assert len(narrow_options(many, "customer")) == MAX_CANDIDATES
 
     async def test_options_narrows_what_fetch_returned(self):
-        widget = FormatWidget("customer", "customerId", CUSTOMERS)
-        assert await widget.options({}, CTX) == CUSTOMERS
-        assert [o.value for o in await widget.options({}, CTX, search="alder")] == ["c-1"]
-        assert await FormatWidget("later", "x", None).options({}, CTX, search="ua") is None
+        ctx = WidgetContext(call_tool=no_tool, fetch=Fetches({"/customers": rows(CUSTOMERS)}))
+        assert [o.value for o in await source_options(CUSTOMER, ctx) or []] == ["c-1", "c-2", "c-3"]
+        assert [o.value for o in await source_options(CUSTOMER, ctx, search="alder") or []] == ["c-1"]
+        later = {
+            "type": "string",
+            "optionsSource": {**SOURCE, "url": "/regions/{region}", "dependsOn": {"region": "/region"}},
+        }
+        assert await source_options(later, ctx, search="ua") is None
 
 
-class TestRegistry:
+class TestWidgetFields:
     @pytest.mark.parametrize(
         "prop,matched",
         [
-            pytest.param({"type": "string", "format": "customerId"}, True, id="format"),
-            pytest.param({"type": "string", "format": "customerId", "enum": ["c-1"]}, False, id="core-enum-wins"),
-            pytest.param({"type": "string", "format": "customerId", "const": "c-1"}, False, id="const"),
-            pytest.param({"type": "string", "format": "customerId", "readOnly": True}, False, id="read-only"),
+            pytest.param(CUSTOMER, True, id="a-source"),
+            pytest.param({**CUSTOMER, "enum": ["c-1"]}, False, id="core-enum-wins"),
+            pytest.param({**CUSTOMER, "const": "c-1"}, False, id="const"),
+            pytest.param({**CUSTOMER, "readOnly": True}, False, id="read-only"),
             pytest.param({"type": "string", "format": "label", "readOnly": True}, False, id="display-only"),
-            pytest.param(
-                {"type": "array", "items": {"type": "string", "format": "customerId"}}, True, id="array-items"
-            ),
+            pytest.param({"type": "array", "items": CUSTOMER}, True, id="array-items"),
+            pytest.param({"type": "string", "format": "customerId"}, False, id="a-format-alone"),
             pytest.param({"type": "string"}, False, id="plain"),
         ],
     )
     def test_matching_rules(self, prop, matched):
-        widget = FormatWidget("customer", "customerId")
-        assert (match_widget([widget, FormatWidget("label", "label")], prop) is widget) is matched
+        assert is_widget_field(prop) is matched

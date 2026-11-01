@@ -6,7 +6,7 @@ import os
 
 os.environ.setdefault("DATABASE_URI", "postgresql://test:test@localhost:5432/test")
 
-from collections.abc import Mapping, Sequence
+from collections.abc import Sequence
 from typing import Any
 
 import pytest
@@ -20,7 +20,7 @@ from orchestrator_agent.form_fill.interpret import ModelInterpreter
 from orchestrator_agent.form_fill.pending import pending_of
 from orchestrator_agent.form_fill.questions import NOTHING_FIT, SEVERAL_FIT, TOO_MANY_FIT
 from orchestrator_agent.form_fill.skill import FormFillSkill
-from orchestrator_agent.form_fill.widgets import CoreApi, FieldWidget, Option, Widget, WidgetContext
+from orchestrator_agent.form_fill.widgets import CoreApi, Option
 from orchestrator_agent.state import AskField, FormFillSession, Reply, SearchState
 
 from .test_form_fill import (
@@ -35,9 +35,9 @@ from .test_form_fill import (
     schema_of,
     turn,
 )
-from .test_form_widgets import FormatWidget
+from .test_form_widgets import SOURCE, Fetches, rows
 
-CUSTOMER: dict[str, Any] = {"format": "customerId", "title": "Customer", "type": "string"}
+CUSTOMER: dict[str, Any] = {"optionsSource": SOURCE, "title": "Customer", "type": "string"}
 PAGE = {
     "properties": {
         "customer_id": CUSTOMER,
@@ -100,11 +100,13 @@ class Refuses:
 
 
 def make(
-    options: Sequence[Option] | None = MANY, choose=None, interpret=None, also: Sequence[FieldWidget] = ()
+    options: Sequence[Option] = MANY, choose=None, interpret=None, contacts: dict[str, Sequence[Option]] | None = None
 ) -> FormFillSkill:
-    return FormFillSkill(
-        widgets=[FormatWidget("customerId", "customerId", options), *also], choose=choose, interpret=interpret
-    )
+    """A skill whose core API lists ``options`` as the customers and, per customer, its ``contacts``."""
+    answers: dict[str, Any] = {"/customers": rows(options)}
+    for customer, persons in (contacts or {}).items():
+        answers[f"/customers/{customer}/contacts"] = rows(persons)
+    return FormFillSkill(fetch=Fetches(answers), choose=choose, interpret=interpret)
 
 
 async def test_a_long_list_is_asked_as_typed_text_with_its_size():
@@ -115,11 +117,11 @@ async def test_a_long_list_is_asked_as_typed_text_with_its_size():
 
 async def test_an_exact_name_is_its_option_without_a_model():
     core, state = WidgetCore(), SearchState()
-    reply = await open_form(make(choose=Refuses()), core, state, KEY, {"customer_id": "TESTACCOUNT"})
+    reply = await open_form(make(choose=Refuses()), core, state, KEY, {"customer_id": "testaccount (ta)"})
     assert reply.status == "confirming" and reply.values["customer_id"] == "c-ta"
     assert reply.labels == {"customer_id": "Testaccount (TA)"}
     assert reply.approval.args["labels"] == {"customer_id": "Testaccount (TA)"}
-    assert "TESTACCOUNT" not in str(core.submitted)
+    assert "testaccount (ta)" not in str(core.submitted)
 
 
 async def test_words_that_fit_one_option_are_that_option():
@@ -176,7 +178,7 @@ async def test_typed_words_for_a_short_list_are_never_submitted():
 @pytest.mark.parametrize(
     "answer,value,label",
     [
-        pytest.param("UA", "c-ua", UT.label, id="a-typed-exact-name"),
+        pytest.param("universiteit alder (ua)", "c-ua", UT.label, id="a-typed-exact-name"),
         pytest.param("c-ub", "c-ub", UU.label, id="a-picked-chip"),
     ],
 )
@@ -190,13 +192,15 @@ async def test_a_short_list_answer_is_one_of_its_options_without_a_model(answer,
 
 
 async def test_a_field_waiting_for_another_value_is_not_asked():
-    reply = await open_form(make(options=None), WidgetCore(), SearchState(), KEY)
-    assert "customer_id" not in reply.asked
+    later = {**SOURCE, "url": "/regions/{region}/customers", "dependsOn": {"region": "/region"}}
+    fields = {"customer_id": {**CUSTOMER, "optionsSource": later}, "note": PAGE["properties"]["note"]}
+    reply = await open_form(make(), WidgetCore(pages=[page_of(fields, ["customer_id"])]), SearchState(), KEY)
+    assert reply.asked == ["note"]  # the customer waits for a region nobody is asked for here
 
 
 async def test_core_rejecting_a_picked_option_is_not_reinterpreted():
     skill = make(choose=Refuses(), interpret=Refuses())
-    reply = await open_form(skill, WidgetCore(refuse="c-ua"), SearchState(), KEY, {"customer_id": "UA"})
+    reply = await open_form(skill, WidgetCore(refuse="c-ua"), SearchState(), KEY, {"customer_id": UT.label})
     assert reply.question("customer_id").problem == "Customer not allowed"
 
 
@@ -288,26 +292,21 @@ def test_a_session_persisted_before_widgets_still_loads():
 # --- a widget field that depends on another field (``WidgetContext.values``) -----------------------------
 
 JAN, PIET = Option("p-jan", "Jan de Vries"), Option("p-piet", "Piet Jansen")
-CONTACTS = {"c-ua": (JAN, PIET), "c-ub": (Option("p-anna", "Anna Smit"), Option("p-bob", "Bob Visser"))}
-REQUIRED_CONTACT = {"format": "contactPerson", "title": "Contact", "type": "string"}
+# The contact persons of the form's customer: the field waits until that is known; one customer has none.
+CONTACTS = {"c-ua": (JAN, PIET), "c-ub": (Option("p-anna", "Anna Smit"), Option("p-bob", "Bob Visser")), "c-ta": ()}
+CONTACT_SOURCE = {
+    "url": "/customers/{customer}/contacts",
+    "dependsOn": {"customer": "1/customer_id"},
+    "value": "value",
+    "label": "label",
+}
+REQUIRED_CONTACT = {"optionsSource": CONTACT_SOURCE, "title": "Contact", "type": "string"}
 OPTIONAL_CONTACTS = {
     "default": [],
-    "items": {"format": "contactPerson", "type": "string"},
+    "items": {"optionsSource": CONTACT_SOURCE, "type": "string"},
     "title": "Contacts",
     "type": "array",
 }
-
-
-class Contacts(Widget):
-    """The contact persons of the form's customer: none (the field waits) until that is one of the customers."""
-
-    id = "contactPerson"
-
-    def matches(self, field: Mapping[str, Any]) -> bool:
-        return field.get("format") == "contactPerson"
-
-    async def fetch(self, field: Mapping[str, Any], ctx: WidgetContext) -> Sequence[Option] | None:
-        return CONTACTS.get(ctx.values.get("customer_id", ""))
 
 
 def page_of(fields: dict[str, Any], required: Sequence[str], title: str = "Customer") -> dict[str, Any]:
@@ -320,7 +319,7 @@ def with_contact(contact: dict[str, Any], *, required: bool) -> dict[str, Any]:
     return page_of(fields, ["customer_id", "contact"] if required else ["customer_id"])
 
 
-@pytest.mark.parametrize("customer", [pytest.param("UA", id="typed-name"), pytest.param("c-ua", id="picked-value")])
+@pytest.mark.parametrize("customer", [pytest.param(UT.label, id="typed-name"), pytest.param("c-ua", id="picked-value")])
 @pytest.mark.parametrize(
     "contact,required,answer",
     [
@@ -332,7 +331,7 @@ async def test_a_field_waiting_for_the_customer_is_asked_with_its_options_once_i
     customer, contact, required, answer
 ):
     core, state = WidgetCore(pages=[with_contact(contact, required=required)]), SearchState()
-    skill = make(also=[Contacts()])
+    skill = make(contacts=CONTACTS)
     first = await open_form(skill, core, state, KEY)
     assert first.asked == ["customer_id"]  # the contact waits for its customer
     reply = await turn(skill, core, state, {"customer_id": customer})
@@ -349,7 +348,7 @@ async def test_a_stop_of_waiting_fields_only_asks_them_as_typed_text_and_never_s
     note = {"title": "Note", "type": "string"}
     first = page_of({"customer_id": customer, "note": note}, ["note"])
     core, state = WidgetCore(pages=[first, page_of({"contact": OPTIONAL_CONTACTS}, [], "Contacts")]), SearchState()
-    skill = make(also=[Contacts()])
+    skill = make(contacts=CONTACTS)
     reply = await open_form(skill, core, state, KEY, {"note": "hello"})  # no customer: the contacts wait for one
     contacts = reply.question("contact")
     assert reply.status == "gathering" and reply.asked == ["contact"]
@@ -361,7 +360,7 @@ async def test_a_stop_of_waiting_fields_only_asks_them_as_typed_text_and_never_s
 
 async def test_a_value_of_a_field_that_waits_again_is_never_submitted():
     core, state = WidgetCore(pages=[with_contact(REQUIRED_CONTACT, required=True)]), SearchState()
-    skill = make(also=[Contacts()])
+    skill = make(contacts=CONTACTS)
     await open_form(skill, core, state, KEY, {"customer_id": "c-ua"})
     assert (await turn(skill, core, state, {"contact": "p-jan"})).status == "confirming"
     again = await turn(skill, core, state, {"customer_id": "c-ta"})  # a customer without contact persons
@@ -405,8 +404,7 @@ def test_kagent_shows_the_hint_after_the_question():
     assert payload.questions[0].question == "Customer (`customer_id`, required) — Type a name — 23 options."
 
 
-def test_the_skill_is_built_with_the_one_widget_and_one_model_reading_and_choosing():
+def test_the_skill_is_built_with_cores_api_and_one_model_reading_and_choosing():
     skill = build_form_fill_skill("test")
-    assert [widget.id for widget in skill.widgets] == ["optionsSource"]
     assert isinstance(skill.interpret, ModelInterpreter) and skill.choose is skill.interpret
     assert isinstance(skill.fetch, CoreApi) and skill.fetch.base == "http://localhost:8080"  # the MCP URL's origin

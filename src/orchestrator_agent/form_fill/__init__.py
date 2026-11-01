@@ -16,14 +16,12 @@
 The pauses travel over A2A (kagent's human-in-the-loop extension) or chat completions (LibreChat's ask-user tool).
 """
 
-from collections.abc import Sequence
-
 from pydantic_ai.models import Model
 
 from orchestrator_agent.form_fill.capability import FormFillCapability
 from orchestrator_agent.form_fill.interpret import Interpreter, ModelInterpreter
 from orchestrator_agent.form_fill.skill import CallTool, FormFillSkill
-from orchestrator_agent.form_fill.widgets import CoreApi, Fetch, FieldWidget, OptionsSourceWidget, api_base
+from orchestrator_agent.form_fill.widgets import CoreApi, Fetch, api_base
 from orchestrator_agent.settings import agent_settings
 from orchestrator_agent.state import Approval, AskField, FormInput, FormReply, Reply
 
@@ -31,20 +29,18 @@ from orchestrator_agent.state import Approval, AskField, FormInput, FormReply, R
 def build_form_fill_skill(
     model: Model | str | None = None,
     *,
-    widgets: Sequence[FieldWidget] | None = None,
     fetch: Fetch | None = None,
 ) -> FormFillSkill:
     """The skill as configured, with ``model`` reading what a person typed where a value was expected.
 
     ``model`` interprets typed answers core rejected and chooses the option typed words mean for a long-list
-    widget field. The one widget reads the ``optionsSource`` a field carries and fetches it from core's API,
+    widget field. A field's options are read from the ``optionsSource`` it carries and fetched from core's API,
     the origin of its MCP endpoint unless configured otherwise, as the person asking.
     """
     reader = ModelInterpreter(model) if model is not None else None
     base = api_base(agent_settings.WFO_CORE_MCP_URL, agent_settings.WFO_CORE_API_URL)
     return FormFillSkill(
         interpret=reader,
-        widgets=[OptionsSourceWidget()] if widgets is None else list(widgets),
         fetch=fetch or CoreApi(base, allowed_hosts=agent_settings.WFO_OPTIONS_HOSTS),
         choose=reader,
     )

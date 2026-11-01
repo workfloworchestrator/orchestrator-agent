@@ -30,25 +30,20 @@ import structlog
 from pydantic_forms.utils.schema import OPTIONS_SOURCE
 
 from orchestrator_agent.form_fill.model import WIDGET_MARK, shape_of
-from orchestrator_agent.form_fill.widgets.base import (
-    MAX_INLINE,
-    FieldWidget,
-    Option,
-    WidgetContext,
-)
+from orchestrator_agent.form_fill.widgets.base import MAX_INLINE, Option, WidgetContext
+from orchestrator_agent.form_fill.widgets.source import source_options, sourced
 
 logger = structlog.get_logger(__name__)
 
 
 @dataclass(frozen=True)
 class LongList:
-    """A widget field with its options: its widget, its (items') property, every option.
+    """A widget field with its options: its (items') property, every option.
 
     Named for the long list a question cannot show; a short list shown as chips is kept the same way, so what
     is typed for either is resolved to one of its options.
     """
 
-    widget: FieldWidget
     field: dict[str, Any]
     options: tuple[Option, ...]
     title: str = ""
@@ -86,16 +81,16 @@ def widget_target(prop: Mapping[str, Any]) -> Mapping[str, Any]:
     return items
 
 
-def match_widget(widgets: Sequence[FieldWidget], prop: Mapping[str, Any]) -> FieldWidget | None:
-    """The widget of a resolved property, if any: the first whose ``matches`` accepts it.
+def is_widget_field(prop: Mapping[str, Any]) -> bool:
+    """Whether a resolved property is a widget field: its (items') source gives the options.
 
     Core's own options always win (a property with ``enum`` or ``const``), what nobody fills is no widget's
     (``readOnly``: shown, never submitted), and a list is matched on its items.
     """
     target = widget_target(prop)
     if any(key in target for key in ("enum", "const")) or prop.get("readOnly") or target.get("readOnly"):
-        return None
-    return next((widget for widget in widgets if widget.matches(target)), None)
+        return False
+    return sourced(target)
 
 
 def _choice(target: Mapping[str, Any], options: Sequence[Option]) -> dict[str, Any]:
@@ -107,63 +102,59 @@ def _with_target(prop: dict[str, Any], target: dict[str, Any]) -> dict[str, Any]
 
 
 class _Fetches:
-    """The options each widget has on one page, fetched once per widget and source: two fields of one type share."""
+    """The options of each source on one page, fetched once: two fields of one source share."""
 
     def __init__(self, ctx: WidgetContext) -> None:
         self.ctx = ctx
-        self.seen: dict[tuple[str, str], Sequence[Option] | None] = {}
+        self.seen: dict[str, Sequence[Option] | None] = {}
 
-    async def __call__(self, widget: FieldWidget, target: Mapping[str, Any]) -> Sequence[Option] | None:
-        decides = {key: target.get(key) for key in ("format", OPTIONS_SOURCE)}
-        key = (widget.id, json.dumps(decides, sort_keys=True, default=str))
+    async def __call__(self, target: Mapping[str, Any]) -> Sequence[Option] | None:
+        key = json.dumps(target[OPTIONS_SOURCE], sort_keys=True, default=str)
         if key not in self.seen:
-            self.seen[key] = await widget.options(target, self.ctx)
+            self.seen[key] = await source_options(target, self.ctx)
         return self.seen[key]
 
 
-async def enrich(schema: Mapping[str, Any], widgets: Sequence[FieldWidget], ctx: WidgetContext) -> EnrichedPage:
-    """``schema`` with every property a widget matches rewritten; every other property as it came."""
+async def enrich(schema: Mapping[str, Any], ctx: WidgetContext) -> EnrichedPage:
+    """``schema`` with every widget field rewritten; every other property as it came."""
     fetch = _Fetches(ctx)
-    found = [await _property(name, prop, widgets, fetch) for name, prop in (schema.get("properties") or {}).items()]
+    found = [await _property(name, prop, fetch) for name, prop in (schema.get("properties") or {}).items()]
     widget_choices = {p.name: p.choice for p in found if p.choice is not None}
     if not found:
         return EnrichedPage(dict(schema))
     return EnrichedPage({**schema, "properties": {p.name: p.schema for p in found}}, widget_choices)
 
 
-async def _property(name: str, prop: Any, widgets: Sequence[FieldWidget], fetch: _Fetches) -> _Property:
-    """One property after ``enrich``: unchanged unless a widget matches it and could say what its options are."""
+async def _property(name: str, prop: Any, fetch: _Fetches) -> _Property:
+    """One property after ``enrich``: unchanged unless it is a widget field whose source could say what its options are."""
     resolved = shape_of(prop) if isinstance(prop, Mapping) else {}
-    widget = match_widget(widgets, resolved) if resolved else None
-    if widget is None:
+    if not resolved or not is_widget_field(resolved):
         return _Property(name, prop)
     target = shape_of(widget_target(resolved))
     try:
-        return await _with_options(name, resolved, target, widget, fetch)
+        return await _with_options(name, resolved, target, fetch)
     except Exception as exc:  # a widget is an add-on: without it the field is asked as before
-        logger.warning("Form-fill widget failed", widget=widget.id, field=name, error=str(exc))
+        logger.warning("Form-fill widget failed", field=name, error=str(exc))
         return _Property(name, prop)
 
 
-async def _with_options(
-    name: str, resolved: dict[str, Any], target: dict[str, Any], widget: FieldWidget, fetch: _Fetches
-) -> _Property:
-    """The property with its widget's options written in, or marked as waiting when they depend on a value not known yet."""
-    options = await fetch(widget, target)
+async def _with_options(name: str, resolved: dict[str, Any], target: dict[str, Any], fetch: _Fetches) -> _Property:
+    """The property with its options written in, or marked as waiting when they depend on a value not known yet."""
+    options = await fetch(target)
     if options is None:
-        return _Property(name, {**resolved, WIDGET_MARK: {"id": widget.id, "later": True}})
+        return _Property(name, {**resolved, WIDGET_MARK: {"id": OPTIONS_SOURCE, "later": True}})
     title = str(resolved.get("title") or name)
-    choice = LongList(widget, target, tuple(options), title=title, multiple=resolved.get("type") == "array")
-    return _shown(name, resolved, target, widget, choice)
+    choice = LongList(target, tuple(options), title=title, multiple=resolved.get("type") == "array")
+    return _shown(name, resolved, target, choice)
 
 
-def _shown(name: str, prop: dict[str, Any], target: dict[str, Any], widget: FieldWidget, choice: LongList) -> _Property:
+def _shown(name: str, prop: dict[str, Any], target: dict[str, Any], choice: LongList) -> _Property:
     """The property as asked: its options as chips when they fit a question, else marked as a long list to type."""
     if choice.options and len(choice.options) <= MAX_INLINE:
-        inlined = {**_with_target(prop, _choice(target, choice.options)), WIDGET_MARK: {"id": widget.id}}
+        inlined = {**_with_target(prop, _choice(target, choice.options)), WIDGET_MARK: {"id": OPTIONS_SOURCE}}
         return _Property(name, inlined, choice)
-    total = {"id": widget.id, "total": len(choice.options)}
+    total = {"id": OPTIONS_SOURCE, "total": len(choice.options)}
     return _Property(name, {**_with_target(prop, target), WIDGET_MARK: total}, choice)
 
 
-__all__ = ["EnrichedPage", "LongList", "enrich", "match_widget", "widget_target"]
+__all__ = ["EnrichedPage", "LongList", "enrich", "is_widget_field", "widget_target"]

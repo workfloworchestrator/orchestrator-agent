@@ -2,7 +2,7 @@
 
 The field's schema says it all: the URL, how the response is read (``items``, ``value``, ``label``), the query
 parameter that searches on the server (``search``), and for each ``{name}`` in the URL a pointer into the page's
-values (``dependsOn``). The widget fills the URL, fetches it as the person asking, and reads the options; nothing
+values (``dependsOn``). The URL is filled, fetched as the person asking, and its response read as options; nothing
 here knows a ``format``. Core and every deployment describe such fields the same way, so this is the only widget.
 """
 
@@ -17,7 +17,7 @@ import httpx
 from pydantic_forms.utils.pointer import parse_pointer
 from pydantic_forms.utils.schema import DEPENDS_ON, OPTIONS_SOURCE
 
-from orchestrator_agent.form_fill.widgets.base import Option, Widget, WidgetContext
+from orchestrator_agent.form_fill.widgets.base import Option, WidgetContext, narrow_options
 from orchestrator_agent.mcp_client import _ContextVarBearerAuth
 
 
@@ -70,38 +70,33 @@ class CoreApi:
         await self._client.aclose()
 
 
-class OptionsSourceWidget(Widget):
-    """Any field with an ``optionsSource``: its options are what the URL returns, read as the source says.
+def sourced(field: Mapping[str, Any]) -> bool:
+    """Whether a field says where its options come from."""
+    return isinstance(field.get(OPTIONS_SOURCE), Mapping)
+
+
+def can_search(field: Mapping[str, Any]) -> bool:
+    """Whether the field's source narrows a list on the server, so a search is asked of it rather than made here."""
+    return bool(field[OPTIONS_SOURCE].get("search"))
+
+
+async def source_options(
+    field: Mapping[str, Any], ctx: WidgetContext, search: str | None = None
+) -> Sequence[Option] | None:
+    """The options of a sourced field: what its URL returns, read as the source says.
 
     A field whose URL names a value the page does not have yet has no options yet (None): it waits for that
-    value, the way ``enrich`` marks it. A source that declares ``search`` is searched on the server; any other
-    list is fetched whole and narrowed here.
+    value, the way ``enrich`` marks it. With ``search``, the options the words could mean: a source that declares
+    ``search`` is searched on the server; any other list is fetched whole and narrowed here.
     """
-
-    id = "optionsSource"
-
-    def matches(self, field: Mapping[str, Any]) -> bool:
-        return isinstance(field.get(OPTIONS_SOURCE), Mapping)
-
-    def can_search(self, field: Mapping[str, Any]) -> bool:
-        return bool(field[OPTIONS_SOURCE].get("search"))
-
-    async def fetch(self, field: Mapping[str, Any], ctx: WidgetContext) -> Sequence[Option] | None:
-        source = field[OPTIONS_SOURCE]
-        url = filled_url(source, ctx.values)
-        return None if url is None else options_in(source, await ctx.fetch(url))
-
-    async def options(
-        self, field: Mapping[str, Any], ctx: WidgetContext, search: str | None = None
-    ) -> Sequence[Option] | None:
-        source = field[OPTIONS_SOURCE]
-        if search is None or not source.get("search"):
-            return await super().options(field, ctx, search)
-        url = filled_url(source, ctx.values)
-        return None if url is None else options_in(source, await ctx.fetch(searched(url, source["search"], search)))
-
-
-# --- the request -------------------------------------------------------------------------------------------------
+    source = field[OPTIONS_SOURCE]
+    url = filled_url(source, ctx.values)
+    if url is None:
+        return None
+    if search is not None and source.get("search"):
+        return options_in(source, await ctx.fetch(searched(url, source["search"], search)))
+    options = options_in(source, await ctx.fetch(url))
+    return options if search is None else narrow_options(options, search)
 
 
 def filled_url(source: Mapping[str, Any], values: Mapping[str, Any]) -> str | None:
@@ -184,11 +179,13 @@ def _option(source: Mapping[str, Any], row: Any) -> Option:
 
 __all__ = [
     "CoreApi",
-    "OptionsSourceWidget",
     "SourceError",
     "api_base",
+    "can_search",
     "filled_url",
     "options_in",
     "searched",
+    "source_options",
+    "sourced",
     "value_at",
 ]
