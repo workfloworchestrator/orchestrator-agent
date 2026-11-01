@@ -43,7 +43,7 @@ jobs:
           fail_ci_if_error: false
 
   web:
-    name: Chat popup (demos/web)
+    name: Chat popup demo (demos/web)
     runs-on: ubuntu-latest
     defaults:
       run:
@@ -53,10 +53,9 @@ jobs:
       - uses: actions/setup-node@v5
         with:
           node-version: 24
-          cache: npm
-          cache-dependency-path: demos/web/package-lock.json
-      - run: npm ci
-      - run: npm run check
+      # The popup is installed from its repository (orchestrator-agent-chat), where it is built.
+      - run: npm install --no-audit --no-fund
+      - run: npm run build
 
   build:
     name: Build container image (${{ matrix.variant }})

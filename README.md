@@ -18,7 +18,7 @@ uv run uvicorn orchestrator_agent.app:app --port 8080
 
 | Path | Protocol | Description |
 | --- | --- | --- |
-| `POST /agui/` | AG-UI | The agent behind a frontend (the chat popup in `demos/web`); workflow forms through AG-UI interrupts |
+| `POST /agui/` | AG-UI | The agent behind a frontend (the chat popup, [orchestrator-agent-chat](https://github.com/workfloworchestrator/orchestrator-agent-chat); its demo page in `demos/web`); workflow forms through AG-UI interrupts |
 | `GET /chats/`, `GET /chats/{thread_id}`, `DELETE /chats/{thread_id}`, `GET /chats/{thread_id}/options/{field}` | REST | The person's AG-UI chats: list them, read one (its last messages, its pending form stop), forget one, search the options of a form question the stop asks |
 | `POST /` | A2A | Agent-to-agent JSON-RPC, protocol v1.0 (`SendMessage`, `SendStreamingMessage`) |
 | `GET /.well-known/agent-card.json` | A2A | Agent card discovery |
@@ -55,45 +55,34 @@ uv run demos/mcp_client.py search "active subscriptions"
 
 ## Chat popup (AG-UI)
 
-`demos/web/` is the agent as a chat popup in the bottom-right corner of a page: a React component,
-`WfoChat`, that talks to the agent's `/agui/` route with the AG-UI client, plus a demo page that hosts it
-the way the WFO UI would. The popup is the client we control: it renders the agent's Markdown tables, draws
-its charts with Recharts from the data the agent attaches to an aggregate result (small in the chat, a click
-opens the chart full size with its table), shows the tools as they run and the result references the agent
-sends, keeps the thread across reloads of the tab, and sends what the host page knows
-(the subscription on screen) as AG-UI context. It is plain React, TypeScript and Tailwind (no preflight, so it
-does not restyle the page it is dropped into), with no chat framework in between.
+The agent as a chat popup in the bottom-right corner of a page is the React component `WfoChat` in
+[orchestrator-agent-chat](https://github.com/workfloworchestrator/orchestrator-agent-chat): it talks to the
+agent's `/agui/` route with the AG-UI client, renders the agent's Markdown tables, draws its charts from the
+data the agent attaches to an aggregate result, shows the tools as they run, keeps the thread across reloads
+of the tab, and sends what the host page knows (the subscription on screen) as AG-UI context. Its props,
+theming and layout are in that repository's README.
+
+`demos/web/` is a page that hosts the popup the way the WFO UI would. It installs the package from its
+repository and talks to the agent on the page's own origin:
 
 ```bash
 # Everything in containers: the agent on 8080 (its .env) and the page on http://localhost:3001
 docker compose up --build
 
-# Or the page alone, against an agent already running (the dev server proxies /agui/ to it)
+# Or the page alone, against an agent already running (the dev server proxies /agui/ and /chats to it)
 cd demos/web && npm install && AGENT_URL=http://127.0.0.1:8080 npm run dev     # http://localhost:5173
 ```
 
 `WEB_PORT` and `AGENT_URL` override the compose defaults. The page needs no CORS on the agent: nginx (in the
-container) or the Vite dev server forwards `/agui/` to it, so the browser sees one origin. With OAuth2 on,
-the page's token field sets the bearer the popup sends and the agent forwards to core.
+container) or the Vite dev server forwards `/agui/` and `/chats` to it, so the browser sees one origin. With
+OAuth2 on, the page's token field sets the bearer the popup sends and the agent forwards to core.
 
-**In another project.** `npm run build` builds the component as a package (`dist/wfo-chat.js`, its
-stylesheet and type declarations; React is a peer dependency). Its props, theming and layout are in
-[`demos/web/README.md`](demos/web/README.md); its types come from the agent's OpenAPI document, which also names
-what travels inside AG-UI messages (`adapters/ag_ui/contract.py`; `tests/test_openapi.py` keeps the popup's copy current):
-
-```tsx
-import { WfoChat } from "@workfloworchestrator/wfo-chat";
-import "@workfloworchestrator/wfo-chat/style.css";
-
-<WfoChat agentUrl="/agui/" token={accessToken} context={[{ description: "The subscription on screen", value: id }]} />
-```
-
-`mountWfoChat(props)` does the same on a page that is not React. The popup follows the system's light or
-dark scheme (`theme="light"` or `"dark"` pins it). Its look is a Tailwind theme (`demos/web/src/styles/theme.css`):
-a host page retunes it by overriding the theme variables on `:root` (`--color-wfo-accent`, `--color-wfo-bg`, ...)
-and gives it its own typeface through `--font-wfo`; everything else is utilities on the elements, no stylesheet
-of its own. `title` names the assistant in the header and `suggestions` are the opening lines offered in an
-empty chat.
+**The contract.** The popup's types come from this agent's OpenAPI document, which also names what travels
+inside AG-UI messages (`adapters/ag_ui/contract.py`): the artifact reference a tool result carries with its
+chart data, the metadata of a form stop and the answers that resolve it. The popup checks in a copy of the
+document; when a route or one of those models changes here, refresh it there (`npm run contract:pull`
+against a running agent, or write it from this checkout with
+`uv run python -m orchestrator_agent.adapters.ag_ui.contract <path>`).
 
 **Workflow forms in the popup.** A form is filled the same deterministic way as through kagent and LibreChat
 (see [Workflow form-fill](#workflow-form-fill-a2a-human-in-the-loop)): the skill walks core's pages, and the

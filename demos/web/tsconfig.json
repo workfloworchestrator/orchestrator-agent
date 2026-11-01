@@ -8,14 +8,10 @@
     "strict": true,
     "noUnusedLocals": true,
     "noUnusedParameters": true,
-    "noFallthroughCasesInSwitch": true,
     "skipLibCheck": true,
     "isolatedModules": true,
     "noEmit": true,
-    "types": ["vite/client", "node"],
-    "paths": {
-      "@workfloworchestrator/wfo-chat": ["./src/index.ts"]
-    }
+    "types": ["vite/client"]
   },
-  "include": ["src", "demo", "vite.config.ts"]
+  "include": ["*.tsx", "vite-env.d.ts"]
 }

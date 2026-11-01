@@ -17,10 +17,10 @@ A client of the AG-UI route reads more than the routes declare: the artifact ref
 carries in place of its payload (with the chart data an aggregate adds), the metadata of the two stops a
 workflow form is walked with, and the answers that resolve them all travel inside AG-UI messages, where no
 route names them. They are added to the document's components, so a client generates its types from
-``/openapi.json`` alone: the chat popup does (``npm run contract``), from a running agent or from the copy
-it checks in, which ``tests/test_openapi.py`` keeps current:
+``/openapi.json`` alone: the chat popup (orchestrator-agent-chat) does, with ``npm run contract``, from a
+running agent (``npm run contract:pull``) or from the copy it checks in, which this module writes without one:
 
-    uv run python -m orchestrator_agent.adapters.ag_ui.contract demos/web/src/api/openapi.json
+    uv run python -m orchestrator_agent.adapters.ag_ui.contract ../orchestrator-agent-chat/src/api/openapi.json
 """
 
 from __future__ import annotations
