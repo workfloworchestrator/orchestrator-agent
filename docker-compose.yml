@@ -5,13 +5,22 @@ services:
     network_mode: host
     restart: unless-stopped
 
-  # The chat popup demo: nginx serves the page and proxies /agui/ to the agent, so the browser sees one origin.
+  # The chat popup on a bare page (demos/web) on its dev server, which forwards /agui/ and /chats to the agent
+  # so the browser sees one origin: http://localhost:5173. The image is this recipe; the repo keeps no Dockerfile.
   web:
-    build: demos/web
-    network_mode: host
+    build:
+      context: demos/web
+      dockerfile_inline: |
+        FROM node:24-alpine
+        RUN apk add --no-cache git
+        WORKDIR /app
+        COPY package.json package-lock.json* ./
+        RUN npm install --no-audit --no-fund
+        COPY index.html main.js vite.config.js ./
+        CMD ["npx", "vite", "--host", "0.0.0.0", "--port", "5173"]
     environment:
-      PORT: ${WEB_PORT:-3001}
       AGENT_URL: ${AGENT_URL:-http://127.0.0.1:8080}
+    network_mode: host
     depends_on:
       - agent
     restart: unless-stopped

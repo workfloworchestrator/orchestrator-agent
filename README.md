@@ -18,7 +18,7 @@ uv run uvicorn orchestrator_agent.app:app --port 8080
 
 | Path | Protocol | Description |
 | --- | --- | --- |
-| `POST /agui/` | AG-UI | The agent behind a frontend (the chat popup, [orchestrator-agent-chat](https://github.com/workfloworchestrator/orchestrator-agent-chat); its demo page in `demos/web`); workflow forms through AG-UI interrupts |
+| `POST /agui/` | AG-UI | The agent behind a frontend (the chat popup, [orchestrator-agent-chat](https://github.com/workfloworchestrator/orchestrator-agent-chat); a bare page for it in `demos/web`); workflow forms through AG-UI interrupts |
 | `GET /chats/`, `GET /chats/{thread_id}`, `DELETE /chats/{thread_id}`, `GET /chats/{thread_id}/options/{field}` | REST | The person's AG-UI chats: list them, read one (its last messages, its pending form stop), forget one, search the options of a form question the stop asks |
 | `POST /` | A2A | Agent-to-agent JSON-RPC, protocol v1.0 (`SendMessage`, `SendStreamingMessage`) |
 | `GET /.well-known/agent-card.json` | A2A | Agent card discovery |
@@ -59,23 +59,17 @@ The agent as a chat popup in the bottom-right corner of a page is the React comp
 [orchestrator-agent-chat](https://github.com/workfloworchestrator/orchestrator-agent-chat): it talks to the
 agent's `/agui/` route with the AG-UI client, renders the agent's Markdown tables, draws its charts from the
 data the agent attaches to an aggregate result, shows the tools as they run, keeps the thread across reloads
-of the tab, and sends what the host page knows (the subscription on screen) as AG-UI context. Its props,
-theming and layout are in that repository's README.
+of the tab, and sends what the host page knows (the subscription on screen) as AG-UI context. Its props and
+theming are in that repository's README.
 
-`demos/web/` is a page that hosts the popup the way the WFO UI would. It installs the package from its
-repository and talks to the agent on the page's own origin:
+`demos/web/` is a page with nothing on it but the popup, installed from that repository:
 
 ```bash
-# Everything in containers: the agent on 8080 (its .env) and the page on http://localhost:3001
-docker compose up --build
-
-# Or the page alone, against an agent already running (the dev server proxies /agui/ and /chats to it)
 cd demos/web && npm install && AGENT_URL=http://127.0.0.1:8080 npm run dev     # http://localhost:5173
 ```
 
-`WEB_PORT` and `AGENT_URL` override the compose defaults. The page needs no CORS on the agent: nginx (in the
-container) or the Vite dev server forwards `/agui/` and `/chats` to it, so the browser sees one origin. With
-OAuth2 on, the page's token field sets the bearer the popup sends and the agent forwards to core.
+The page needs no CORS on the agent: its dev server forwards `/agui/` and `/chats` to it, so the browser sees
+one origin. With OAuth2 on, the popup's `token` prop is the bearer the agent forwards to core.
 
 **The contract.** The popup's types come from this agent's OpenAPI document, which also names what travels
 inside AG-UI messages (`adapters/ag_ui/contract.py`): the artifact reference a tool result carries with its
