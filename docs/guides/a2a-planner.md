@@ -20,7 +20,7 @@
    products, workflows and processes.
 
 The agent speaks A2A protocol v1.0. Callers on 0.3 are still served, but they cannot fill in workflow forms. Forms need
-the [kagent human-in-the-loop extension](../architecture/index.md#workflow-form-fill), so that the planner can relay
+the [kagent human-in-the-loop extension](../reference/runtime.md#workflow-forms), so that the planner can relay
 the questions and the approval to the person.
 
 ### Reference setup

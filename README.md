@@ -274,10 +274,17 @@ and its tool arguments are built from core's request models (the agent depends o
 the skill never picks keys out of a dict; only the page schema itself, written for a browser form, is
 read here, and that half of the bridge goes once core's form tool returns a field spec.
 
-In the agent the skill runs in (A2A) the model never sees core's write tools (`WriteToolGate` hides
-`create_workflow` / `resume_workflow_process` / `abort_workflow_process`), so writes only ever go through
-this skill; the MCP and AG-UI agents run without the skill, so they get neither the gate nor the
-`workflow` plugin and behave as before. Routing in front of the model and prefilling pages from the
+On every interface automatically discovered Core tools must have MCP annotations explicitly declaring
+`readOnlyHint: true`. New read-only tools are discovered automatically; tools marked as writes or missing
+the annotation are blocked. Core authors must label their tools accurately: the agent does not inspect
+their implementation. Known workflow write tools stay blocked during automatic discovery even if
+mislabeled, and frontend tools are excluded. Trusted capability code can explicitly expose selected
+local or Core mutations using `allow_capability_mutations`; the capability then owns approval and
+authorization for those calls. `WriteToolGate` runs with or without the form skill; the MCP and AG-UI agents have no
+`workflow` plugin. Workflow starts go through the separate form skill after a matching structured approval
+response. The capability bypass does not change that built-in flow or add approval to custom tools.
+The calling client must obtain that approval from a person. Conversation and query persistence
+still write to the database. Routing in front of the model and prefilling pages from the
 conversation with a typed decision engine (Jev) live on a separate branch; a handed-off key core does not
 know is a tool retry, so the model corrects itself.
 

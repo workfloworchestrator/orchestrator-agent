@@ -27,6 +27,17 @@ The AG-UI and MCP endpoints run without the form-fill skill, so they cannot star
    that say what each id stands for. A workflow that ends in a summary page has its tables shown as well.
 4. **Approve** starts the workflow and **reject** cancels it. The agent answers with the id of the process.
 
+??? tip "Answer with the keyboard in LibreChat"
+    | Key | Effect |
+    | --- | --- |
+    | `1`–`9` | Pick that option; in a multi-select question, toggle it |
+    | `↑` / `↓` | Move the highlight |
+    | `Enter` | Confirm the answer |
+    | `Shift`+`Enter` | New line, does not submit |
+    | `Esc` | Hide the dialog; the question stays open |
+
+    To give an answer that is not in the list, type it in the message box.
+
 ### What the agent does not do
 
 - It does not read a *yes* in the chat as approval. Only the approval of the pending stop counts.
@@ -44,6 +55,6 @@ orchestrator.
 
 ## Reference
 
-- [How it works: why workflows need approval](../architecture/index.md#why-workflows-need-approval)
+- [The agent needs approval before starting workflows](../architecture/index.md#the-agent-needs-approval-before-starting-workflows)
 - [Plugins: workflow](../reference/plugins.md#workflow)
 - [Forms in Orchestrator Core](https://workfloworchestrator.org/orchestrator-core/reference-docs/forms/)

@@ -18,13 +18,14 @@ nav:
       - Security and observability: guides/security-observability.md
       - Benchmark prompt and model changes: guides/evals.md
   - Architecture:
-      - How it works: architecture/index.md
+      - How the agent fits into WFO: architecture/index.md
       - How we evaluate the agent: architecture/evaluation.md
       - Running in your own stack: architecture/production.md
   - Reference:
       - Endpoints and protocols: reference/endpoints.md
       - Configuration: reference/configuration.md
       - Plugins: reference/plugins.md
+      - Runtime behaviour: reference/runtime.md
       - Evals: reference/evals.md
 theme:
   name: material

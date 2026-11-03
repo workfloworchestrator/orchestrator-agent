@@ -166,7 +166,7 @@ answer with a chart. Then ask *Find all active subscriptions* to get a table.
 - [Enable embeddings](https://workfloworchestrator.org/orchestrator-core/reference-docs/ai-search/#running-it) in
   Orchestrator Core for semantic and hybrid search if you haven't already done so.
 - [Teach the agent your domain](domain-context.md) with your identifiers and terminology.
-- [Endpoints and protocols](../reference/endpoints.md) for the other ways to reach the agent.
+- Learn about [endpoints and protocols](../reference/endpoints.md) to connect your own clients and tools.
 
 ## Reference
 

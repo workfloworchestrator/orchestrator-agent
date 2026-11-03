@@ -2,7 +2,7 @@
 
 Each capability of the agent is a plugin: a Markdown file with YAML frontmatter, shipped in the agent under
 `capabilities/plugins/`. The body is the prompt. The plugins describe *what* to do and the tool descriptions served by
-Orchestrator Core describe *how* to use each tool. See [How it works](../architecture/index.md) for the design.
+Orchestrator Core describe *how* to use each tool. See [How the agent fits into WFO](../architecture/index.md) for the design.
 
 All plugins are always on. Every plugin is also advertised as a skill in the A2A agent card.
 
@@ -63,7 +63,9 @@ Example: *Start the terminate workflow for subscription abc123.*
 | `description` | Shown in the A2A agent card |
 | `a2a_tags`, `examples` | Tags and example prompts for the A2A skill |
 | `defer_loading` | `false` for always on, `true` to load on demand together with its tools |
-| `tools` | The tools the plugin owns |
+| `tools` | The tools the plugin owns for result mapping and loading; ownership does not grant mutation access |
 | `artifact` | Maps the tool results to `query`, `data` or `export` output. Omit for instructions only |
 
-See [Teach the agent your domain](../guides/domain-context.md) for how to change the behaviour of the agent.
+For selected mutations, implement a Python capability using the explicit
+[mutation bypass](runtime.md#capability-mutation-bypass). See
+[Teach the agent your domain](../guides/domain-context.md) for how to change the behaviour of the agent.

@@ -46,7 +46,7 @@ discover the agent through its card at `/.well-known/agent-card.json`, which adv
 
 Callers that have not moved to v1.0 are still served: the card also advertises a 0.3 interface and the
 agent accepts `message/send` and `message/stream`. A 0.3 caller gets everything except workflow forms, which need the
-human-in-the-loop extension described in [How it works](../architecture/index.md#workflow-form-fill).
+human-in-the-loop extension described in [Workflow forms](runtime.md#workflow-forms).
 
 The endpoint is built on the [A2A Python SDK](https://github.com/a2aproject/a2a-python), not on pydantic-ai. It covers
 what a client needs to ask the agent questions, not the whole protocol:

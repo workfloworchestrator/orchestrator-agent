@@ -21,19 +21,13 @@ leaves the section out. Restart the agent to apply a change.
 Good things to put in it are identifier formats and the field they map to, the meaning of product names and
 abbreviations, and terms that people use for things that have another name in the inventory.
 
-### Retrievers
+??? tip "Let the agent link to your UI and other services"
+    Tell the agent where your WFO UI and other systems live, and it puts clickable links in its answers, so you do
+    not have to look a subscription or process up yourself:
 
-The agent also chooses how to match for each question:
-
-| Retriever | Used for |
-| --- | --- |
-| Hybrid (semantic and fuzzy keyword) | Identifiers, codes and names |
-| Semantic | Descriptive questions in sentences |
-| Fuzzy | Exact tokens, and whenever embeddings are not available |
-
-Semantic and hybrid retrieval need embeddings in Orchestrator Core, see
-[Running AI search](https://workfloworchestrator.org/orchestrator-core/reference-docs/ai-search/#running-it). Without
-them the agent uses fuzzy search and does not offer the other two.
+    ```shell
+    AGENT_DOMAIN_CONTEXT="The WFO UI is at http://localhost:3000. Link a subscription as http://localhost:3000/subscriptions/<subscription_id> and a process as http://localhost:3000/workflows/<process_id>. NetBox is at http://localhost:8000."
+    ```
 
 ### Changing the behaviour further
 

@@ -81,10 +81,16 @@ curl http://localhost:8080/v1/chat/completions \
   -d '{"model": "wfo", "messages": [{"role": "user", "content": "How many subscriptions are there per status?"}]}'
 ```
 
+## Conclusion
+
+If the health check returns OK and your question gets an answer, your Orchestrator Agent is up and running and
+connected to Orchestrator Core. From here you can connect a chat client, tune the agent to your domain, or plug it into
+your own tools.
+
 ## Next steps
 
 - [Connect LibreChat](guides/librechat.md) to chat with the agent.
 - [Enable embeddings](https://workfloworchestrator.org/orchestrator-core/reference-docs/ai-search/#running-it) in
   Orchestrator Core for semantic and hybrid search if you haven't already done so.
 - [Teach the agent your domain](guides/domain-context.md) with your identifiers and terminology.
-- [Endpoints and protocols](reference/endpoints.md) for the other ways to reach the agent.
+- Learn about [endpoints and protocols](reference/endpoints.md) to connect your own clients and tools.

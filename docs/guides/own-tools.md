@@ -3,7 +3,7 @@
 The Orchestrator Agent answers from the tools of Orchestrator Core. When a question needs more than those tools
 offer, you can extend it in three steps, from small to large:
 
-1. **Add a tool.** Expose a route of your orchestrator, and the agent can use it at once.
+1. **Add a tool.** Expose a read-only route of your orchestrator and mark it with `READONLY_TOOL`.
 2. **Connect another service.** Bring in the data of a system outside WFO, such as NetBox or a CRM.
 3. **Create your own agent.** Run an agent with its own tools, instructions and model next to the Orchestrator Agent.
 
@@ -22,8 +22,8 @@ Pick the section that matches where the data or the behaviour lives:
 ## Expose a route of your orchestrator
 
 The agent uses the tools that the MCP server of Orchestrator Core serves. A tool is a FastAPI route with the tag
-`agent-exposed`. Orchestrator Core turns it into an MCP tool, and the agent offers it to the model without any change
-in the agent.
+`agent-exposed`. Orchestrator Core turns it into an MCP tool. The agent automatically discovers tools and only
+offers those explicitly marked read-only. No list of custom tool names needs to be maintained in the agent.
 
 1. Add a route to your orchestrator and tag it:
 
@@ -51,7 +51,7 @@ in the agent.
 
     - `operation_id` becomes the name of the tool.
     - The docstring becomes the description, and the model picks the tool by it. Say when to use the tool, not only
-      what it returns. See [How it works](../architecture/index.md#orchestrator-core-search-index-and-mcp-server) for
+      what it returns. See [How the agent fits into WFO](../architecture/index.md#orchestrator-core-search-index-and-mcp-server) for
       why the tool description carries this.
     - The Pydantic models of the route become the parameter schema.
     - `openapi_extra` sets the hints that clients use to judge safety: `READONLY_TOOL`, `WRITE_TOOL`,
@@ -59,16 +59,60 @@ in the agent.
 
 2. Restart the orchestrator. Orchestrator Core builds the list of tools once, when `OrchestratorCore(...)` is created.
 
+3. Review the route and the functions it calls for changes to business state before declaring it read-only.
+   Once the agent discovers the tool, `READONLY_TOOL` admits it automatically; no agent code change is required.
+
 !!! warning "Expose read-only tools only"
-    The agent passes a new tool to the model as it is, in every conversation. It only hides the write tools of
-    Orchestrator Core that it knows by name. A tool of yours that changes something would be called by the model
-    without the approval of a person. See [why workflows need approval](../architecture/index.md#why-workflows-need-approval).
+    `READONLY_TOOL` grants model access by setting `readOnlyHint: true`; it does not prove that the implementation
+    is read-only. You are responsible for accurate annotations. The model can call a discovered read-only tool
+    without human confirmation. Write tools and tools without the annotation are blocked during automatic discovery. Keep business changes
+    in WFO workflows behind the separate approval path.
+    See [workflow approval](../architecture/index.md#the-agent-needs-approval-before-starting-workflows).
 
 ### Verify it works
 
 Open the API docs of your orchestrator at `http://<core>/api/docs#/agent-exposed`. Every tool is listed there with
 its name (the `operationId`), its description and its parameters. Your route should be among them. Then ask the
 agent a question that needs the tool, for example *Which contracts does customer 12345678 have?*
+
+## Expose selected mutations through a capability
+
+To deliberately make selected mutating tools available, implement a trusted Python capability and return
+`allow_capability_mutations(...)` from its `get_toolset()`. For example, this capability selects one Core write:
+
+```python
+from typing import Any
+
+from pydantic_ai.capabilities import AbstractCapability
+
+from orchestrator_agent.mcp_client import build_core_toolset
+from orchestrator_agent.tool_policy import allow_capability_mutations
+
+
+class ProcessMaintenanceCapability(AbstractCapability[Any]):
+    id = "process-maintenance"
+    description = "Resume processes under the deployment's maintenance policy."
+
+    def __init__(self):
+        self.core = build_core_toolset()
+
+    def get_toolset(self):
+        return allow_capability_mutations(
+            self.core,
+            tool_names={"resume_workflow_process"},
+        )
+```
+
+Register this capability with the agent, for example through the `capabilities` argument on `agent.run()`.
+You can wrap a local `FunctionToolset` in the same way. Only the selected tools bypass the default read-only
+policy, and only when provided by an active registered capability. A deferred capability must be loaded first.
+The wrapper alone, passed as an ordinary toolset, does not grant access. A Markdown plugin's `tools` field
+declares ownership and does not provide this bypass.
+
+The selected tool can be called directly by the model. The helper does not add confirmation: implement the
+approval and authorization your capability needs before executing a mutation. The existing built-in workflow
+form capability still requires its usual approval. See the
+[runtime reference](../reference/runtime.md#capability-mutation-bypass) for the exact boundary.
 
 ## Connect other services
 
@@ -114,7 +158,7 @@ Then, for any runtime:
 
 1. **Give it tools over MCP.** Point the agent at the MCP servers of the systems it works with. To reach WFO from your
    own agent, prefer delegating to the Orchestrator Agent over A2A. Connecting to the MCP server of Orchestrator Core
-   directly bypasses the guards above, see [Read tools and write tools](../architecture/index.md#read-tools-and-write-tools).
+   directly bypasses the guards above, see [Read tools and write tools](../reference/runtime.md#read-tools-and-write-tools).
 2. **Write its instructions.** Describe what the agent is for and when it should use which tool. Keep how a tool is
    used in the description of the tool.
 3. **Serve it over A2A.** The runtime serves an agent card at `/.well-known/agent-card.json`. The card lists the

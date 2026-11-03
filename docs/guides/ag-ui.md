@@ -19,6 +19,9 @@ The AG-UI endpoint runs the agent without the workflow form-fill skill, and the 
 reachable only through that skill. To start workflows from chat, see
 [Start workflows from chat](workflows-from-chat.md).
 
+Tools supplied by the frontend in `RunAgentInput.tools` are not available to the model. Its tools come from the
+Core tools explicitly annotated as read-only.
+
 ## Verify it works
 
 Use the demo client of the agent repository:
