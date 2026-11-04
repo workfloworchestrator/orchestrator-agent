@@ -31,7 +31,8 @@ class Fetches:
     """A ``Fetch`` answering from a table of URL -> document, remembering what was asked."""
 
     def __init__(self, answers: dict[str, Any]) -> None:
-        self.answers, self.urls = answers, []
+        self.answers = answers
+        self.urls: list[str] = []
 
     async def __call__(self, url: str) -> Any:
         self.urls.append(url)

@@ -16,13 +16,14 @@
 import os
 from datetime import UTC, datetime
 from types import SimpleNamespace
+from typing import Any
 from unittest.mock import MagicMock
 
 os.environ.setdefault("DATABASE_URI", "postgresql://test:test@localhost:5432/test")
 
 from orchestrator_agent.persistence import list_threads, read_state  # noqa: E402
 
-STALE_QUERY = {"aggregate": {"aggregations": []}}  # a shape a later model no longer takes
+STALE_QUERY: dict[str, Any] = {"aggregate": {"aggregations": []}}  # a shape a later model no longer takes
 
 
 def test_a_state_that_reads_is_read_whole():

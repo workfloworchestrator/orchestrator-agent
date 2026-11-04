@@ -82,14 +82,15 @@ def _field_of(node: ast.AST) -> str | None:
 
 
 def _writes(tree: ast.AST) -> list[tuple[int, str]]:
-    found = []
+    found: list[tuple[int, str]] = []
     for node in ast.walk(tree):
-        targets: list[ast.AST] = []
+        targets: list[ast.expr] = []
         if isinstance(node, (ast.Assign, ast.AugAssign, ast.AnnAssign)):
             targets = node.targets if isinstance(node, ast.Assign) else [node.target]
         elif isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute) and node.func.attr in WRITERS:
             targets = [node.func.value]
-        found.extend((node.lineno, field) for target in targets if (field := _field_of(target)))
+        line = getattr(node, "lineno", 0)
+        found.extend((line, field) for target in targets if (field := _field_of(target)))
     return found
 
 

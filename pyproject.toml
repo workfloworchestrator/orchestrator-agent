@@ -6,8 +6,7 @@ license = "Apache-2.0"
 requires-python = ">=3.11,<3.14"
 dependencies = [
     "orchestrator-core>=5.6.0a3",  # the form page as one JSON Schema (``status``, ``errors``): in the 5.6.0 alphas
-    # TODO: >=2.10.0 (``OptionsSource``) once released; until then its branch, see [tool.uv.sources] below.
-    "pydantic-forms>=2.9.0",  # core's form types the skill reads, and the option sources its fields declare
+    "pydantic-forms>=2.10.0",  # core's form types the skill reads, and the option sources its fields declare
     "pydantic-ai-slim[mcp]>=2.0,<3",
     "ag-ui-protocol>=1.0.0,<2",  # interrupts (``RunFinishedEvent.outcome``, ``RunAgentInput.resume``): the AG-UI human-in-the-loop
     "a2a-sdk[http-server]>=1.1.5,<2",
@@ -136,7 +135,3 @@ override-dependencies = [
     "pydantic[email]>=2.13,<2.14",  # the extra pydantic-forms needs; an override drops extras it does not name
     "pydantic-settings>=2.15.0,<2.16",
 ]
-
-# TODO: drop before merge; pydantic-forms 2.10.0 (``OptionsSource``, the PR from this branch) is not released yet.
-[tool.uv.sources]
-pydantic-forms = { git = "https://github.com/workfloworchestrator/pydantic-forms", branch = "feat/field-options-source" }
