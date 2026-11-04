@@ -1,28 +1,26 @@
 # Use MCP clients
 
-!!! info "Goal"
-    Call the agent, or the MCP server of Orchestrator Core, from any MCP client such as Claude Code or an agent
-    framework.
+The agent serves its own tools over MCP at `http://<agent>:8080/mcp`: one per [plugin](../reference/plugins.md)
+(`search`, `aggregate`, `entity`, `export`) plus `ask`. Each takes a question in plain language, so an MCP client such
+as Claude Code can hand WFO questions to the agent and get answers back.
 
-There are two MCP servers, and they serve different tools:
+!!! warning "No workflow approval over MCP"
+    The workflow plugin and its approval step are not available on `/mcp`, but the write tools of Core are not hidden
+    either: the model behind this endpoint can start workflows without asking a person. Use it for questions, and
+    start workflows from [chat](workflows-from-chat.md). See
+    [Read tools and write tools](../reference/runtime.md#read-tools-and-write-tools).
 
-| Server | URL | Tools |
-| --- | --- | --- |
-| The agent | `http://<agent>:8080/mcp` | The agent itself, with tools such as `search`, `aggregate` and `ask` that take a question in plain language |
-| Orchestrator Core | `http://<core>:8080/mcp/` | The raw tools: `search`, `aggregate`, `list_workflows`, `get_subscription_details` and more |
-
-Use the agent when you want answers to questions, and Orchestrator Core when your own client or model should pick the
-tools.
+To have your own client or model pick Core's tools directly instead, connect to the MCP server of Orchestrator Core.
+See the [Core MCP reference](https://workfloworchestrator.org/orchestrator-core/reference-docs/mcp/).
 
 ## Steps
 
-1. For Orchestrator Core, set `MCP_ENABLED=True` and install it with the `mcp` extra. The transport is streamable HTTP.
-2. Add the server to your client. For Claude Code, create a `.mcp.json` in your project:
+1. Add the agent to your client. For Claude Code, create a `.mcp.json` in your project:
 
     ```json
     {
       "mcpServers": {
-        "wfo-search": {
+        "orchestrator-agent": {
           "type": "http",
           "url": "http://localhost:8080/mcp"
         }
@@ -30,25 +28,39 @@ tools.
     }
     ```
 
-3. When authentication is on, send the same bearer token as for the REST API in the `Authorization` header.
+2. When the agent authenticates requests (`OAUTH2_ACTIVE=true`, the default), send a bearer token from your OIDC
+   provider in the `Authorization` header. In Claude Code, add it to the server entry; `${WFO_TOKEN}` is read from
+   your environment:
+
+    ```json
+    "headers": {
+      "Authorization": "Bearer ${WFO_TOKEN}"
+    }
+    ```
+
+    See [Authentication](../reference/configuration.md#authentication).
 
 ## Verify it works
 
-Run the demo client of the agent repository. It runs a search, an aggregation and an `ask`:
+Check from the project directory that Claude Code can reach the agent:
 
 ```shell
-uv run demos/mcp_client.py
+claude mcp list
 ```
 
-Or call one tool:
+`orchestrator-agent` should be listed as connected. Inside a Claude Code session, `/mcp` shows the same status and
+the tools the agent offers.
 
-```shell
-uv run demos/mcp_client.py search "active subscriptions"
+Then ask a question that needs your orchestrator:
+
+```text
+Using the orchestrator-agent tools, how many active subscriptions are there per product?
 ```
 
-The client connects to `http://localhost:8080/mcp`. Edit `URL` in `demos/mcp_client.py` for another address.
+Claude Code asks permission to call a tool such as `mcp__orchestrator-agent__aggregate`, and answers with the counts
+the agent returns. If the call fails with a 401, the `Authorization` header from step 2 is missing or the token is not
+valid.
 
 ## Reference
 
-- [MCP server of Orchestrator Core](https://workfloworchestrator.org/orchestrator-core/reference-docs/mcp/)
 - [Endpoints and protocols](../reference/endpoints.md#mcp)

@@ -4,7 +4,7 @@
     Give the agent the identifier conventions and terminology of your organisation, so that a question like *Show
     circuit IS4443* is turned into a filter on the right field.
 
-## Steps
+## Domain knowledge
 
 When a user mentions a concrete identifier, such as a customer name, a subscription id or a code like `IS4443`, the
 agent uses it as a search key. It looks up which field matches and filters on it with `like`, which tolerates
@@ -15,7 +15,7 @@ field an identifier belongs to when that is a convention of your organisation. T
 AGENT_DOMAIN_CONTEXT="Circuit codes look like IS#### and map to the imsCircuitId field — filter with like. Customer references are 8-digit numbers — field customerId."
 ```
 
-The text is added as a `## Domain Knowledge` section to the system prompt, so every capability sees it. An empty value
+The text is added as a `## Domain Knowledge` section to the system prompt, so every [capability](../architecture/index.md#capabilities) sees it. An empty value
 leaves the section out. Restart the agent to apply a change.
 
 Good things to put in it are identifier formats and the field they map to, the meaning of product names and
@@ -29,9 +29,9 @@ abbreviations, and terms that people use for things that have another name in th
     AGENT_DOMAIN_CONTEXT="The WFO UI is at http://localhost:3000. Link a subscription as http://localhost:3000/subscriptions/<subscription_id> and a process as http://localhost:3000/workflows/<process_id>. NetBox is at http://localhost:8000."
     ```
 
-### Changing the behaviour further
+## Changing the behaviour further
 
-The behaviour of each capability is a Markdown prompt in the [plugins](../reference/plugins.md) of the agent. To change
+The behaviour of each [capability](../architecture/index.md#capabilities) is a Markdown prompt in the [plugins](../reference/plugins.md) of the agent. To change
 a prompt or add a plugin, fork the agent, edit or add a file in `capabilities/plugins/` and restart. Plugins are not
 loaded from outside the agent, and they describe intent rather than tool names. How a tool is used is described by the
 tool descriptions in Orchestrator Core. To give the agent data that no tool serves yet, see

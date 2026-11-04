@@ -21,18 +21,37 @@ hide:
 <br>
 
 __The Orchestrator Agent is a ready-to-use AI agent for the
-[Workflow Orchestrator Programme](https://www.workfloworchestrator.org), funded by [GÉANT](https://geant.org) through
-the NETDEV Incubator. It lets people and other agents work with the data and workflows in WFO without knowing the UI,
-the API or the search syntax.__
+[Workflow Orchestrator Programme](https://www.workfloworchestrator.org). It lets people and other agents work with
+the data and workflows in the Workflow Orchestrator without knowing the UI, the API or the search syntax.__
+
+__The Programme is funded by [GÉANT](https://geant.org) through
+[the incubator process](https://wiki.geant.org/spaces/NETDEV/pages/613122207/NETDEV+Incubator) within the Network
+Development Work Package (WP6) of the GN5-2 project.__
 
 ## What is the Orchestrator Agent?
 
 Ask a question in plain language and the agent searches your subscriptions, products, workflows and processes for the
 answer. It can also start workflows from the conversation, with an approval of the person before anything changes.
 
-It is a thin service on top of the search index and the MCP server of
-[Orchestrator Core](https://workfloworchestrator.org/orchestrator-core/), so the agent itself keeps no second copy of your data or
-your workflow logic. It needs a running Orchestrator Core to work.
+### An agent and its harness
+
+An AI agent is a language model that does more than answer: it chooses tools, reads what they return and decides on
+its next step until the task is done. The model alone cannot search a database or start a workflow. The software
+around it does that. This surrounding software is called the *agent harness*. It gives the model its instructions and
+tools, runs the tool calls, enforces rules and approvals, keeps track of the conversation and returns the result to
+whoever asked.
+
+The Orchestrator Agent is a harness for WFO. You choose the language model; the agent provides the rest:
+
+- **Instructions**: prompts that tell the model how to search, aggregate, look up, export and run workflows.
+- **Tools**: the operations of [Orchestrator Core](https://workfloworchestrator.org/orchestrator-core/), made
+  available over MCP.
+- **Guardrails**: rules that apply to every tool call, and a person's approval before a workflow changes anything.
+- **Memory**: conversation history and open workflow forms, stored in the WFO database.
+- **Interfaces**: chat applications, MCP clients and other agents can all talk to it.
+
+It is a thin service on top of the search index and the MCP server of Orchestrator Core, so the agent itself keeps no
+second copy of your data or your workflow logic. See [How the agent fits on top of Orchestrator Core](architecture/index.md) for details.
 
 The language model is a separate matter: what the agent sends to it, such as search results, may be stored by the
 provider of that model. If your data may not leave your own environment, run the agent with a model of your own, see
@@ -66,7 +85,7 @@ and can also be run from source. One service exposes the agent over several prot
 | `POST /agui` | AG-UI | Streaming answers, tables and charts into your own frontend |
 | `/mcp` | MCP | MCP clients such as Claude Code or an agent framework |
 
-The agent's capabilities are built from [plugins](reference/plugins.md), and you can add your own. All endpoints are
+The agent's [capabilities](architecture/index.md#capabilities) are built from [plugins](reference/plugins.md), and you can add your own. All endpoints are
 described in [Endpoints and protocols](reference/endpoints.md).
 
 ## Getting Started
@@ -113,16 +132,3 @@ first, follow the
 - 📖 **How does it work?** Read the [architecture](architecture/index.md)
 - 🚀 **From first try to production?** See
   [Learn / Orchestrator Agent](https://workfloworchestrator.org/learn/orchestrator-agent/)
-
-## Special thanks
-
-<div class="grid cards" markdown>
-
--   [![GÉANT](img/geant-logo.png){ align=right width="160" }](https://geant.org)
-    Special thanks to **GÉANT** for funding this work through the
-    [NETDEV Incubator](https://wiki.geant.org/spaces/NETDEV/pages/613122207/NETDEV+Incubator).
-    Two incubator projects, [*WFO RAG agent and LLM integration*](https://wiki.geant.org/spaces/NETDEV/pages/631443164/NETDEV+Incubator+proposals)
-    (2025) and *A2A protocol integration, agent refactoring and multi-agent troubleshooting* (2026), got the
-    Orchestrator Agent off the ground.
-
-</div>

@@ -13,10 +13,10 @@ around it.
 - Questions to start with: do people need to start workflows? Does a model of yours already pick tools? Is the caller
   a person or another agent?
 - A decision flow (Mermaid) from those questions to a path: `/v1`, `/mcp`, A2A or AG-UI.
-- A capability matrix in user terms, per path: memory between turns, rich results, structured data, workflow forms,
+- A feature matrix in user terms, per path: memory between turns, rich results, structured data, workflow forms,
   user identity.
     - `/v1`: memory only with an `X-Conversation-Id` header. Workflow forms only for LibreChat (>= 0.8.8).
-    - Agent `/mcp`: stateless, no workflow tool, no follow-ups.
+    - Agent `/mcp`: stateless, no workflow forms, no follow-ups.
     - Orchestrator Core `/mcp/`: raw tools including `create_workflow`. The client's model drives them, so the
       agent's guards do not apply.
     - A2A: the full agent. Workflow forms need the kagent HITL extension.
@@ -32,7 +32,7 @@ One short paragraph each: which path to use, what works, what doesn't, and a lin
   to use the agent's MCP and when to use the MCP server of Orchestrator Core.
   [Use MCP clients](../guides/mcp-clients.md).
 - **Agent platforms and planners** (kagent, docker-agent, other A2A runtimes) → A2A.
-  [Use the agent from an A2A planner](../guides/a2a-planner.md).
+  [Connect another agent over A2A](../guides/a2a-planner.md).
 - **Your own app** → AG-UI for a web UI, or the OpenAI SDK for backend scripts and bots.
   [Build a frontend with AG-UI](../guides/ag-ui.md).
 - **A gateway in front of several clients** (LiteLLM proxy, an MCP gateway) → see [Gateways](#gateways).

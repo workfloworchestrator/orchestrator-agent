@@ -12,9 +12,10 @@ show the questions and the approval to a person:
 - **LibreChat.** Follow [Connect LibreChat](librechat.md). The `X-Agent-Client: librechat` header and
   `askUserQuestion: true` on the model spec are what enable forms.
 - **An A2A planner.** The planner must support the kagent human-in-the-loop extension.
-  See [Use the agent from an A2A planner](a2a-planner.md).
+  See [Connect another agent over A2A](a2a-planner.md).
 
-The AG-UI and MCP endpoints run without the form-fill skill, so they cannot start workflows.
+The AG-UI and MCP endpoints run without the form-fill skill, so they have no workflow forms and no approval step. See
+[Read tools and write tools](../reference/runtime.md#read-tools-and-write-tools).
 
 ### What the user goes through
 

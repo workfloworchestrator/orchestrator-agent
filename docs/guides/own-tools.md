@@ -22,8 +22,8 @@ Pick the section that matches where the data or the behaviour lives:
 ## Expose a route of your orchestrator
 
 The agent uses the tools that the MCP server of Orchestrator Core serves. A tool is a FastAPI route with the tag
-`agent-exposed`. Orchestrator Core turns it into an MCP tool. The agent automatically discovers tools and only
-offers those explicitly marked read-only. No list of custom tool names needs to be maintained in the agent.
+`agent-exposed`. Orchestrator Core turns it into an MCP tool. The agent discovers tools automatically, so no list of
+custom tool names needs to be maintained in the agent.
 
 1. Add a route to your orchestrator and tag it:
 
@@ -51,22 +51,22 @@ offers those explicitly marked read-only. No list of custom tool names needs to 
 
     - `operation_id` becomes the name of the tool.
     - The docstring becomes the description, and the model picks the tool by it. Say when to use the tool, not only
-      what it returns. See [How the agent fits into WFO](../architecture/index.md#orchestrator-core-search-index-and-mcp-server) for
+      what it returns. See [How the agent fits on top of Orchestrator Core](../architecture/index.md#orchestrator-core-search-index-and-mcp-server) for
       why the tool description carries this.
     - The Pydantic models of the route become the parameter schema.
-    - `openapi_extra` sets the hints that clients use to judge safety: `READONLY_TOOL`, `WRITE_TOOL`,
-      `IDEMPOTENT_WRITE_TOOL` or `DESTRUCTIVE_TOOL`, all from `orchestrator.core.mcp.server`.
+    - `openapi_extra` sets the hints that clients can use to judge safety: `READONLY_TOOL`, `WRITE_TOOL`,
+      `IDEMPOTENT_WRITE_TOOL` or `DESTRUCTIVE_TOOL`, all from `orchestrator.core.mcp.server`. The agent does not filter
+      on them.
 
 2. Restart the orchestrator. Orchestrator Core builds the list of tools once, when `OrchestratorCore(...)` is created.
 
-3. Review the route and the functions it calls for changes to business state before declaring it read-only.
-   Once the agent discovers the tool, `READONLY_TOOL` admits it automatically; no agent code change is required.
+3. Review the route and the functions it calls for changes to business state before tagging it. Once Orchestrator Core
+   serves the tool, the agent offers it to the model; no agent code change is required.
 
 !!! warning "Expose read-only tools only"
-    `READONLY_TOOL` grants model access by setting `readOnlyHint: true`; it does not prove that the implementation
-    is read-only. You are responsible for accurate annotations. The model can call a discovered read-only tool
-    without human confirmation. Write tools and tools without the annotation are blocked during automatic discovery. Keep business changes
-    in WFO workflows behind the separate approval path.
+    Every tagged route becomes a tool that the model can call without human confirmation, whatever its annotation.
+    The agent hides only the workflow write tools of Orchestrator Core, by name, and only where the form-fill skill
+    runs. Keep business changes in WFO workflows behind the separate approval path.
     See [workflow approval](../architecture/index.md#the-agent-needs-approval-before-starting-workflows).
 
 ### Verify it works
@@ -74,45 +74,6 @@ offers those explicitly marked read-only. No list of custom tool names needs to 
 Open the API docs of your orchestrator at `http://<core>/api/docs#/agent-exposed`. Every tool is listed there with
 its name (the `operationId`), its description and its parameters. Your route should be among them. Then ask the
 agent a question that needs the tool, for example *Which contracts does customer 12345678 have?*
-
-## Expose selected mutations through a capability
-
-To deliberately make selected mutating tools available, implement a trusted Python capability and return
-`allow_capability_mutations(...)` from its `get_toolset()`. For example, this capability selects one Core write:
-
-```python
-from typing import Any
-
-from pydantic_ai.capabilities import AbstractCapability
-
-from orchestrator_agent.mcp_client import build_core_toolset
-from orchestrator_agent.tool_policy import allow_capability_mutations
-
-
-class ProcessMaintenanceCapability(AbstractCapability[Any]):
-    id = "process-maintenance"
-    description = "Resume processes under the deployment's maintenance policy."
-
-    def __init__(self):
-        self.core = build_core_toolset()
-
-    def get_toolset(self):
-        return allow_capability_mutations(
-            self.core,
-            tool_names={"resume_workflow_process"},
-        )
-```
-
-Register this capability with the agent, for example through the `capabilities` argument on `agent.run()`.
-You can wrap a local `FunctionToolset` in the same way. Only the selected tools bypass the default read-only
-policy, and only when provided by an active registered capability. A deferred capability must be loaded first.
-The wrapper alone, passed as an ordinary toolset, does not grant access. A Markdown plugin's `tools` field
-declares ownership and does not provide this bypass.
-
-The selected tool can be called directly by the model. The helper does not add confirmation: implement the
-approval and authorization your capability needs before executing a mutation. The existing built-in workflow
-form capability still requires its usual approval. See the
-[runtime reference](../reference/runtime.md#capability-mutation-bypass) for the exact boundary.
 
 ## Connect other services
 
@@ -132,7 +93,7 @@ For the second way:
    [MCP server list](https://github.com/modelcontextprotocol/servers).
 2. Create an agent with that MCP server as its toolset, see [Create your own agent](#create-your-own-agent).
 3. Add it as a peer of a planner, next to the Orchestrator Agent, see
-   [Use the agent from an A2A planner](a2a-planner.md).
+   [Connect another agent over A2A](a2a-planner.md).
 
 The agents profile of the [example orchestrator](https://github.com/workfloworchestrator/example-orchestrator) does
 exactly this for NetBox: `inventory-agent` reads NetBox through `netbox-mcp`, and `planner-agent` combines its answers
@@ -168,7 +129,7 @@ Then, for any runtime:
    instead of a service account, so the agent can only do what the user may do. See
    [Security and observability](security-observability.md).
 5. **Connect it to a planner.** Add the agent card URL as a peer of the planner and tell the planner when to use it,
-   see [Use the agent from an A2A planner](a2a-planner.md).
+   see [Connect another agent over A2A](a2a-planner.md).
 
 To give people a chat frontend on top, put the planner behind an OpenAI-compatible endpoint, because LibreChat has no
 A2A client. The example orchestrator uses `a2a-proxy` for this, see the

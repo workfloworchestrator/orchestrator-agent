@@ -1,4 +1,4 @@
-# How the agent fits into WFO
+# How the agent fits on top of Orchestrator Core
 
 
 The Orchestrator Agent connects natural-language requests to the data and workflows in WFO. It combines a language
@@ -28,12 +28,16 @@ Core makes these operations available as tools through its MCP server. Each tool
 use it, so the model can choose an operation that fits the question. The agent's instructions describe its purpose;
 the knowledge of how to search your orchestrator stays with Core's tools.
 
+Core is also the agent's only tool connection. To bring in another system, expose it as a tool in your orchestrator,
+or give it an agent of its own and let a planner combine both answers. See
+[Add your own tools, services and agents](../guides/own-tools.md).
+
 For example, a question about active subscriptions becomes a search through Core. Core returns matching records,
 and the agent presents them with an explanation. Tables and charts are built from the returned data by the agent,
 so the model does not need to reproduce each row or number in its answer.
 
 The [Core MCP reference](https://workfloworchestrator.org/orchestrator-core/reference-docs/mcp/) describes the tools;
-the [plugin reference](../reference/plugins.md) lists the agent's capabilities.
+the [plugin reference](../reference/plugins.md) lists the plugins that make up the agent's [capabilities](#capabilities).
 
 ## The language model interprets the request
 
@@ -54,7 +58,10 @@ data is used for training. Those terms matter when deciding whether a provider i
 A self-hosted model lets you keep that processing within your infrastructure. See
 [Use your own LLM](../guides/own-llm.md) for supported connections and setup.
 
-## The database keeps the conversation going
+The same applies to tracing. With Langfuse or another tracing backend enabled, prompts and tool results are also sent
+there. See [Security and observability](../guides/security-observability.md).
+
+## The database stores the conversations
 
 The agent also needs a direct connection to the WFO PostgreSQL database. It stores conversation history and state,
 including an open workflow form, so a later message can continue the same conversation. For example, answering the
@@ -64,17 +71,46 @@ These connections serve different purposes: MCP provides access to WFO operation
 agent's conversation memory. The database connection does not give the model a SQL interface to your inventory.
 The storage details are in [Conversation persistence](../reference/runtime.md#conversation-persistence).
 
+## Capabilities extend the model and its tools
+
+<a id="capabilities"></a>
+
+Orchestrator Core supplies the tools; capabilities shape how the model uses them. A capability is the extension unit
+of pydantic-ai, the framework the agent runs on. Each one can contribute instructions for the model, extra tools, and
+hooks that run around a model request or a tool call. The agent uses three kinds:
+
+- **Plugins.** A [plugin](../reference/plugins.md) is a Markdown file: a prompt plus a few lines of frontmatter. The
+  prompt tells the model how to do one job, and the frontmatter names the tools the plugin owns and how to render their
+  results, as a table, a chart or a download link. The built-in plugins are search, aggregate, entity, export and
+  workflow.
+- **Guards.** Guards are rules written in Python that constrain the model and its tools: the filter path guard, the
+  deferred tool gate, history trimming and, wherever the form-fill skill runs, the write tool gate. See
+  [Plugins and guards](../reference/runtime.md#plugins-and-guards).
+- **The form-fill skill.** This Python capability intercepts messages before they reach the model and guides the
+  person through a workflow form, one question at a time. See [Workflow forms](../reference/runtime.md#workflow-forms).
+
+A plugin is either always on or deferred, controlled by `defer_loading` in its frontmatter. The model sees an
+always-on plugin's instructions and tools from the start. A deferred plugin stays hidden until the model calls the
+`load_capability` tool to load it. All built-in plugins are always on.
+
+Not every interface gets every capability. A2A and `/v1` share an agent that includes the form-fill skill, so they get
+the workflow plugin, the skill and the write tool gate. AG-UI and the agent's `/mcp` endpoint get the remaining plugins
+and guards. The A2A agent card also advertises each plugin as a skill, unless its frontmatter sets `advertise: false`.
+
+Don't confuse these with the `capabilities` field of the A2A agent card. That field lists protocol features such as
+streaming and is unrelated.
+
 ## Different ways to reach the same agent
 
 The agent can sit behind an existing chat application, become part of your own application, or work alongside other
-agents. These interfaces connect different kinds of callers to the same WFO capabilities:
+agents. These interfaces connect different kinds of callers to the same WFO operations:
 
 - **A chat application**, such as LibreChat, gives people a place to ask questions and read answers. The agent
   appears as a model in the application, using an OpenAI-compatible chat interface. See
   [Connect LibreChat](../guides/librechat.md).
-- **Another agent** can delegate the WFO part of a larger task through A2A (Agent-to-Agent). A planner could combine
+- **Another agent** can delegate the WFO part of a larger task through A2A. A planner could combine
   an answer about WFO subscriptions with information from an inventory agent responsible for NetBox. See
-  [Use the agent from an A2A planner](../guides/a2a-planner.md).
+  [Connect another agent over A2A](../guides/a2a-planner.md).
 - **Your own web frontend** can display the conversation and results as part of your application. AG-UI carries
   the events the frontend needs to show the agent's progress and answers. See
   [Build a frontend with AG-UI](../guides/ag-ui.md).
@@ -86,8 +122,9 @@ own tools. Connecting directly to Core puts the calling client in charge of choo
 the agent lets it interpret the question and coordinate those operations. The
 [endpoint reference](../reference/endpoints.md) describes each interface and its supported features.
 
-## The agent needs approval before starting workflows
+## The agent needs approval before starting workflows [TODO]
 
+<a id="the-agent-needs-approval-before-starting-workflows"></a>
 <a id="why-workflows-need-approval"></a>
 
 <a id="workflow-form-fill"></a>
@@ -98,8 +135,8 @@ operations that create, change or delete services or start, resume or abort work
 consequences. A model can misunderstand a request or choose the wrong workflow, so it should propose changes for
 a person to approve before they are carried out.
 
-The model can select a workflow. On every interface, automatically discovered Core tools must be explicitly declared read-only.
-Core's built-in workflow write tools stay hidden during automatic discovery, and AG-UI frontend tools are not exposed.
+The model can select a workflow. Where the form-fill skill runs, on A2A and on the OpenAI-compatible `/v1` endpoint
+that LibreChat uses, Core's workflow write tools are hidden from the model and AG-UI frontend tools are not exposed.
 A separate form-handling path
 collects the person's answers, has Core validate them and asks for explicit approval before starting the workflow.
 This is the agent's human-in-the-loop (HITL) boundary. Core continues to own the validation and execution; the agent
@@ -109,33 +146,15 @@ This restriction applies to the model's control over services and workflows. The
 conversation history and query results, and the form handler can start a workflow after receiving approval.
 The calling client is responsible for collecting that approval from a person and forwarding it faithfully.
 
-Trusted capability code can explicitly expose selected mutating tools, including Core writes, through a
-[capability mutation bypass](../reference/runtime.md#capability-mutation-bypass). Those tools are callable by the
-model while that capability is active. The capability author must enforce any approval or authorization needed;
-the bypass does not add a confirmation step. The built-in workflow form path keeps its existing approval.
+AG-UI and the agent's own MCP endpoint run without the form-fill skill, so this boundary does not apply there: the
+model behind them can call Core's write tools directly, without approval. Use these endpoints for questions, and start
+workflows through A2A or LibreChat. See [Read tools and write tools](../reference/runtime.md#read-tools-and-write-tools).
 
 This requires a client that can present questions and approval: LibreChat or an A2A planner with support for human
 input. The MCP and AG-UI interfaces do not currently offer workflow forms. See
 [Start workflows from chat](../guides/workflows-from-chat.md) for setup and
 [Runtime behaviour](../reference/runtime.md#workflow-forms) for the form-handling details.
 
-## Working with other systems
-
-The agent's tool connection is to Orchestrator Core. Information from another system can be made available through
-a tool in your orchestrator, or through a separate agent that a planner calls alongside the WFO agent. The first
-approach keeps related operations together in WFO; the second gives each system its own agent and lets the planner
-combine their answers. See [Add your own tools, services and agents](../guides/own-tools.md).
-
-Connecting another system does not automatically extend the WFO agent's approval boundary to it. Another agent
-can have tools that change that system directly. Custom Core tools declared read-only become available automatically,
-without an approval step. Their authors are responsible for making that declaration accurate; the agent trusts
-Core's annotations and does not inspect endpoint implementations. Tools marked as writes or missing a read-only
-declaration are blocked. Approval controls need to be part of each integration. We recommend
-keeping tools read-only or putting mutating operations behind explicit human approval, following the same principle
-as WFO workflows.
-
-Optional observability services, such as Langfuse, help you understand what happened during a request. When enabled,
-their traces can include prompts and tool results, adding another destination for conversation data. Embedding
-services used for search are connected to Core, which manages the search index. See
-[Security and observability](../guides/security-observability.md) and
-[Core's AI search reference](https://workfloworchestrator.org/orchestrator-core/reference-docs/ai-search/).
+The boundary covers only Core's three workflow write tools, which the gate hides by name. A custom tool you add to
+Core, or another agent the planner calls, gets no approval step from this agent, so build approval into each
+integration or keep those tools read-only. See [Add your own tools, services and agents](../guides/own-tools.md).

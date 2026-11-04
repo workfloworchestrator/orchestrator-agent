@@ -1,10 +1,11 @@
 # Plugins
 
-Each capability of the agent is a plugin: a Markdown file with YAML frontmatter, shipped in the agent under
+Each plugin is loaded as one [capability](../architecture/index.md#capabilities) of the agent: a Markdown file with YAML frontmatter, shipped in the agent under
 `capabilities/plugins/`. The body is the prompt. The plugins describe *what* to do and the tool descriptions served by
-Orchestrator Core describe *how* to use each tool. See [How the agent fits into WFO](../architecture/index.md) for the design.
+Orchestrator Core describe *how* to use each tool. See [How the agent fits on top of Orchestrator Core](../architecture/index.md) for the design.
 
-All plugins are always on. Every plugin is also advertised as a skill in the A2A agent card.
+All built-in plugins are always on. The workflow plugin is present only where the form-fill skill runs: A2A and `/v1`.
+Every plugin is also advertised as a skill in the A2A agent card, unless it sets `advertise: false`.
 
 | Plugin | Tools from Orchestrator Core | Output |
 | --- | --- | --- |
@@ -61,11 +62,10 @@ Example: *Start the terminate workflow for subscription abc123.*
 | --- | --- |
 | `id` | Name of the plugin |
 | `description` | Shown in the A2A agent card |
+| `advertise` | `true` (the default) to advertise the plugin as a skill in the A2A agent card |
 | `a2a_tags`, `examples` | Tags and example prompts for the A2A skill |
-| `defer_loading` | `false` for always on, `true` to load on demand together with its tools |
-| `tools` | The tools the plugin owns for result mapping and loading; ownership does not grant mutation access |
+| `defer_loading` | `false` for always on, `true` to load on demand: the instructions and the tools stay hidden until the model loads the [capability](../architecture/index.md#capabilities) |
+| `tools` | The tools the plugin owns, for result mapping and deferred loading |
 | `artifact` | Maps the tool results to `query`, `data` or `export` output. Omit for instructions only |
 
-For selected mutations, implement a Python capability using the explicit
-[mutation bypass](runtime.md#capability-mutation-bypass). See
-[Teach the agent your domain](../guides/domain-context.md) for how to change the behaviour of the agent.
+See [Teach the agent your domain](../guides/domain-context.md) for how to change the behaviour of the agent.

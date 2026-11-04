@@ -15,12 +15,12 @@
    URL. The agent also puts a rendered table or chart in the text of the answer, so a client that only shows text
    still shows the result.
 
-The AG-UI endpoint runs the agent without the workflow form-fill skill, and the write tools of Orchestrator Core stay
-reachable only through that skill. To start workflows from chat, see
+The AG-UI endpoint runs the agent without the workflow form-fill skill, so it has no approved path to start workflows
+and its model can call the write tools of Orchestrator Core directly. To start workflows from chat, see
 [Start workflows from chat](workflows-from-chat.md).
 
-Tools supplied by the frontend in `RunAgentInput.tools` are not available to the model. Its tools come from the
-Core tools explicitly annotated as read-only.
+Tools supplied by the frontend in `RunAgentInput.tools` are not available to the model. Its tools come from
+Orchestrator Core.
 
 ## Verify it works
 

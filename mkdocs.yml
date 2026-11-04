@@ -9,7 +9,7 @@ nav:
   - Guides:
       - Connect LibreChat: guides/librechat.md
       - Use MCP clients: guides/mcp-clients.md
-      - Use the agent from an A2A planner: guides/a2a-planner.md
+      - Connect another agent over A2A: guides/a2a-planner.md
       - Build a frontend with AG-UI: guides/ag-ui.md
       - Start workflows from chat: guides/workflows-from-chat.md
       - Use your own LLM: guides/own-llm.md
@@ -18,7 +18,7 @@ nav:
       - Security and observability: guides/security-observability.md
       - Benchmark prompt and model changes: guides/evals.md
   - Architecture:
-      - How the agent fits into WFO: architecture/index.md
+      - How the agent fits on top of Orchestrator Core: architecture/index.md
       - How we evaluate the agent: architecture/evaluation.md
       - Running in your own stack: architecture/production.md
   - Reference:

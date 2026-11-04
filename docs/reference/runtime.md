@@ -1,7 +1,7 @@
 # Runtime behaviour
 
 This reference describes the agent's implementation and checks. For the roles of the connected systems, see
-[How the agent fits into WFO](../architecture/index.md).
+[How the agent fits on top of Orchestrator Core](../architecture/index.md).
 
 ## Components
 
@@ -41,66 +41,42 @@ Most tools only read: search, aggregate, look up an entity. Orchestrator Core al
 changes: `create_workflow`, `resume_workflow_process` and `abort_workflow_process`.
 
 These write tools are part of the MCP server of Orchestrator Core, so any MCP client that connects to it directly
-can call them. The Orchestrator Agent excludes them from automatic discovery. Its built-in workflow capability
-starts workflows through the separate approved path described in [Workflow forms](#workflow-forms).
+can call them. What the Orchestrator Agent does with them depends on the interface:
 
-Every interface filters Core's tools by their MCP annotations, using `orchestrator_agent/tool_policy.py`:
-
-| Declaration | Access through automatic discovery |
+| Interface | Write tools |
 | --- | --- |
-| `readOnlyHint: true` (a boolean) | Available, including newly discovered custom tools |
-| `readOnlyHint: false` | Blocked |
-| Missing, null or malformed declaration | Blocked |
+| A2A and `/v1` | Hidden from the model by the write tool gate. Both serve the same agent, and workflows start only through the approved path described in [Workflow forms](#workflow-forms). |
+| AG-UI and agent `/mcp` | Not hidden. These endpoints run without the form-fill skill and without the write tool gate, so the model can call every tool that Core exposes. |
 
-The known workflow write tools remain blocked during automatic discovery even if incorrectly marked read-only. Core cannot supply tools
-under the names reserved for local orchestration. Local form handoff and capability loading are provided by the
-agent itself and need no MCP annotations. AG-UI frontend tools are excluded.
+The gate hides a fixed list of tool names. It does not look at the annotations of a tool, and it does not inspect what
+an endpoint does. A custom route tagged `agent-exposed` is therefore visible to the model, whether or not it is marked
+read-only. Conversation persistence and stored search results also write to PostgreSQL.
 
-This policy trusts the configured Core server and its authors to annotate implementations accurately. It does
-not inspect endpoint code or prevent a falsely marked read tool from changing business state. Adding a tagged
-custom endpoint with `openapi_extra=READONLY_TOOL` makes it callable automatically once discovered; exposing it
-does not add a human approval step. Conversation persistence and stored search results still write to PostgreSQL.
-
-### Capability mutation bypass
-
-Trusted Python capability code can return `allow_capability_mutations(toolset, tool_names={...})` from
-`get_toolset()`. It exposes only the selected tool names, including local functions or Core write tools, while
-the registered capability is active. Deferred capabilities must be loaded first. Unselected tools remain blocked.
-
-The write gate requires both the explicit bypass marker and the framework's registered capability owner.
-Returning the wrapper as an ordinary agent or run toolset grants no bypass. Core metadata cannot establish
-capability ownership; frontend tools remain excluded. Reserved local orchestration names cannot be selected.
-Declaring ownership in a Markdown plugin's `tools` field does not enable mutation access.
-
-This bypass permits direct model invocation and does not add human confirmation. The capability author must
-enforce the required approval and authorization. It does not change the built-in workflow form capability's
-approval flow. See [Expose selected mutations through a capability](../guides/own-tools.md#expose-selected-mutations-through-a-capability)
-for an example.
-
-!!! danger "Connecting the write tools yourself"
-    You can still connect these tools to your own agent or MCP client, at your own discretion. We do not advise it:
-    the model can then change your inventory without the approval of a person. If you do, let the client ask for
-    confirmation before each call. The tools carry hints for this: `abort_workflow_process` is marked destructive,
+!!! danger "Write tools without approval"
+    Where the write tools are not hidden, the model can change your inventory without the approval of a person. This
+    holds for AG-UI and the agent `/mcp`, and for your own agent or MCP client when you connect it to Core. We advise
+    against it: start workflows through A2A or LibreChat, or let the client ask for confirmation before each call. The tools carry hints for this: `abort_workflow_process` is marked destructive,
     and none of the three is marked read-only.
 
 ## Plugins and guards
 
 A [plugin](plugins.md) is a Markdown file with a prompt and a few lines of frontmatter. It declares the
 tools it owns and, optionally, how their results are shown. The built-in plugins are search, aggregate, entity,
-export and workflow. Each one becomes a capability of the agent and a skill in the A2A agent card.
+export and workflow. Each one becomes a [capability](../architecture/index.md#capabilities) of the agent and a skill
+in the A2A agent card.
 
 Ownership of a tool drives two things. The results of the tool are mapped to the declared output type: a query result
 for a table or chart, a data result for one entity, or an export. And when a plugin is set to load on demand, its
-tools stay hidden together with its instructions until the model loads it. Allowed tools owned by no plugin are always
+tools stay hidden together with its instructions until the model loads it. Tools owned by no plugin are always
 available.
 
-A few guards hold for all tools, so they are not part of a plugin:
+A few guards hold for all tools, so they are not part of a plugin. They are capabilities too, written in Python instead
+of Markdown:
 
 - The **filter path guard** requires that a call with filters or a grouping is preceded by the discovery of the valid
   filter paths. Paths are specific to a database and must not be guessed.
-- The **write tool gate** restricts model tools on every interface to declared reads and local orchestration,
-  with an explicit selected-tool exception for active registered capabilities and no frontend exception.
-  See [Read tools and write tools](#read-tools-and-write-tools).
+- The **write tool gate**, on A2A and `/v1` (the agent with the form-fill skill), hides the workflow write tools of Core from the model, so workflows start only
+  through the form-fill skill. See [Read tools and write tools](#read-tools-and-write-tools).
 - **History trimming** keeps a sliding window of the conversation.
 
 Tables and charts are **rendered blocks**: the agent builds a Markdown table or a Mermaid chart from the result in code
@@ -129,7 +105,8 @@ interprets what a person typed in words into a value, which Orchestrator Core va
 Approval is a structured response matching the pending request. The agent trusts its calling client to obtain
 that response from a person; the protocol response itself does not prove human interaction.
 
-The MCP and AG-UI endpoints run without this skill, so they have neither the workflow plugin nor the write tools.
+The MCP and AG-UI endpoints run without this skill, so they have neither the workflow plugin nor the write tool gate.
+The model behind them can call the write tools of Core directly.
 
 ## Conversation persistence
 
