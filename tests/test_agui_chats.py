@@ -220,6 +220,7 @@ async def test_the_run_result_becomes_the_threads_memory():
     [
         pytest.param(_stored(SearchState(owner="alice")), "bob", id="someone-elses"),
         pytest.param(_stored(SearchState(owner="alice")), None, id="owned-but-anonymous-caller"),
+        pytest.param(_stored(SearchState()), "alice", id="unowned-to-a-signed-in-caller"),
         pytest.param(_stored(SearchState(), agent_type="a2a"), "alice", id="another-routes"),
     ],
 )
@@ -235,21 +236,6 @@ async def test_a_thread_that_is_not_the_callers_is_refused(mock_adapter_cls, moc
     db_session.add.assert_not_called()
 
 
-@pytest.mark.asyncio
-@patch("orchestrator_agent.adapters.ag_ui.worker.PostgresStatePersistence")
-@patch("orchestrator_agent.adapters.ag_ui.worker._AGUIAdapter")
-async def test_an_unowned_thread_of_this_route_becomes_the_callers(mock_adapter_cls, mock_persistence_cls):
-    _persistence(mock_persistence_cls, _stored(SearchState(), agent_type="search"))
-    _adapter(mock_adapter_cls)
-    db_session = MagicMock()
-    db_session.get.return_value = None
-
-    stream = await AGUIWorker.run_request(_agent(), _run_input(), db_session, owner="alice")
-    _ = [chunk async for chunk in stream]
-
-    assert mock_adapter_cls.call_args.kwargs["deps"].state.owner == "alice"
-
-
 # --- the API -------------------------------------------------------------------------------------------------------
 
 
@@ -257,7 +243,10 @@ async def test_an_unowned_thread_of_this_route_becomes_the_callers(mock_adapter_
 def client():
     app = FastAPI()
     app.include_router(chats.router, prefix="/chats")
-    with patch("orchestrator_agent.api.endpoints.chats.db") as mock_db:
+    with (
+        patch("orchestrator_agent.api.endpoints.chats.db") as mock_db,
+        patch("orchestrator_agent.api.endpoints.chats.subject_of", return_value=None),  # no signed-in caller
+    ):
         mock_db.session = MagicMock()
         yield TestClient(app)
 
@@ -306,17 +295,26 @@ def test_a_chats_messages_come_as_agui_messages(client):
 
 
 @pytest.mark.parametrize(
-    ("thread", "status"),
+    ("thread", "subject", "status"),
     [
-        pytest.param(None, 404, id="unknown"),
-        pytest.param(StoredThread("t", "a2a", datetime.now(UTC), SearchState()), 404, id="another-routes"),
+        pytest.param(None, None, 404, id="unknown"),
+        pytest.param(StoredThread("t", "a2a", datetime.now(UTC), SearchState()), None, 404, id="another-routes"),
         pytest.param(
-            StoredThread("t", AGENT_TYPE, datetime.now(UTC), SearchState(owner="alice")), 403, id="someone-elses"
+            StoredThread("t", AGENT_TYPE, datetime.now(UTC), SearchState(owner="alice")), "bob", 403, id="someone-elses"
+        ),
+        pytest.param(
+            StoredThread("t", AGENT_TYPE, datetime.now(UTC), SearchState(owner="alice")), None, 403, id="anonymous"
+        ),
+        pytest.param(
+            StoredThread("t", AGENT_TYPE, datetime.now(UTC), SearchState()), "alice", 403, id="unowned-to-signed-in"
         ),
     ],
 )
-def test_a_chat_that_is_not_the_callers_is_not_served(client, thread, status):
-    with patch("orchestrator_agent.api.endpoints.chats.load_thread", return_value=thread):
+def test_a_chat_that_is_not_the_callers_is_not_served(client, thread, subject, status):
+    with (
+        patch("orchestrator_agent.api.endpoints.chats.load_thread", return_value=thread),
+        patch("orchestrator_agent.api.endpoints.chats.subject_of", return_value=subject),
+    ):
         assert client.get("/chats/t").status_code == status
         assert client.delete("/chats/t").status_code == status
 

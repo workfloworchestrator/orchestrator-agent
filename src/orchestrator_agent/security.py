@@ -149,10 +149,15 @@ class AuthMiddleware:
 
 
 def subject_of(request: Request) -> str | None:
-    """The subject of the person the middleware authenticated, or None (OAuth2 off, or no subject claim).
+    """The subject of the person the middleware authenticated, or None when OAuth2 is off.
 
-    Where a route binds a conversation to a person (AG-UI), this is the owner it binds to.
+    Where a route binds a conversation to a person (AG-UI), this is the owner it binds to. With OAuth2 on, a token
+    without a subject is refused rather than read as having no owner.
     """
     user = getattr(request.state, "user", None)
     subject = user.get("sub") if isinstance(user, Mapping) else None
-    return str(subject) if subject else None
+    if subject:
+        return str(subject)
+    if oauth2lib_settings.OAUTH2_ACTIVE:
+        raise HTTPException(status_code=401, detail="Token has no subject")
+    return None

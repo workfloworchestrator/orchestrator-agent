@@ -274,14 +274,13 @@ class AGUIWorker:
 
     @staticmethod
     def _owned(thread: StoredThread | None, owner: str | None) -> SearchState:
-        """The thread's state for this caller: a new thread, or one of theirs; an unowned one of this route becomes theirs."""
+        """The thread's state for this caller: a new thread, or one that is theirs."""
         if thread is None:
             return SearchState(owner=owner)
         if thread.agent_type not in AGUI_AGENT_TYPES:
             raise ThreadForbiddenError(f"thread {thread.thread_id} belongs to the {thread.agent_type} route")
-        if thread.state.owner is not None and thread.state.owner != owner:
-            raise ThreadForbiddenError(f"thread {thread.thread_id} belongs to someone else")
-        thread.state.owner = owner
+        if thread.state.owner != owner:
+            raise ThreadForbiddenError(f"thread {thread.thread_id} is not the caller's")
         return thread.state
 
     @staticmethod

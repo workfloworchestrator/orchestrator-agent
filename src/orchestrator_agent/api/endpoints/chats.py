@@ -48,11 +48,11 @@ def _summary(thread: StoredThread) -> ChatSummary:
 
 
 def _mine(request: Request, thread_id: str) -> StoredThread:
-    """The thread, when it is this route's and the caller's (an unowned one counts as theirs)."""
+    """The thread, when it is this route's and the caller's."""
     thread = load_thread(db.session, thread_id)
     if thread is None or thread.agent_type not in AGUI_AGENT_TYPES:
         raise HTTPException(status_code=404, detail="No such chat")
-    if thread.state.owner is not None and thread.state.owner != subject_of(request):
+    if thread.state.owner != subject_of(request):
         raise HTTPException(status_code=403, detail="Not your chat")
     return thread
 
