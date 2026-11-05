@@ -42,6 +42,27 @@ class RenderedBlock(BaseModel):
         return self.content
 
 
+class ChartPoint(BaseModel):
+    """One category of a distribution and the value plotted for it."""
+
+    label: str
+    value: float | int
+
+
+class ChartData(BaseModel):
+    """A grouped aggregation as data a client draws itself (the popup), beside its Mermaid rendering.
+
+    ``kind`` is core's ``visualization`` hint (pie, bar or line); ``metric`` names the aggregation plotted
+    and ``title`` says what it is grouped by. A pie is a part-to-whole hint, which a client is free to
+    draw as bars.
+    """
+
+    kind: Literal["pie", "bar", "line"]
+    title: str
+    metric: str
+    points: list[ChartPoint]
+
+
 class ToolArtifact(BaseModel):
     """Base metadata for result-producing tools.
 
@@ -60,6 +81,7 @@ class QueryArtifact(ToolArtifact):
     visualization_type: VisualizationType = Field(default_factory=VisualizationType)
     search_type: str = ""
     rendered_block: RenderedBlock | None = None
+    chart: ChartData | None = None  # the rendered_block's data, for a client that draws its own charts
 
 
 class DataArtifact(ToolArtifact):

@@ -21,15 +21,29 @@ from pydantic_ai.models import Model
 from orchestrator_agent.form_fill.capability import FormFillCapability
 from orchestrator_agent.form_fill.interpret import Interpreter, ModelInterpreter
 from orchestrator_agent.form_fill.skill import CallTool, FormFillSkill
+from orchestrator_agent.form_fill.widgets import CoreApi, Fetch, api_base
+from orchestrator_agent.settings import agent_settings
 from orchestrator_agent.state import Approval, AskField, FormInput, FormReply, Reply
 
 
-def build_form_fill_skill(model: Model | str | None = None) -> FormFillSkill:
-    """The skill as configured, with ``model`` interpreting what a person typed for a field when core rejected it.
+def build_form_fill_skill(
+    model: Model | str | None = None,
+    *,
+    fetch: Fetch | None = None,
+) -> FormFillSkill:
+    """The skill as configured, with ``model`` reading what a person typed where a value was expected.
 
-    The interpreter is one protocol attribute; the Jev branch puts its decision engine behind the same protocol.
+    ``model`` interprets typed answers core rejected and chooses the option typed words mean for a long-list
+    widget field. A field's options are read from the ``optionsSource`` it carries and fetched from core's API,
+    the origin of its MCP endpoint unless configured otherwise, as the person asking.
     """
-    return FormFillSkill(interpret=ModelInterpreter(model) if model is not None else None)
+    reader = ModelInterpreter(model) if model is not None else None
+    base = api_base(agent_settings.WFO_CORE_MCP_URL, agent_settings.WFO_CORE_API_URL)
+    return FormFillSkill(
+        interpret=reader,
+        fetch=fetch or CoreApi(base, allowed_hosts=agent_settings.WFO_OPTIONS_HOSTS),
+        choose=reader,
+    )
 
 
 __all__ = [

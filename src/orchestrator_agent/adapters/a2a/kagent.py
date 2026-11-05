@@ -45,6 +45,7 @@ from google.protobuf import json_format
 from pydantic import BaseModel, Field, TypeAdapter, ValidationError
 
 from orchestrator_agent.form_fill.pending import PendingAsk, answered_values, pending_approval, pending_ask
+from orchestrator_agent.form_fill.session import paused
 from orchestrator_agent.state import Approval, AskField, Decision, FormFillSession, FormInput, Reply
 
 logger = structlog.get_logger(__name__)
@@ -110,9 +111,14 @@ _RESPONSE: TypeAdapter[HITLResponse] = TypeAdapter(Annotated[HITLResponse, Field
 # --- outbound: a skill stop -> the extension payload ------------------------------------------------
 
 
+def _worded(field: AskField) -> str:
+    """The question as kagent shows it: its card has no description, so a hint follows the question."""
+    return f"{field.question} — {field.hint}" if field.hint else field.question
+
+
 def ask_request(request_id: str, ask: Sequence[AskField]) -> tuple[AskUserRequest, PendingAsk]:
     """An ``ask_user_request`` for the skill's ``AskField``s, plus what to remember for the answer."""
-    questions = [HITLQuestion(question=f.question, choices=list(f.choices), multiple=f.multiple) for f in ask]
+    questions = [HITLQuestion(question=_worded(f), choices=list(f.choices), multiple=f.multiple) for f in ask]
     return AskUserRequest(id=request_id, questions=questions), pending_ask(request_id, ask)
 
 
@@ -221,8 +227,7 @@ def pause(
         payload, pending = approval_request(request_id, reply.approval)
     else:
         payload, pending = ask_request(request_id, reply.ask or [])
-    session.pending = pending.model_dump(mode="json")
-    session.unseen = answered
+    paused(session, pending, unseen=answered)
     return payload
 
 

@@ -52,7 +52,7 @@ async def _run(agent: Agent, text: str, state: SearchState, given: FormInput | N
     return await agent.run(text, deps=StateDeps(state))
 
 
-ANSWERS = FormInput(values={"customer_name": "UT", "speed": "10000"})
+ANSWERS = FormInput(values={"customer_name": "UA", "speed": "10000"})
 
 
 class TestFormFillCapability:
@@ -125,7 +125,7 @@ class TestFormFillCapability:
         agent, calls = _agent(FormFillSkill(), broken, _text("model answer"))
         session = FormFillSession(workflow_key="create_demo_lightpath", values={"speed": "10000"})
         state = SearchState(form_fill=session.model_copy(deep=True))
-        result = await _run(agent, "Human input supplied", state, FormInput(values={"customer_name": "UT"}))
+        result = await _run(agent, "Human input supplied", state, FormInput(values={"customer_name": "UA"}))
         assert result.output == "model answer" and len(calls) == 1
         assert state.form_fill == session and state.form_reply is None
 

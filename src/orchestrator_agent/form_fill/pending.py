@@ -37,6 +37,8 @@ class PendingAsk(BaseModel):
     id: str
     kind: Literal["ask", "approval"]
     questions: list[AskField] = Field(default_factory=list)  # a page's questions, as the skill asked them
+    # The stop as the transport showed it, for a client that reopens the conversation and must show it again.
+    shown: dict[str, Any] | None = None
 
 
 def pending_ask(request_id: str, ask: Sequence[AskField]) -> PendingAsk:

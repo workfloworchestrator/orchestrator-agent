@@ -140,8 +140,8 @@ else ticket_id only), the agent on A2A (`JEV_API_KEY` set, `gpt-4o` for the non-
 
 | # | Caller sends | Skill replies | Decisions (agent log) |
 |---|---|---|---|
-| 1 | "create a demo lightpath for Universiteit Twente at 10 gig, policer on. Ticket JIRA-4821." | page 1: needs `customer_name`; filled: product, speed 10000, speed_policer true | routing intent 1.0 / workflow 1.0; product 0.86; speed 1.0; policer 1.0 |
-| 2 | `customer_name: Universiteit Twente` + `ticket_id: JIRA-4821` | page 2: needs `redundancy` (options listed); ticket_id already taken | redundancy → not specified |
+| 1 | "create a demo lightpath for Universiteit Alder at 10 gig, policer on. Ticket JIRA-4821." | page 1: needs `customer_name`; filled: product, speed 10000, speed_policer true | routing intent 1.0 / workflow 1.0; product 0.86; speed 1.0; policer 1.0 |
+| 2 | `customer_name: Universiteit Alder` + `ticket_id: JIRA-4821` | page 2: needs `redundancy` (options listed); ticket_id already taken | redundancy → not specified |
 | 3 | `redundancy: protected` | summary of all six values, asks to confirm | — |
 | 4 | `yes` | "Started workflow … Process id …" | approve 1.0 |
 | 5 | "how many workflows are there?" | model path (aggregate + artifact) | routing intent other 1.0 |
@@ -692,7 +692,7 @@ the user's OpenID token on the request that follows a long pause.
 4. **An edit stop**: a validated answer is never asked again, so a correction means rejecting and
    starting over. A stop that asks every field again (an empty answer keeps the value) would give a
    correction path without reading text.
-5. **An agent-facing form page in core** (core PR, then a version bump here): `get_workflow_form` returns
+5. **An agent-facing form page in core** — done (core `feat/form-schema-contract`, agent `feat/read-core-form-spec`) (core PR, then a version bump here): `get_workflow_form` returns
    the raw pydantic-forms JSON schema, written for a browser (`$ref` / `allOf` / nullable `anyOf`,
    `uniforms` widget hints, display-only `format` markers, enum labels in a side table, nested `$defs`
    for structured fields) and validation errors as a Python-repr'd dict inside the MCP error text. Core
@@ -700,9 +700,9 @@ the user's OpenID token on the request that follows a long pause.
    kind, required, display-only, default, options as value/label pairs, shape of structured fields — and
    errors as a list of field and message. Everything that undoes the browser schema and the error text on
    the agent side is isolated in **`form_fill/core_bridge.py`**: its schema-reading half is deleted and
-   `page_model` is built from core's field spec instead; the built model, and everything that works from it
+   `page_model` is built from core's page schema, one self-contained document per page, instead; the built model, and everything that works from it
    (the interpreter's output type, the stops, the questions, the summary), stays as it is.
-6. **`list_workflows` without a filter** (core): the MCP tool rejects a call with no argument (HTTP 422,
+6. **`list_workflows` without a filter** — done (same PRs) (core): the MCP tool rejects a call with no argument (HTTP 422,
    `body: Field required`), although its description says "leave empty for all". The agent asks for the
    catalogue in two calls (`is_task` false, then true) until that is fixed.
 7. **Prefilling from the opening request**: nothing the request states is read at the handoff; each page
