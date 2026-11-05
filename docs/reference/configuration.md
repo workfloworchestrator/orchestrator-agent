@@ -10,7 +10,7 @@ The agent is configured through environment variables. Copy `.env.example` from 
 
 | Variable | Default | Description |
 | --- | --- | --- |
-| `DATABASE_URI` | *(required)* | PostgreSQL connection URI for the WFO database. A bare `postgresql://` scheme is coerced to `postgresql+psycopg://` |
+| `DATABASE_URI` | *(required)* | PostgreSQL connection URI for the WFO database. Use the `postgresql+psycopg://` scheme: a bare `postgresql://` selects the psycopg2 driver, which is not installed, so the agent fails to start |
 | `WFO_CORE_MCP_URL` | `http://localhost:8080/mcp` | URL of the Orchestrator Core MCP server that serves the domain tools the agent calls |
 | `BASE_URL` | `http://localhost:8080` | Public URL of the agent, advertised in the A2A agent card |
 
@@ -22,6 +22,9 @@ The agent is configured through environment variables. Copy `.env.example` from 
 | `AGENT_API_BASE` | *(none)* | Base URL of an OpenAI-compatible provider, or the Azure endpoint |
 | `AGENT_API_KEY` | *(none)* | API key for the provider |
 | `AGENT_API_VERSION` | *(none)* | API version for Azure OpenAI, for example `2024-12-01-preview` |
+
+When `AGENT_API_BASE`, `AGENT_API_KEY` and `AGENT_API_VERSION` are all unset, the provider reads its own environment
+variable for the key, such as `OPENAI_API_KEY` or `ANTHROPIC_API_KEY`.
 
 See [Use your own LLM](../guides/own-llm.md) for examples.
 
@@ -38,12 +41,14 @@ See [Teach the agent your domain](../guides/domain-context.md).
 | Variable | Default | Description |
 | --- | --- | --- |
 | `OAUTH2_ACTIVE` | `true` | Authenticate incoming requests with OIDC |
+| `OAUTH2_AUTHORIZATION_ACTIVE` | `true` | Authorize authenticated incoming requests with an Open Policy Agent (OPA). Only applies when `OAUTH2_ACTIVE=true`. Set to `false` if you do not run OPA |
+| `OPA_URL` | *(none)* | OPA decision endpoint. Required when `OAUTH2_ACTIVE=true` and `OAUTH2_AUTHORIZATION_ACTIVE=true`, otherwise every request fails with 503 |
 | `OAUTH2_OUTBOUND_ACTIVE` | *(unset)* | Authenticate outgoing requests to Orchestrator Core with OAuth2 client credentials. When unset it follows `OAUTH2_ACTIVE` |
 | `OIDC_BASE_URL` | *(none)* | Base URL of the OIDC provider. Required when `OAUTH2_ACTIVE=true` |
 | `OIDC_CONF_URL` | *(none)* | OIDC discovery document URL. Required when `OAUTH2_ACTIVE=true` |
-| `OAUTH2_RESOURCE_SERVER_ID` | *(none)* | OAuth2 client id. Required when `OAUTH2_ACTIVE=true` |
-| `OAUTH2_RESOURCE_SERVER_SECRET` | *(none)* | OAuth2 client secret. Required when `OAUTH2_ACTIVE=true` |
-| `OAUTH2_TOKEN_URL` | *(none)* | Token endpoint for the outgoing client-credentials requests |
+| `OAUTH2_RESOURCE_SERVER_ID` | *(none)* | OAuth2 client id. Required when incoming or outgoing authentication is on |
+| `OAUTH2_RESOURCE_SERVER_SECRET` | *(none)* | OAuth2 client secret. Required when incoming or outgoing authentication is on |
+| `OAUTH2_TOKEN_URL` | *(none)* | Token endpoint for the outgoing client-credentials requests. Required when outgoing authentication is on |
 
 ## Observability
 

@@ -28,9 +28,10 @@ Core makes these operations available as tools through its MCP server. Each tool
 use it, so the model can choose an operation that fits the question. The agent's instructions describe its purpose;
 the knowledge of how to search your orchestrator stays with Core's tools.
 
-Core is also the agent's only tool connection. To bring in another system, expose it as a tool in your orchestrator,
-or give it an agent of its own and let a planner combine both answers. See
-[Add your own tools, services and agents](../guides/own-tools.md).
+Core is also the agent's only tool connection. To bring in another system,
+[expose it as a tool](https://workfloworchestrator.org/orchestrator-core/reference-docs/mcp/#extending) in your
+orchestrator, or give it an agent of its own and let a planner combine both answers. See
+[Connect another service](../guides/connect-service.md).
 
 For example, a question about active subscriptions becomes a search through Core. Core returns matching records,
 and the agent presents them with an explanation. Tables and charts are built from the returned data by the agent,
@@ -115,7 +116,7 @@ agents. These interfaces connect different kinds of callers to the same WFO oper
   the events the frontend needs to show the agent's progress and answers. See
   [Build a frontend with AG-UI](../guides/ag-ui.md).
 - **An MCP client** can use the agent as a tool that answers WFO questions in plain language. This lets an assistant
-  in another application ask the agent for help. See [Use MCP clients](../guides/mcp-clients.md).
+  in another application ask the agent for help. See [Use the agent with MCP](../guides/mcp-clients.md).
 
 There are two distinct MCP connections: the agent calls Core's tools, and an external client can call the agent's
 own tools. Connecting directly to Core puts the calling client in charge of choosing WFO operations. Connecting to
@@ -157,4 +158,5 @@ input. The MCP and AG-UI interfaces do not currently offer workflow forms. See
 
 The boundary covers only Core's three workflow write tools, which the gate hides by name. A custom tool you add to
 Core, or another agent the planner calls, gets no approval step from this agent, so build approval into each
-integration or keep those tools read-only. See [Add your own tools, services and agents](../guides/own-tools.md).
+integration or keep those tools read-only. See [Connect another service](../guides/connect-service.md) and
+[Create your own agent](../guides/create-agent.md).

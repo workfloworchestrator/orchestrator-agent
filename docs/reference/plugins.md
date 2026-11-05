@@ -68,4 +68,14 @@ Example: *Start the terminate workflow for subscription abc123.*
 | `tools` | The tools the plugin owns, for result mapping and deferred loading |
 | `artifact` | Maps the tool results to `query`, `data` or `export` output. Omit for instructions only |
 
-See [Teach the agent your domain](../guides/domain-context.md) for how to change the behaviour of the agent.
+## Customise a plugin
+
+The agent only loads plugins from its own `capabilities/plugins/` directory. You cannot add one from outside, so to
+change a prompt or add a plugin, fork the agent, edit or add a file in that directory, and restart.
+
+A plugin says *what* the agent should do, not *which tool* to call. How each tool is used comes from the tool
+descriptions that Orchestrator Core serves. To change how a tool is used, change its description in Orchestrator
+Core rather than naming the tool in a plugin.
+
+To give the agent knowledge about your identifiers and terminology without forking, see
+[Teach the agent your domain](../guides/domain-context.md).

@@ -71,7 +71,7 @@ For the protocol itself, see the [AG-UI documentation](https://docs.ag-ui.com/).
 
 `/mcp` exposes the agent's own tools to MCP clients. It is a `FastMCP` server from the
 [MCP Python SDK](https://github.com/modelcontextprotocol/python-sdk), over stateless streamable HTTP. See
-[Use MCP clients](../guides/mcp-clients.md).
+[Use the agent with MCP](../guides/mcp-clients.md).
 
 It serves tools only: one per [plugin](plugins.md) plus `ask`. It registers no resources or prompts, and workflow
 plugins are not available here.

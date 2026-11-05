@@ -33,7 +33,8 @@ them in that group, at `http://<core>/api/docs#/agent-exposed`. For each route y
 `operationId`), the description the model reads (the docstring) and the parameters.
 
 The default set is listed in the [MCP server reference](https://workfloworchestrator.org/orchestrator-core/reference-docs/mcp/#usage). To add
-a tool of your own, see [Add your own tools, services and agents](../guides/own-tools.md).
+a tool of your own, see [Extending](https://workfloworchestrator.org/orchestrator-core/reference-docs/mcp/#extending)
+in the MCP server reference.
 
 ## Read tools and write tools
 

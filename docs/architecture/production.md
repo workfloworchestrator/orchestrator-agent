@@ -30,7 +30,7 @@ One short paragraph each: which path to use, what works, what doesn't, and a lin
   [Connect LibreChat](../guides/librechat.md), plus a planned guide for other OpenAI-compatible clients.
 - **Harnesses and IDE agents** (Claude Code, Codex CLI, Cursor, VS Code Copilot, Goose, Claude Desktop) → MCP. When
   to use the agent's MCP and when to use the MCP server of Orchestrator Core.
-  [Use MCP clients](../guides/mcp-clients.md).
+  [Use the agent with MCP](../guides/mcp-clients.md).
 - **Agent platforms and planners** (kagent, docker-agent, other A2A runtimes) → A2A.
   [Connect another agent over A2A](../guides/a2a-planner.md).
 - **Your own app** → AG-UI for a web UI, or the OpenAI SDK for backend scripts and bots.
@@ -71,8 +71,50 @@ Short, one paragraph each, with upstream links:
 
 ## Gateways
 
-- When you need one: several clients, machine callers, quotas, a central audit log.
-- Links to upstream gateway docs and to adopter write-ups.
+### What the example setup does
+
+In the [example orchestrator](https://github.com/workfloworchestrator/example-orchestrator), LibreChat has no A2A
+client, like many chat UIs, portals and services, so it reaches the agents through a small proxy,
+[kagent-a2a-proxy](https://github.com/nren-agents/kagent-a2a-proxy) (the `a2a-proxy` service in
+`docker-compose.agents.yml`). The proxy turns OpenAI chat completions into A2A calls, using a fixed map from model
+name to agent URL. In effect it is a hand-wired gateway for one protocol, one client and no users. That is enough for
+a laptop, but it leaves open questions that matter as soon as you run the agent for real:
+
+- **No identity.** The proxy accepts any API key and Orchestrator Core runs without OAuth, so every request is
+  anonymous. Nothing downstream can decide per user or per agent.
+- **Not the only way in.** LibreChat also calls the MCP servers of Orchestrator Core and NetBox directly, and the
+  agents call each other over A2A. A check you add to the proxy covers only one of those paths.
+- **No limits and no shared trace.** There is no rate limit or budget per caller, and LibreChat, the proxy, the agents
+  and Orchestrator Core each log on their own.
+- **Fixed addresses.** Agent URLs and agent cards point at container addresses, see [Known pitfalls](#known-pitfalls).
+
+### Questions a gateway answers
+
+Once you have real users, machine callers or MCP servers you don't own, every request has to answer the same
+questions. No single agent or MCP server should answer them on its own:
+
+- **Who is calling, and for whom?** A user, an agent acting for a user, or an agent on its own. A shared service
+  account (see [Identity](#identity)) hides the difference and grants more than the caller may do.
+- **Which credential goes to the next hop?** Forwarding the user's token to an MCP server you don't own hands it a
+  credential your own backends accept.
+- **Which agents and tools may the caller see?** MCP lists every tool of a server, including `create_workflow`,
+  unless something filters that list per caller.
+- **How much may the caller spend?** An alert on cost does not stop an agent stuck in a loop; a budget per user and
+  per agent does.
+- **What happened?** One trace from the chat message to the audit log of Orchestrator Core, see
+  [Observability](#observability).
+
+These are the issues you may run into. Virge.io helped develop the Orchestrator Agent and runs it in its own stack. On
+its website it works these issues out as requirements for a gateway, in the blog post
+[Why (y)our agents need a gateway (part 1)](https://virge.io/en/blog/why-your-agents-need-a-gateway-part-1/){target="_blank" rel="noopener"}
+:octicons-link-external-16:.
+
+### When you need one
+
+Put a gateway in front once you have several clients, machine callers, quotas or a central audit log, instead of
+extending the proxy of the example setup. Depending on the traffic this is an API or agent gateway in front of the
+agents and MCP servers, or a model proxy such as LiteLLM between the agents and the model providers. See
+[Write-ups from adopters](#write-ups-from-adopters) for how others did it.
 
 ## Evaluate before you change prompts or models
 
@@ -86,8 +128,14 @@ Short, one paragraph each, with upstream links:
 - A missing `X-Conversation-Id` header, so the agent forgets the conversation.
 - A LibreChat version too old for workflow forms.
 - Harnesses that auto-approve destructive tools of Orchestrator Core.
-- Cost runaway without per-caller limits.
+- Cost runaway without per-caller limits, see [Gateways](#gateways).
+- A client without A2A connected to a planner through a demo proxy that checks no identity, see [Gateways](#gateways).
 
 ## Write-ups from adopters
 
-A neutral list of how organisations run the agent. To be filled once write-ups are public.
+A neutral list of how organisations run the agent.
+
+- Virge.io, which helped develop the Orchestrator Agent and runs it in its own stack:
+  [Why (y)our agents need a gateway (part 1)](https://virge.io/en/blog/why-your-agents-need-a-gateway-part-1/){target="_blank" rel="noopener"}
+  :octicons-link-external-16:. The cross-cutting questions of an agent network, and the requirements for a
+  gateway that answers them.

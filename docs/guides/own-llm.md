@@ -1,8 +1,7 @@
 # Use your own LLM
 
-!!! info "Goal"
-    Run the agent on a model of your choice: hosted (OpenAI, Azure OpenAI), self-hosted (for example Ollama) or behind
-    a proxy such as LiteLLM.
+You can run the agent on a model of your choice: hosted (OpenAI, Azure OpenAI), self-hosted (for example Ollama)
+or behind a proxy such as LiteLLM.
 
 ## Steps
 
@@ -43,9 +42,15 @@ tools or arguments.
 
 ## Verify it works
 
-Ask a few questions through [LibreChat](librechat.md) or the [demo clients](mcp-clients.md#verify-it-works). To compare
-models on the same questions, use the golden set in [Benchmark prompt and model changes](evals.md).
+Ask a few questions through [LibreChat](librechat.md) or the [demo clients](mcp-clients.md#verify-it-works).
+
+## Benchmark the model
+
+A model that answers a few questions well can still pick the wrong tools or arguments on others. Before you switch
+models, run the golden set of the agent on both the current and the new model and compare the scores. See
+[Benchmark prompt and model changes](evals.md).
 
 ## Reference
 
-[Configuration: model](../reference/configuration.md#model)
+- [Configuration: model](../reference/configuration.md#model)
+- [Benchmark prompt and model changes](evals.md)

@@ -1,4 +1,4 @@
-# Use MCP clients
+# Use the agent with MCP
 
 The agent serves its own tools over MCP at `http://<agent>:8080/mcp`: one per [plugin](../reference/plugins.md)
 (`search`, `aggregate`, `entity`, `export`) plus `ask`. Each takes a question in plain language, so an MCP client such

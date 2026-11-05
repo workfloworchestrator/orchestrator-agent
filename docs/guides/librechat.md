@@ -101,6 +101,14 @@ LibreChat calls the agent from inside its container, so `localhost` is the conta
 - If the agent listens on port 8080 of your machine, keep `http://host.docker.internal:8080/v1`.
 - If the agent runs elsewhere, use an address the container can reach, ending in `/v1`.
 
+!!! warning "Other agents in LibreChat need a front door, not a demo proxy"
+    LibreChat talks to the Orchestrator Agent directly, because the agent speaks OpenAI chat completions. A planner or
+    another agent that speaks only A2A is different: LibreChat has no A2A client, so you need something that
+    translates in between. The example orchestrator uses a small proxy for this that checks no identity and sets no
+    limits. Every request then passes that proxy, so in your own stack it decides who may call which agent and at
+    what cost. See [Reach the planner from your clients](a2a-planner.md#reach-the-planner-from-your-clients) and
+    [Gateways](../architecture/production.md#gateways).
+
 ### 3. Set up sign-in
 
 How users sign in to LibreChat depends on whether the agent checks tokens. See
