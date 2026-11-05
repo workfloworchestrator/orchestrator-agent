@@ -60,7 +60,19 @@ A self-hosted model lets you keep that processing within your infrastructure. Se
 [Use your own LLM](../guides/own-llm.md) for supported connections and setup.
 
 The same applies to tracing. With Langfuse or another tracing backend enabled, prompts and tool results are also sent
-there. See [Security and observability](../guides/security-observability.md).
+there. See [Tracing and observability](observability.md).
+
+### How a question becomes a search
+
+The agent treats an identifier in a question as a search key. It looks for the field that matches and filters on it
+with `like`, which allows for substrings and typos. If no field clearly matches, it ranks results instead. With
+embeddings enabled in Orchestrator Core, it also picks a retriever per question: hybrid for identifiers and names,
+semantic for descriptive questions, and fuzzy otherwise.
+
+What the agent cannot work out are conventions that only your organisation knows, such as which field holds a circuit
+code or what an abbreviation of a product means. The model has never seen them. That knowledge has to come from you,
+as a short domain context added to the system prompt, see
+[How to teach the agent your domain](../guides/domain-context.md).
 
 ## The database stores the conversations
 
@@ -122,6 +134,21 @@ There are two distinct MCP connections: the agent calls Core's tools, and an ext
 own tools. Connecting directly to Core puts the calling client in charge of choosing WFO operations. Connecting to
 the agent lets it interpret the question and coordinate those operations. The
 [endpoint reference](../reference/endpoints.md) describes each interface and its supported features.
+
+The same choice applies to another agent that needs WFO data. Delegating to the Orchestrator Agent over A2A is
+usually better than giving that agent the MCP server of Core as a toolset, because a direct connection gets only the
+raw tools. It misses what the Orchestrator Agent adds on top:
+
+- the [plugins](../reference/plugins.md), which tell the model how to search, aggregate, look up, export and start
+  workflows, and build tables, charts and download links from the results in code;
+- the guards, such as the filter path guard that stops the model from guessing filter paths, and history trimming;
+- the [form-fill skill](../reference/runtime.md#workflow-forms), which walks a workflow form with the person and
+  starts the workflow only after approval. Without it, the model can call the write tools of Core directly, see
+  [Read tools and write tools](../reference/runtime.md#read-tools-and-write-tools);
+- your [domain context](../guides/domain-context.md).
+
+A direct connection still makes sense when the other agent's model should make all the choices itself, for example
+in a harness where a person approves every tool call.
 
 ## The agent needs approval before starting workflows [TODO]
 

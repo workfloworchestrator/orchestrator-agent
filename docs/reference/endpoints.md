@@ -82,4 +82,55 @@ For the protocol itself, see the [MCP documentation](https://modelcontextprotoco
 
 With `OAUTH2_ACTIVE=true` (the default) incoming requests are authenticated with OIDC. With
 `OAUTH2_ACTIVE=false` the agent accepts unauthenticated requests. Calls from the agent to Orchestrator Core
-are controlled separately by `OAUTH2_OUTBOUND_ACTIVE`. See [Configuration](configuration.md#authentication).
+are controlled separately by `OAUTH2_OUTBOUND_ACTIVE`. See [Configuration](configuration.md#authentication) for the
+settings and [Authentication and authorization](../architecture/auth.md) for how the checks fit together.
+
+### Public paths
+
+`GET /health` and `GET /.well-known/agent-card.json` never require a token.
+
+### Responses
+
+| Status | When |
+| --- | --- |
+| 401 | No bearer token was sent |
+| 403 | The identity provider's userinfo endpoint rejected the token, or OPA denied the request. A denial includes the OPA decision id |
+| 503 | The OIDC discovery document or OPA could not be reached, or `OPA_URL` is not set while authorization is on |
+
+### OPA input
+
+With `OAUTH2_AUTHORIZATION_ACTIVE=true` the agent posts this to `OPA_URL` for every request, and continues when
+`result` is `true`:
+
+```json
+{
+  "input": {
+    "...": "the claims returned by the userinfo endpoint",
+    "resource": "/v1/chat/completions",
+    "method": "POST",
+    "arguments": { "path": {}, "query": {}, "json": { "...": "the request body" } }
+  }
+}
+```
+
+An example policy that admits only members of one group, assuming the identity provider returns a `groups` claim:
+
+```rego
+package agent
+
+default allow := false
+
+allow if "network-operators" in input.groups
+```
+
+### User token forwarded to Orchestrator Core
+
+| Endpoint | Token read from | When absent |
+| --- | --- | --- |
+| `POST /v1/chat/completions` | `Authorization` header | service account |
+| `POST /agui` | `Authorization` header | service account |
+| A2A `POST /` | `auth_token` or `authToken` in the message metadata | service account |
+| `/mcp` | not forwarded | always the service account |
+
+The service account uses the OAuth2 client-credentials grant against `OAUTH2_TOKEN_URL`. Its token is cached and
+fetched again when Orchestrator Core answers 401 or 403.

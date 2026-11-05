@@ -21,7 +21,7 @@ instead, follow the [tutorial on the example orchestrator](https://workfloworche
     customer connectivity?* finds subscriptions that don't contain those words, and a search for `amsterdam router`
     finds a subscription described as "AMS core node". The agent then picks a retriever per question: hybrid for
     identifiers and names, semantic for descriptive questions, and fuzzy otherwise. See
-    [Teach the agent your domain](guides/domain-context.md#retrievers).
+    [How a question becomes a search](architecture/index.md#how-a-question-becomes-a-search).
 
 ## 1. Run the agent
 
@@ -53,7 +53,7 @@ OAUTH2_ACTIVE=false
 
 Both the agent and Orchestrator Core default to port 8080, so run one of them on another port or on another host and
 adjust `WFO_CORE_MCP_URL` and `BASE_URL` to match. Keep `OAUTH2_ACTIVE=false` for a local try-out only, see
-[Security and observability](guides/security-observability.md) before you expose the agent. All settings are listed in
+[How to secure the agent](guides/secure-agent.md) before you expose the agent. All settings are listed in
 [Configuration](reference/configuration.md).
 
 At startup the agent checks the tools of the Orchestrator Core MCP server. If a tool it needs is missing, it stops

@@ -26,7 +26,10 @@ The agent is configured through environment variables. Copy `.env.example` from 
 When `AGENT_API_BASE`, `AGENT_API_KEY` and `AGENT_API_VERSION` are all unset, the provider reads its own environment
 variable for the key, such as `OPENAI_API_KEY` or `ANTHROPIC_API_KEY`.
 
-See [Use your own LLM](../guides/own-llm.md) for examples.
+When one of them is set, the `azure:` prefix in `AGENT_MODEL`, or a set `AGENT_API_VERSION`, selects the Azure OpenAI
+provider.
+
+See [How to use your own LLM](../guides/own-llm.md) for examples.
 
 ## Domain context
 
@@ -56,7 +59,7 @@ See [Teach the agent your domain](../guides/domain-context.md).
 | --- | --- | --- |
 | `LANGFUSE_ENABLED` | `false` | Send OpenTelemetry traces to Langfuse. Needs the `langfuse` extra and `LANGFUSE_PUBLIC_KEY`, `LANGFUSE_SECRET_KEY` and `LANGFUSE_HOST` |
 
-See [Security and observability](../guides/security-observability.md).
+See [How to secure the agent](../guides/secure-agent.md) and [How to trace the agent](../guides/tracing.md).
 
 ## LibreChat
 

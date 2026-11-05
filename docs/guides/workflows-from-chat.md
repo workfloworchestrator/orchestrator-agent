@@ -1,9 +1,5 @@
 # Start workflows from chat
 
-!!! info "Goal"
-    Let users start create, modify, terminate and task workflows from a chat, with the questions of the workflow form
-    asked one page at a time and an approval before anything starts.
-
 ## Steps
 
 The `workflow` [plugin](../reference/plugins.md#workflow) is built in and always on. What a client needs is a way to

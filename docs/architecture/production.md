@@ -40,13 +40,13 @@ One short paragraph each: which path to use, what works, what doesn't, and a lin
 ## Identity
 
 - Who holds the user's token on each path: a chat UI forwarding OIDC, a harness sending a bearer header, A2A
-  propagation.
-- MCP caveat: whether the agent's `/mcp` forwards the user's token to Orchestrator Core. To check in the code before
-  writing.
+  propagation. Explained per endpoint in
+  [Authentication and authorization](auth.md#outbound-who-the-agent-acts-as), including that the agent's
+  `/mcp` always calls Orchestrator Core as the service account.
 - Fallback to a service account with client credentials (`OAUTH2_OUTBOUND_ACTIVE`), and why it grants more than the
-  user may do.
+  user may do, see [Why the user's token is better than a service account](auth.md#why-the-users-token-is-better-than-a-service-account).
 - Token exchange (RFC 8693) as an option, depending on your identity provider.
-- Link: [Security and observability](../guides/security-observability.md).
+- Link: [How to secure the agent](../guides/secure-agent.md).
 
 ## Deployment shapes
 
@@ -65,7 +65,8 @@ Short, one paragraph each, with upstream links:
 ## Observability
 
 - Langfuse is built in. Other OpenTelemetry backends work with a small wrapper, see
-  [Trace with another OpenTelemetry backend](../guides/security-observability.md#trace-with-another-opentelemetry-backend).
+  [Tracing and observability](observability.md#langfuse-and-why-switching-is-easy) and
+  [How to trace the agent](../guides/tracing.md).
 - Following one request from the chat trace to the agent trace to the audit log of Orchestrator Core
   (`traceparent`).
 

@@ -1,15 +1,32 @@
-# Use your own LLM
+# How to use your own LLM
 
-You can run the agent on a model of your choice: hosted (OpenAI, Azure OpenAI), self-hosted (for example Ollama)
-or behind a proxy such as LiteLLM.
+This guide shows you how to run the agent on a model of your choice: hosted, self-hosted or behind a proxy. To weigh
+hosted against self-hosted, see [The language model interprets the request](../architecture/index.md#where-your-data-goes).
 
 ## Steps
 
-Set `AGENT_MODEL` in `provider:model` format. Without any other setting, the model string goes straight to
-[pydantic-ai](https://ai.pydantic.dev/models/), which reads the usual environment variable of the provider, such as
-`OPENAI_API_KEY`.
+### 1. Pick a model that calls tools well
 
-For an OpenAI-compatible endpoint, set `AGENT_API_BASE` and `AGENT_API_KEY`:
+The agent works by calling tools, so pick a model with good tool calling. A small local model may pick the wrong
+tools or arguments.
+
+### 2. Benchmark it before you switch
+
+Run the golden set on your current model and on the new one, and compare the scores. See
+[Benchmark prompt and model changes](evals.md).
+
+### 3. Configure the model
+
+=== "Hosted provider"
+
+    Set `AGENT_MODEL` in `provider:model` format and the provider's usual API key variable:
+
+    ```shell
+    AGENT_MODEL=openai:gpt-4o
+    OPENAI_API_KEY=sk-...
+    ```
+
+    See the [pydantic-ai model list](https://ai.pydantic.dev/models/) for the providers and their variables.
 
 === "Ollama"
 
@@ -35,22 +52,15 @@ For an OpenAI-compatible endpoint, set `AGENT_API_BASE` and `AGENT_API_KEY`:
     AGENT_API_VERSION=2024-12-01-preview
     ```
 
-The `azure:` prefix, or setting `AGENT_API_VERSION`, selects the Azure provider.
-
-The agent calls tools, so choose a model that supports tool calling well. A small local model may pick the wrong
-tools or arguments.
+### 4. Restart the agent
 
 ## Verify it works
 
-Ask a few questions through [LibreChat](librechat.md) or the [demo clients](mcp-clients.md#verify-it-works).
-
-## Benchmark the model
-
-A model that answers a few questions well can still pick the wrong tools or arguments on others. Before you switch
-models, run the golden set of the agent on both the current and the new model and compare the scores. See
-[Benchmark prompt and model changes](evals.md).
+1. Ask a question that needs a tool, for example *How many subscriptions are there per status?*, through
+   [LibreChat](librechat.md) or an [MCP client](mcp-clients.md#verify-it-works).
+2. The answer should contain the counts. If the agent answers without them, or the request fails, the model may not
+   support tool calling, or `AGENT_API_BASE` or the key is wrong.
 
 ## Reference
 
 - [Configuration: model](../reference/configuration.md#model)
-- [Benchmark prompt and model changes](evals.md)

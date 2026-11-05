@@ -1,38 +1,35 @@
-# Create your own agent
+# How to create your own agent
 
-Run an agent with its own tools, instructions and model next to the Orchestrator Agent. A planner combines the
-answers of both over [A2A](https://a2a-protocol.org/latest/). Each agent stays responsible for one system. Use this
-when a question needs a system that the Orchestrator Agent does not reach, see
-[Connect another service](connect-service.md).
+This guide shows you how to run an agent for another system next to the Orchestrator Agent, with its own tools,
+instructions and model, so that a planner can combine the answers of both over [A2A](https://a2a-protocol.org/latest/).
+To decide whether you need a separate agent at all, see [How to connect another service](connect-service.md).
 
-An agent that works with the Orchestrator Agent needs three things:
-
-- a runtime that runs the agent loop,
-- tools over MCP, from the MCP servers of the systems it works with,
-- an A2A endpoint with an agent card, so that a planner can find and call it.
-
-## Choose a runtime
-
-| Runtime | Fits | Docs |
-| --- | --- | --- |
-| [docker-agent](https://github.com/docker/docker-agent) | Compose or a VM. An agent is an `agent.yaml` with its model, instructions and toolsets | [docker-agent](https://github.com/docker/docker-agent) |
-| [kagent](https://kagent.dev/) | Kubernetes. Agents and MCP servers are declared as resources | [kagent docs](https://kagent.dev/docs/kagent) |
-| Your own code | Full control over the agent loop, for example with pydantic-ai or the A2A Python SDK | [pydantic-ai A2A](https://ai.pydantic.dev/a2a/), [A2A Python SDK](https://github.com/a2aproject/a2a-python) |
-
-The steps below use docker-agent with Docker Compose. The example is the `inventory-agent` of the
-[example orchestrator](https://github.com/workfloworchestrator/example-orchestrator), which reads NetBox through its
-MCP server. The same steps apply to the other runtimes, in their own configuration format.
+The steps use [docker-agent](https://github.com/docker/docker-agent) with Docker Compose, and the `inventory-agent` of
+the [example orchestrator](https://github.com/workfloworchestrator/example-orchestrator), which reads NetBox through
+its MCP server. You need an MCP server for your system; to run one, see
+[step 1 of How to connect another service](connect-service.md#1-run-an-mcp-server-for-the-service).
 
 ## Steps
 
-### 1. Declare the agent and its tools
+### 1. Choose a runtime
+
+| If you run | Use | Docs |
+| --- | --- | --- |
+| Docker Compose or a VM | docker-agent | [docker-agent](https://github.com/docker/docker-agent) |
+| Kubernetes | kagent | [kagent docs](https://kagent.dev/docs/kagent) |
+| Your own code | pydantic-ai or the A2A Python SDK | [pydantic-ai A2A](https://ai.pydantic.dev/a2a/), [A2A Python SDK](https://github.com/a2aproject/a2a-python) |
+
+The next steps are for docker-agent. With another runtime, make the same choices in its configuration format.
+
+### 2. Declare the agent and its tools
 
 Create a folder for the agent, for example `docker/inventory-agent/`, with an `agent.yaml`:
 
 ```yaml
 agents:
   inventory:
-    model: openai/gpt-4o
+    model: openai/gpt-4o  # or for example anthropic/claude-sonnet-5
+    # Published in the agent card. A planner reads it to decide when to call this agent.
     description: "Read-only NetBox network inventory agent: sites, devices, interfaces, cables, prefixes, IP addresses, VLANs and L2VPNs."
     instruction_file: instructions.md
     toolsets:
@@ -43,34 +40,14 @@ agents:
         allow_private_ips: true  # needed for addresses inside a compose network
 ```
 
-- `model` is the provider and model, for example `anthropic/claude-sonnet-5`. The API key comes from the environment
-  of the container (`OPENAI_API_KEY`, `ANTHROPIC_API_KEY`).
-- `description` is published in the agent card. A planner reads it to decide when to call this agent, so make it
-  accurate and specific.
-- `toolsets` lists the MCP servers the agent uses. docker-agent blocks private addresses unless
-  `allow_private_ips` is set.
+Make the `description` specific: the planner uses it to choose between agents.
 
-To reach WFO from your own agent, delegate to the Orchestrator Agent over A2A rather than adding the MCP server of
-Orchestrator Core as a toolset. A direct connection gets only the raw tools of Core.
+If your agent also needs WFO data, add the Orchestrator Agent as an A2A peer, as in
+[How to connect another agent over A2A](a2a-planner.md#steps). Do not add the MCP server of Orchestrator Core as a
+toolset: the agent would get only the raw tools of Core, without the plugins, guards and workflow approval of the
+Orchestrator Agent. See [Different ways to reach the same agent](../architecture/index.md#different-ways-to-reach-the-same-agent).
 
-??? info "What a direct connection to Core skips"
-    The Orchestrator Agent adds the following on top of the tools of Core. An agent that connects to the MCP server
-    of Core directly has none of it:
-
-    - The [plugins](../reference/plugins.md): the prompts that tell the model how to search, aggregate, look up,
-      export and start workflows, plus the tables, charts and download links built from the results in code. See
-      [Plugins and guards](../reference/runtime.md#plugins-and-guards).
-    - The guards, such as the filter path guard that stops the model from guessing filter paths, and history
-      trimming.
-    - The [form-fill skill](../reference/runtime.md#workflow-forms), which walks a workflow form with the person and
-      starts the workflow only after approval. Without it, the model can call the write tools of Core directly, see
-      [Read tools and write tools](../reference/runtime.md#read-tools-and-write-tools).
-    - Your [domain context](domain-context.md), set with `AGENT_DOMAIN_CONTEXT`.
-
-    See [Capabilities extend the model and its tools](../architecture/index.md#capabilities) for how these fit
-    together.
-
-### 2. Write its instructions
+### 3. Write its instructions
 
 Put the system prompt in `instructions.md` next to `agent.yaml`. Describe what the agent is for, what data it can
 reach and how it should answer. Leave how each tool is used to the descriptions of the tools themselves:
@@ -88,9 +65,10 @@ Your tools and their usage are described by the NetBox MCP server they come from
 - If a query returns nothing, say so plainly; never invent inventory.
 ```
 
-### 3. Serve it over A2A
+### 4. Serve it over A2A
 
-Add a service to your compose file that runs `docker-agent serve a2a` on the folder:
+Add a service to your compose file that runs `docker-agent serve a2a` on the folder. Set the model's API key
+(`OPENAI_API_KEY`, `ANTHROPIC_API_KEY`) in its environment:
 
 ```yaml
 services:
@@ -106,44 +84,37 @@ services:
       - netbox-mcp
 ```
 
-The agent card at `/.well-known/agent-card.json` advertises the address that the agent listens on. docker-agent has no
-separate setting for the public URL, so listen on the service name, which the other agents can reach. With
-`0.0.0.0` or `localhost`, the card advertises `localhost` and the planner cannot reach the agent.
+Listen on the service name, not on `0.0.0.0` or `localhost`. The agent card advertises the listen address, and a
+planner cannot reach `localhost`.
 
-The card captures the address at startup. After you restart the agent, also restart the planner.
+### 5. Connect it to a planner
+
+Add the agent card URL as a peer of a planner, next to the Orchestrator Agent, and tell the planner when to use it.
+See [How to connect another agent over A2A](a2a-planner.md).
+
+Restart the planner whenever you restart this agent: the card is read at startup.
 
 ## Verify it works
 
-Fetch the agent card and check the URL and the description in it:
+1. Fetch the agent card:
 
-```shell
-curl http://inventory-agent:8080/.well-known/agent-card.json
-```
+    ```shell
+    curl http://inventory-agent:8080/.well-known/agent-card.json
+    ```
 
-The URL should be the service name, not `localhost`, and the description should say what the agent is for.
+    The URL in it should be the service name, not `localhost`, and the description should say what the agent is for.
+
+2. Ask the planner a question that needs both agents, for example *Which sites exist in NetBox, and how many nodes
+   are in WFO?* The answer should combine both.
 
 ## Next steps
 
-### Connect it to a planner
-
-Add the agent card URL as a peer of a planner, next to the Orchestrator Agent, and tell the planner when to use it.
-See [Connect another agent over A2A](a2a-planner.md). Then ask the planner a question that needs both agents, for
-example *Which sites exist in NetBox, and how many nodes are in WFO?* The answer should combine both.
-
-### Pass the identity of the user on
-
-When the service requires authentication, forward the token of the user instead of a service account, so the agent can
-only do what the user may do. See [Security and observability](security-observability.md). The example uses a
-read-only NetBox token in the MCP server, which is fine for a demo but gives every user the same access.
-
-### Benchmark it
-
-Before you change prompts or models, add the questions to a benchmark, see
-[Benchmark prompt and model changes](evals.md).
+- If the service has per-user permissions, forward the user's token to it instead of using one shared token. See
+  [Authentication and authorization](../architecture/auth.md).
+- Before you change prompts or models, add the questions to a benchmark, see
+  [Benchmark prompt and model changes](evals.md).
 
 ## Reference
 
-- [Connect another service](connect-service.md)
-- [Connect another agent over A2A](a2a-planner.md)
 - [Endpoints and protocols: A2A](../reference/endpoints.md#a2a)
 - [Running the agent in your own stack](../architecture/production.md), for deployment shapes and identity

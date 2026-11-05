@@ -1,23 +1,21 @@
-# Connect another agent over A2A
+# How to connect another agent over A2A
 
-To see a planner that combines the Orchestrator Agent with a second agent, follow the
-[tutorial](https://workfloworchestrator.org/learn/orchestrator-agent/tutorials/example-orchestrator/).
-This guide covers connecting the agent to your own setup. The calling agent is usually a planner, but it can also be
-your own agent, see [Create your own agent](create-agent.md).
+This guide shows you how to let another agent, usually a planner, call the Orchestrator Agent over
+[A2A](https://a2a-protocol.org/latest/). To see a working planner first, follow the
+[tutorial](https://workfloworchestrator.org/learn/orchestrator-agent/tutorials/example-orchestrator/). To build the
+second agent, see [How to create your own agent](create-agent.md).
 
 ## Steps
 
-1. Set `BASE_URL` of the Orchestrator Agent to an address that the other agent can reach. The agent card advertises
-   this URL, and the caller sends its messages there. Inside Docker or Kubernetes this is the service name, not
-   `localhost`.
-2. Check that the agent card is served at that address and shows the right URL. The card lists one skill per
-   [plugin](../reference/plugins.md):
+1. Set `BASE_URL` of the Orchestrator Agent to an address that the calling agent can reach. Inside Docker or
+   Kubernetes, use the service name, not `localhost`.
+2. Check that the agent card shows that URL:
 
     ```shell
     curl http://<agent>:8080/.well-known/agent-card.json
     ```
 
-3. Add the Orchestrator Agent as a remote A2A agent of the calling agent, using the base URL of the card.
+3. Add the Orchestrator Agent as a remote A2A agent of the calling agent, using the base URL of the card:
 
     === "docker-agent"
 
@@ -41,42 +39,34 @@ your own agent, see [Create your own agent](create-agent.md).
         Use the A2A client of your runtime, for example the
         [A2A Python SDK](https://github.com/a2aproject/a2a-python), with the card URL.
 
-    Add the agent of your own service the same way, as a second remote agent next to the Orchestrator Agent, see
-    [Connect another service](connect-service.md).
+    Add the agent of your own service the same way, next to the Orchestrator Agent.
 
-4. Tell the calling agent in its instructions when to use the Orchestrator Agent, for example for questions about
-   subscriptions, products, workflows and processes, and when to use your own agent.
-5. Restart the calling agent whenever you restart the Orchestrator Agent or change its plugins. Most runtimes read the
-   card only at startup.
+4. In the instructions of the calling agent, say when to use the Orchestrator Agent, for example for questions about
+   subscriptions, products, workflows and processes, and when to use your other agents.
+5. If the Orchestrator Agent authenticates requests, have the calling agent send the user's token twice: in the
+   `Authorization` header to pass the agent's check, and as `auth_token` in the message metadata so that Orchestrator
+   Core sees the user. Without the metadata, calls to Orchestrator Core run as the agent's service account. See
+   [Authentication and authorization](../architecture/auth.md#outbound-who-the-agent-acts-as).
+6. If users should start workflows through the calling agent, make it request the
+   [kagent human-in-the-loop extension](../reference/runtime.md#workflow-forms), as kagent 1.0 and later does. Without
+   it, the calling agent can ask questions but cannot start workflows.
+7. If your clients do not speak A2A, such as most chat UIs, put a gateway in front of the planner. Do not reuse the
+   proxy of the example orchestrator: it checks no identity and sets no limits. See
+   [Gateways](../architecture/production.md#gateways).
 
-## Workflow forms
-
-The agent speaks A2A protocol v1.0. Callers on 0.3 are still served, but they cannot fill in workflow forms. Forms
-need the [kagent human-in-the-loop extension](../reference/runtime.md#workflow-forms), so that the calling agent can
-relay the questions and the approval to the person. The calling agent must request the extension in its call, as
-kagent 1.0 and later does. Without it, the calling agent can ask questions but cannot start workflows.
-
-## Reach the planner from your clients
-
-The Orchestrator Agent itself speaks OpenAI chat completions, AG-UI and MCP, so most clients connect to it directly.
-A planner built on an A2A runtime often speaks only A2A. A chat UI, a portal, a script or a service that has no A2A
-client then cannot reach the planner without something that translates in between.
-
-!!! warning "A translating proxy is also your front door"
-    The [example orchestrator](https://github.com/workfloworchestrator/example-orchestrator) solves this with a small
-    proxy that turns OpenAI chat completions into A2A. It checks no identity and sets no limits, which is fine for a
-    demo on a laptop. In your own stack every request passes this point, so it decides who may call which agent, with
-    which credential, and at what cost. Don't copy the demo proxy as is: read
-    [Gateways](../architecture/production.md#gateways) first.
+Restart the calling agent whenever you restart the Orchestrator Agent or change its plugins: most runtimes read the
+card only at startup.
 
 ## Verify it works
 
-Ask the calling agent a question about WFO, for example *How many active subscriptions are there?*. The answer
-should come from the Orchestrator Agent.
+1. Ask the calling agent a question about WFO, for example *How many active subscriptions are there?*
+2. Check in the log or trace of the calling agent that it called the `wfo` peer, and that the answer contains the
+   count it returned.
+3. If you set up workflow forms, ask it to start a workflow. It should relay the form questions and ask for approval
+   before the workflow starts.
 
 ## Reference
 
 - [Endpoints and protocols: A2A](../reference/endpoints.md#a2a)
 - [Configuration: `BASE_URL`](../reference/configuration.md)
 - [Plugins](../reference/plugins.md)
-- [Create your own agent](create-agent.md), to build the second agent

@@ -1,8 +1,5 @@
 # Benchmark prompt and model changes
 
-!!! info "Goal"
-    Check that a change to a prompt, a model or a plugin does not make the agent pick the wrong tools.
-
 ## Steps
 
 1. Start the backing services, an Orchestrator Core with the MCP server and a seeded database, and install the

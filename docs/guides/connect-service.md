@@ -1,14 +1,15 @@
-# Connect another service
+# How to connect another service
 
-The Orchestrator Agent connects to one MCP server: the one of Orchestrator Core, set with `WFO_CORE_MCP_URL`. It does
-not load the MCP servers of other systems. To answer questions that need data of another system, such as NetBox, a
-monitoring system or a CRM, choose one of two ways.
+This guide shows you how to let the agent answer questions that need data from another system, such as NetBox, a
+monitoring system or a CRM.
 
-| When the data | Do this |
+The Orchestrator Agent itself connects only to the MCP server of Orchestrator Core. Choose a way in based on where
+the data belongs:
+
+| If the data | Do this |
 | --- | --- |
-| Belongs to the subscriptions in WFO, for example the contract or the monitoring status of a subscription | Add a route to your orchestrator and [expose it as a tool](https://workfloworchestrator.org/orchestrator-core/reference-docs/mcp/#extending). The agent then answers from one place. |
-| Lives in a system of its own | Give the system an agent of its own and let a planner combine the answers, as described below. This keeps each agent small, with its own tools and instructions. |
-
+| Belongs to subscriptions in WFO, for example the contract or the monitoring status of a subscription | Add a route to your orchestrator and [expose it as a tool](https://workfloworchestrator.org/orchestrator-core/reference-docs/mcp/#extending). You don't need the steps below. |
+| Lives in a system of its own | Give the system its own agent and let a planner combine the answers. Follow the steps below. |
 
 ## Steps
 
@@ -17,8 +18,10 @@ The example connects NetBox, as the `agents` profile of the
 
 ### 1. Run an MCP server for the service
 
-Many systems have an MCP server, see the [MCP server list](https://github.com/modelcontextprotocol/servers). For NetBox,
-run [netbox-mcp](https://github.com/netboxlabs/netbox-mcp-server) over streamable HTTP:
+Find an MCP server for your system, for example in the
+[MCP server list](https://github.com/modelcontextprotocol/servers). For NetBox, run
+[netbox-mcp](https://github.com/netboxlabs/netbox-mcp-server) over streamable HTTP, with a read-only API token so the
+agent cannot change the service:
 
 ```yaml
 services:
@@ -32,19 +35,16 @@ services:
       PORT: "8000"
 ```
 
-The tools are then served at `http://netbox-mcp:8000/mcp`. Give the server a token that can only read, so the agent
-cannot change the service.
+The tools are then served at `http://netbox-mcp:8000/mcp`.
 
 ### 2. Create an agent with the MCP server as its toolset
 
-Follow [Create your own agent](create-agent.md). Its example agent uses `http://netbox-mcp:8000/mcp` as its toolset and
-is served over A2A as `inventory-agent`.
+Follow [How to create your own agent](create-agent.md), with `http://netbox-mcp:8000/mcp` as its toolset.
 
-### 3. Connect the agent to a planner
+### 3. Connect both agents to a planner
 
 Add the new agent and the Orchestrator Agent as peers of a planner, see
-[Connect another agent over A2A](a2a-planner.md). In the example orchestrator, `planner-agent` has both as `a2a`
-toolsets and decides from their agent cards which one to ask.
+[How to connect another agent over A2A](a2a-planner.md).
 
 ## Verify it works
 
@@ -54,6 +54,4 @@ in WFO?* The answer should combine data from NetBox and from WFO.
 ## Reference
 
 - [MCP server of Orchestrator Core: extending](https://workfloworchestrator.org/orchestrator-core/reference-docs/mcp/#extending)
-- [Create your own agent](create-agent.md)
-- [Connect another agent over A2A](a2a-planner.md)
 - [Teach the agent your domain](domain-context.md)

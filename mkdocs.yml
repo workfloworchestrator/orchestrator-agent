@@ -7,19 +7,22 @@ nav:
   - Overview: index.md
   - Getting started: getting-started.md
   - Guides:
-      - Connect LibreChat: guides/librechat.md
-      - Use the agent with MCP: guides/mcp-clients.md
-      - Connect another agent over A2A: guides/a2a-planner.md
+      - How to connect LibreChat: guides/librechat.md
+      - How to use the agent with MCP: guides/mcp-clients.md
+      - How to connect another agent over A2A: guides/a2a-planner.md
       - Build a frontend with AG-UI: guides/ag-ui.md
       - Start workflows from chat: guides/workflows-from-chat.md
-      - Use your own LLM: guides/own-llm.md
-      - Teach the agent your domain: guides/domain-context.md
-      - Connect another service: guides/connect-service.md
-      - Create your own agent: guides/create-agent.md
-      - Security and observability: guides/security-observability.md
+      - How to use your own LLM: guides/own-llm.md
+      - How to teach the agent your domain: guides/domain-context.md
+      - How to connect another service: guides/connect-service.md
+      - How to create your own agent: guides/create-agent.md
+      - How to secure the agent: guides/secure-agent.md
+      - How to trace the agent: guides/tracing.md
       - Benchmark prompt and model changes: guides/evals.md
   - Architecture:
       - How the agent fits on top of Orchestrator Core: architecture/index.md
+      - Authentication and authorization: architecture/auth.md
+      - Tracing and observability: architecture/observability.md
       - How we evaluate the agent: architecture/evaluation.md
       - Running in your own stack: architecture/production.md
   - Reference:

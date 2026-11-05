@@ -1,9 +1,5 @@
 # Build a frontend with AG-UI
 
-!!! info "Goal"
-    Connect a web frontend to the agent over [AG-UI](https://docs.ag-ui.com/), so that answers stream into your own
-    interface.
-
 ## Steps
 
 1. Point your AG-UI client at `POST /agui` of the agent. The response is a stream of server-sent events.

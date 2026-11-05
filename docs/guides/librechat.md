@@ -2,13 +2,11 @@
 render_macros: false
 ---
 
-# Connect LibreChat
+# How to connect LibreChat
 
-This guide shows how to: Run [LibreChat](https://www.librechat.ai/) with the Orchestrator agent as a chat model,
-including workflow forms.
-
-The setup below is the smallest one that works: LibreChat and its database, with the agent as the only model. For
-file uploads, search, other models and production settings, see the
+This guide shows you how to run [LibreChat](https://www.librechat.ai/) with the Orchestrator Agent as a chat model,
+including workflow forms. It sets up the smallest setup that works: LibreChat and its database, with the agent as the
+only model. For file uploads, search, other models and production settings, see the
 [LibreChat documentation](https://www.librechat.ai/docs/local).
 
 ## Before you start
@@ -57,7 +55,7 @@ volumes:
   librechat-data:
   mongodb-data:
 ```
-    
+
 `librechat.yaml`:
 
 ```yaml
@@ -90,61 +88,53 @@ modelSpecs:
 ```
 
 Use LibreChat 0.8.8 or later: older versions cannot show workflow forms. Keep `X-Agent-Client`, `X-Conversation-Id`,
-`askUserQuestion` and `titleConvo` as shown. The
-[LibreChat configuration reference](../reference/configuration.md#librechat) explains what each key does. The file
-`examples/librechat.yaml` in the agent repository has the same content with comments.
+`askUserQuestion` and `titleConvo` as shown. For what each key does, see
+[Configuration: LibreChat](../reference/configuration.md#librechat), or the commented copy in
+`examples/librechat.yaml` of the agent repository.
 
 ### 2. Point `baseURL` at the agent
 
-LibreChat calls the agent from inside its container, so `localhost` is the container itself, not your machine.
-
 - If the agent listens on port 8080 of your machine, keep `http://host.docker.internal:8080/v1`.
-- If the agent runs elsewhere, use an address the container can reach, ending in `/v1`.
-
-!!! warning "Other agents in LibreChat need a front door, not a demo proxy"
-    LibreChat talks to the Orchestrator Agent directly, because the agent speaks OpenAI chat completions. A planner or
-    another agent that speaks only A2A is different: LibreChat has no A2A client, so you need something that
-    translates in between. The example orchestrator uses a small proxy for this that checks no identity and sets no
-    limits. Every request then passes that proxy, so in your own stack it decides who may call which agent and at
-    what cost. See [Reach the planner from your clients](a2a-planner.md#reach-the-planner-from-your-clients) and
-    [Gateways](../architecture/production.md#gateways).
+- If the agent runs elsewhere, use an address the container can reach, ending in `/v1`. Do not use `localhost`: inside
+  the container that is the container itself.
 
 ### 3. Set up sign-in
 
-How users sign in to LibreChat depends on whether the agent checks tokens. See
-[LibreChat authentication](https://www.librechat.ai/v0.8.8/docs/configuration/authentication) for all options.
+=== "The agent runs with `OAUTH2_ACTIVE=false`"
 
-**The agent runs with `OAUTH2_ACTIVE=false`** (local try-out only). The email login of the compose file above is
-enough. Leave the `Authorization` header commented out.
+    Use the email login of the compose file above, and leave the `Authorization` header commented out. Do this for a
+    local try-out only.
 
-**The agent runs with `OAUTH2_ACTIVE=true`.** LibreChat must sign users in with OpenID Connect against the same
-identity provider as the agent and Orchestrator Core, and pass each user's access token on to the agent:
+=== "The agent runs with `OAUTH2_ACTIVE=true`"
 
-1. Register LibreChat as a client in your identity provider, with the redirect URI
-    `http://localhost:3080/oauth/openid/callback` (or your LibreChat address). LibreChat has
-    [guides per provider](https://www.librechat.ai/v0.8.8/docs/configuration/authentication/OAuth2-OIDC), such as
-    [Keycloak](https://www.librechat.ai/v0.8.8/docs/configuration/authentication/OAuth2-OIDC/keycloak).
-2. Add the OpenID settings to `environment` in `docker-compose.yml`, and turn on
-    [token reuse](https://www.librechat.ai/v0.8.8/docs/configuration/authentication/OAuth2-OIDC/token-reuse) so
-    LibreChat keeps the user's access token:
+    Sign users in with OpenID Connect against the same identity provider as the agent and Orchestrator Core, and pass
+    each user's access token on to the agent:
 
-    ```yaml
-          - OPENID_ISSUER=https://idp.example.com/realms/example
-          - OPENID_CLIENT_ID=librechat
-          - OPENID_CLIENT_SECRET=...
-          - OPENID_SESSION_SECRET=...
-          - OPENID_CALLBACK_URL=/oauth/openid/callback
-          - OPENID_SCOPE=openid profile email offline_access
-          - OPENID_REUSE_TOKENS=true
-          - ALLOW_SOCIAL_LOGIN=true
-          - ALLOW_REGISTRATION=false
-          - ALLOW_EMAIL_LOGIN=false
-    ```
+    1. Register LibreChat as a client in your identity provider, with the redirect URI
+        `http://localhost:3080/oauth/openid/callback` (or your LibreChat address). LibreChat has
+        [guides per provider](https://www.librechat.ai/v0.8.8/docs/configuration/authentication/OAuth2-OIDC), such as
+        [Keycloak](https://www.librechat.ai/v0.8.8/docs/configuration/authentication/OAuth2-OIDC/keycloak).
+    2. Add the OpenID settings to `environment` in `docker-compose.yml`, and turn on
+        [token reuse](https://www.librechat.ai/v0.8.8/docs/configuration/authentication/OAuth2-OIDC/token-reuse) so
+        LibreChat keeps the user's access token:
 
-3. Make sure the access token is one the agent accepts: issued by the identity provider in the agent's
-    `OIDC_CONF_URL`, for an audience the agent and Orchestrator Core trust. See
-    [Security and observability](security-observability.md).
-4. Uncomment the `Authorization` header in `librechat.yaml`.
+        ```yaml
+              - OPENID_ISSUER=https://idp.example.com/realms/example
+              - OPENID_CLIENT_ID=librechat
+              - OPENID_CLIENT_SECRET=...
+              - OPENID_SESSION_SECRET=...
+              - OPENID_CALLBACK_URL=/oauth/openid/callback
+              - OPENID_SCOPE=openid profile email offline_access
+              - OPENID_REUSE_TOKENS=true
+              - ALLOW_SOCIAL_LOGIN=true
+              - ALLOW_REGISTRATION=false
+              - ALLOW_EMAIL_LOGIN=false
+        ```
+
+    3. Make sure the access token is one the agent accepts: issued by the identity provider in the agent's
+        `OIDC_CONF_URL`, for an audience the agent and Orchestrator Core trust. See
+        [Authentication and authorization](../architecture/auth.md).
+    4. Uncomment the `Authorization` header in `librechat.yaml`.
 
 ### 4. Start LibreChat
 
@@ -155,8 +145,7 @@ docker compose up -d
 Open <http://localhost:3080> and register an account. After a change to `librechat.yaml` or `docker-compose.yml`, run
 `docker compose up -d --force-recreate`.
 
-LibreChat generates its encryption keys and JWT secrets on first start and stores them in the `librechat-data`
-volume. Before you run it for real users, set permanent values for `CREDS_KEY`, `CREDS_IV`, `JWT_SECRET` and
+Before you run it for real users, set permanent values for `CREDS_KEY`, `CREDS_IV`, `JWT_SECRET` and
 `JWT_REFRESH_SECRET`, see [LibreChat credentials](https://www.librechat.ai/docs/configuration/dotenv#credentials-configuration).
 
 ## Verify it works
@@ -171,10 +160,12 @@ answer with a chart. Then ask *Find all active subscriptions* to get a table.
 
 ## Next steps
 
+- To reach a planner or another A2A-only agent from LibreChat, put a gateway in between: LibreChat has no A2A
+  client. Do not reuse the proxy of the example orchestrator, which checks no identity and sets no limits. See
+  [Gateways](../architecture/production.md#gateways).
 - [Enable embeddings](https://workfloworchestrator.org/orchestrator-core/reference-docs/ai-search/#running-it) in
   Orchestrator Core for semantic and hybrid search if you haven't already done so.
 - [Teach the agent your domain](domain-context.md) with your identifiers and terminology.
-- Learn about [endpoints and protocols](../reference/endpoints.md) to connect your own clients and tools.
 
 ## Reference
 
