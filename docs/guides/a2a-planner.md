@@ -52,7 +52,7 @@ second agent, see [How to create your own agent](create-agent.md).
    it, the calling agent can ask questions but cannot start workflows.
 7. If your clients do not speak A2A, such as most chat UIs, put a gateway in front of the planner. Do not reuse the
    proxy of the example orchestrator: it checks no identity and sets no limits. See
-   [Gateways](../architecture/production.md#gateways).
+   [Gateways](https://workfloworchestrator.org/learn/orchestrator-agent/production/#gateways).
 
 Restart the calling agent whenever you restart the Orchestrator Agent or change its plugins: most runtimes read the
 card only at startup.

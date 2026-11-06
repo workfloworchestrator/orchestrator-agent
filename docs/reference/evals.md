@@ -3,8 +3,9 @@
 The `evals/` folder of the agent repository holds a golden-set benchmark built on
 [pydantic-evals](https://ai.pydantic.dev/evals/). The agent runs in-process against a live Orchestrator Core MCP
 server, so the benchmark measures agent behaviour only: which tools are called, in which order and with which
-arguments. See [How we evaluate the agent](../architecture/evaluation.md) for the reasoning and
-[Benchmark prompt and model changes](../guides/evals.md) for a walkthrough.
+arguments. See [Understanding agent evaluations](../architecture/evaluation.md) for the reasoning and
+[How to benchmark prompt and model changes](../guides/evals.md) for comparisons, or
+[How to add an evaluation case](../guides/add-eval-case.md) to extend the dataset.
 
 ## Dataset
 
@@ -34,32 +35,64 @@ Tool calls are read from the OpenTelemetry spans that pydantic-ai emits.
 
 ## Commands
 
-Start the backing services, an Orchestrator Core with the MCP server and a seeded database, then run from `evals/`:
-
-```shell
-docker compose -f docker-compose.yml up -d --wait
-uv sync
-cp .env.example .env   # set AGENT_API_KEY and pin AGENT_MODEL
-```
+Run from `evals/` after completing the [guide setup](../guides/evals.md#1-prepare-the-evaluation-environment).
 
 | Command | Effect |
 | --- | --- |
 | `uv run python run_eval.py` | Run the full golden set |
-| `uv run python run_eval.py --cases <name>` | Run a subset, for a smoke test |
-| `uv run python run_eval.py --fail-under 0.7` | Exit non-zero when the score is below the floor |
+| `uv run python run_eval.py --cases <name>` | Run the named case; accepts comma-separated names |
+| `uv run python run_eval.py --fail-under 0.7` | Exit non-zero when the aggregate is below the floor |
 | `uv run python run_eval.py --baseline baseline_report.json` | Fail when a case regresses against the committed baseline |
-| `uv run python run_eval.py --save-report baseline_report.json` | Bless a new baseline |
+| `uv run python run_eval.py --save-report baseline_report.json` | Save a report; review it before accepting it as a baseline |
 
-Scores are only comparable on the same model, so pin `AGENT_MODEL`.
+## Reports
 
-### Baseline
+Reports are printed to the terminal; JSON is written only with `--save-report`. The terminal includes inputs and
+durations but hides final outputs. Saved reports retain outputs and evaluator reasons, not full tool transcripts.
+
+Each completed case contains:
+
+| Field | Contents |
+| --- | --- |
+| `scores` | Numeric evaluator results; `TrajectoryMatch` ranges from 0 to 1, with 1 indicating a full match in its configured mode |
+| `assertions` | Separate boolean checks, including selected arguments and the call budget |
+| `reason` within an evaluator result | The evaluator's explanation, when provided |
+| `output` | The final agent answer; not graded by the bundled cases |
+
+Execution failures are recorded separately in `failures`. A completed case can have failed assertions or low scores.
+The [product-count example](../guides/add-eval-case.md#2-add-the-case-to-the-dataset) checks `aggregate` and `entity_type: PRODUCT`, but does not verify the returned
+count or answer against the three seeded products. The benchmark records tool-call spans locally for grading; it does
+not automatically publish its reports to Langfuse.
+
+## Exit status
+
+Without gates, failed assertions and low scores do not cause a non-zero exit. Case execution failures do. With
+`--fail-under`, the runner averages the per-score averages together with the assertion pass rate (when present).
+This aggregate is not a task-success percentage, and the floor does not require every assertion to pass.
+
+The runner does not automatically capture the model and all environment settings in report metadata.
+
+## Settings
+
+Real environment variables override `evals/.env`. The harness reads `AGENT_MODEL`, `AGENT_API_KEY`,
+`WFO_CORE_MCP_URL`, `OAUTH2_ACTIVE` and `DATASET_FILE`. It publishes the first four to the agent environment.
+Export other agent settings, such as `AGENT_API_BASE`, `AGENT_API_VERSION` and `AGENT_DOMAIN_CONTEXT`, in the shell;
+the harness does not forward them from its `.env`.
+
+The runner executes cases sequentially, with one attempt per case. It has no repeat flag.
+
+## Baseline
 
 `baseline_report.json` is a full report of a blessed run. A score that drops more than `--tolerance` (default 0.2)
 below the baseline, or an assertion that flips from passing to failing, fails the run and names the case.
-Improvements never fail. Bless a new baseline in the same change that moves the numbers, so a baseline change is
-always a reviewed diff.
+The tolerance is an absolute difference, not a percentage. Improvements never fail. Only cases and evaluator names
+present on both sides are compared: new cases are reported as skipped, and removed cases or checks do not fail the
+comparison. A passing comparison can retain existing baseline failures. Review dataset coverage and individual results.
 
-### CI
+Keep the baseline fixed while investigating a change. Accept a replacement deliberately after reviewing a full run,
+and include the baseline diff with the change. The comparator does not check model or configuration identity.
+
+## CI
 
 `.github/workflows/eval.yml` runs the benchmark on demand, nightly and on pull requests labelled `eval`. It gates on
 the committed baseline and the `--fail-under` floor. It needs the `EVAL_AGENT_API_KEY` repository secret and

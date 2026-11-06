@@ -52,7 +52,7 @@ Example: *Export the last search results as CSV.*
 Starts a workflow, whether it creates, modifies or terminates something, or runs a task. The agent lists the
 workflows, picks the right one and hands over to the form-fill skill, which asks the user the questions of the form
 and asks for approval before it starts the process. The agent never starts a workflow on chat text alone. See
-[Start workflows from chat](../guides/workflows-from-chat.md).
+[Start workflows from chat](https://workfloworchestrator.org/learn/orchestrator-agent/use-cases/workflows-from-chat/).
 
 Example: *Start the terminate workflow for subscription abc123.*
 

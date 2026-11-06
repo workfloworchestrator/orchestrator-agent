@@ -65,13 +65,13 @@ That shared shape links the two. Tracing shows what the agent does with real que
 does not break what already worked. A bad answer found in a trace is the best material for a new eval case, because
 the trace already contains the question and the route the agent took. Writing down the route it should have taken
 turns a one-off failure into a check that runs on every later change. See
-[Benchmark prompt and model changes](../guides/evals.md).
+[How to add an evaluation case](../guides/add-eval-case.md).
 
 ## What is not there yet
 
 - **One trace across services.** The agent does not take over a `traceparent` header from its caller and does not
   pass one on to Orchestrator Core. The chat UI, the agent and Orchestrator Core each record their part on their own,
   and you link them by time and user. A gateway in front of the agents is one place to tie them together, see
-  [Gateways](production.md#gateways).
+  [Gateways](https://workfloworchestrator.org/learn/orchestrator-agent/production/#gateways).
 - **Eval results in the tracing backend.** Langfuse can store scores and datasets, but the evals keep their results
   in the repository instead.

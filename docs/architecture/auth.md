@@ -100,4 +100,4 @@ directly, without passing the agent.
 These are questions for a layer in front of all of them, not for each agent on its own. The
 [example orchestrator](https://github.com/workfloworchestrator/example-orchestrator) shows the minimal version: a small
 proxy that lets LibreChat talk to agents over A2A, but accepts any API key. That is fine on a laptop and a liability
-anywhere else. In [gateways](production.md#gateways) you can read more about a gateway can solve these issues.
+anywhere else. In [gateways](https://workfloworchestrator.org/learn/orchestrator-agent/production/#gateways) you can read more about a gateway can solve these issues.

@@ -13,7 +13,7 @@
 
 The AG-UI endpoint runs the agent without the workflow form-fill skill, so it has no approved path to start workflows
 and its model can call the write tools of Orchestrator Core directly. To start workflows from chat, see
-[Start workflows from chat](workflows-from-chat.md).
+[Start workflows from chat](https://workfloworchestrator.org/learn/orchestrator-agent/use-cases/workflows-from-chat/).
 
 Tools supplied by the frontend in `RunAgentInput.tools` are not available to the model. Its tools come from
 Orchestrator Core.

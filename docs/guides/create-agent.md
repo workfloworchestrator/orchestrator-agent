@@ -112,9 +112,9 @@ Restart the planner whenever you restart this agent: the card is read at startup
 - If the service has per-user permissions, forward the user's token to it instead of using one shared token. See
   [Authentication and authorization](../architecture/auth.md).
 - Before you change prompts or models, add the questions to a benchmark, see
-  [Benchmark prompt and model changes](evals.md).
+  [How to benchmark prompt and model changes](evals.md).
 
 ## Reference
 
 - [Endpoints and protocols: A2A](../reference/endpoints.md#a2a)
-- [Running the agent in your own stack](../architecture/production.md), for deployment shapes and identity
+- [Running the agent in your own stack](https://workfloworchestrator.org/learn/orchestrator-agent/production/), for deployment shapes and identity

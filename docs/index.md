@@ -62,7 +62,7 @@ provider of that model. If your data may not leave your own environment, run the
 - **Chat with an LLM about your WFO**: search, count, look up and export subscriptions, products and processes, with tables and
   charts built from the real data. See the [plugins reference](reference/plugins.md)
 - **Workflows with approval**: start a workflow from a conversation. Nothing changes until a person approves it. See
-  [Start workflows from chat](guides/workflows-from-chat.md)
+  [Start workflows from chat](https://workfloworchestrator.org/learn/orchestrator-agent/use-cases/workflows-from-chat/)
 - **Fits your clients**: use it from LibreChat, MCP clients, other agents or your own web frontend. See
   [Endpoints and protocols](reference/endpoints.md)
 - **Your own LLM**: choose the language model that fits your requirements for cost, quality and where your data may

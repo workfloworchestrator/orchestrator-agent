@@ -162,7 +162,7 @@ answer with a chart. Then ask *Find all active subscriptions* to get a table.
 
 - To reach a planner or another A2A-only agent from LibreChat, put a gateway in between: LibreChat has no A2A
   client. Do not reuse the proxy of the example orchestrator, which checks no identity and sets no limits. See
-  [Gateways](../architecture/production.md#gateways).
+  [Gateways](https://workfloworchestrator.org/learn/orchestrator-agent/production/#gateways).
 - [Enable embeddings](https://workfloworchestrator.org/orchestrator-core/reference-docs/ai-search/#running-it) in
   Orchestrator Core for semantic and hybrid search if you haven't already done so.
 - [Teach the agent your domain](domain-context.md) with your identifiers and terminology.

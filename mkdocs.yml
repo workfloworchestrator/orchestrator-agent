@@ -11,20 +11,19 @@ nav:
       - How to use the agent with MCP: guides/mcp-clients.md
       - How to connect another agent over A2A: guides/a2a-planner.md
       - Build a frontend with AG-UI: guides/ag-ui.md
-      - Start workflows from chat: guides/workflows-from-chat.md
       - How to use your own LLM: guides/own-llm.md
       - How to teach the agent your domain: guides/domain-context.md
       - How to connect another service: guides/connect-service.md
       - How to create your own agent: guides/create-agent.md
       - How to secure the agent: guides/secure-agent.md
       - How to trace the agent: guides/tracing.md
-      - Benchmark prompt and model changes: guides/evals.md
+      - How to benchmark prompt and model changes: guides/evals.md
+      - How to add an evaluation case: guides/add-eval-case.md
   - Architecture:
       - How the agent fits on top of Orchestrator Core: architecture/index.md
       - Authentication and authorization: architecture/auth.md
       - Tracing and observability: architecture/observability.md
-      - How we evaluate the agent: architecture/evaluation.md
-      - Running in your own stack: architecture/production.md
+      - Understanding agent evaluations: architecture/evaluation.md
   - Reference:
       - Endpoints and protocols: reference/endpoints.md
       - Configuration: reference/configuration.md

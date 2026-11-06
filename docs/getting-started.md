@@ -95,5 +95,5 @@ your own tools.
 - [Teach the agent your domain](guides/domain-context.md) with your identifiers and terminology.
 - Learn about [endpoints and protocols](reference/endpoints.md) to connect your own clients and tools.
 - Before more clients, other agents or machine callers use the agent, read
-  [Gateways](architecture/production.md#gateways). The agent checks who calls it, but it sets no limits or budgets per
+  [Gateways](https://workfloworchestrator.org/learn/orchestrator-agent/production/#gateways). The agent checks who calls it, but it sets no limits or budgets per
   caller, and the other paths to your tools need the same checks.

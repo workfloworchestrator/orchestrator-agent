@@ -13,7 +13,7 @@ tools or arguments.
 ### 2. Benchmark it before you switch
 
 Run the golden set on your current model and on the new one, and compare the scores. See
-[Benchmark prompt and model changes](evals.md).
+[How to benchmark prompt and model changes](evals.md).
 
 ### 3. Configure the model
 

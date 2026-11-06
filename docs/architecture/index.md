@@ -180,7 +180,7 @@ workflows through A2A or LibreChat. See [Read tools and write tools](../referenc
 
 This requires a client that can present questions and approval: LibreChat or an A2A planner with support for human
 input. The MCP and AG-UI interfaces do not currently offer workflow forms. See
-[Start workflows from chat](../guides/workflows-from-chat.md) for setup and
+[Start workflows from chat](https://workfloworchestrator.org/learn/orchestrator-agent/use-cases/workflows-from-chat/) for setup and
 [Runtime behaviour](../reference/runtime.md#workflow-forms) for the form-handling details.
 
 The boundary covers only Core's three workflow write tools, which the gate hides by name. A custom tool you add to
