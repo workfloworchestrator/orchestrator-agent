@@ -1,4 +1,4 @@
-# Evals
+# Evaluation benchmark
 
 The `evals/` folder of the agent repository holds a golden-set benchmark built on
 [pydantic-evals](https://ai.pydantic.dev/evals/). The agent runs in-process against a live Orchestrator Core MCP
@@ -14,13 +14,9 @@ user question with evaluators. Cases refer to the deterministic seed data in `do
 `metadata.failure_modes` tags the shape of the task and `metadata.curation_note` explains why the expected
 trajectory is the ideal one.
 
-The file uses the canonical serialized form, and `wfo_search_dataset_schema.json` provides IDE validation. After
-editing cases by hand, round-trip the file to restore the canonical form and refresh the schema:
-
-```shell
-uv run python -c "from pydantic_evals import Dataset; \
-  Dataset[str, str].from_file('wfo_search_dataset.yaml').to_file('wfo_search_dataset.yaml')"
-```
+The file uses the canonical serialized form, and `wfo_search_dataset_schema.json` provides IDE validation.
+[How to add an evaluation case](../guides/add-eval-case.md#3-validate-and-run-the-case) includes the serialization
+command used after editing cases.
 
 ## Evaluators
 
@@ -89,8 +85,8 @@ The tolerance is an absolute difference, not a percentage. Improvements never fa
 present on both sides are compared: new cases are reported as skipped, and removed cases or checks do not fail the
 comparison. A passing comparison can retain existing baseline failures. Review dataset coverage and individual results.
 
-Keep the baseline fixed while investigating a change. Accept a replacement deliberately after reviewing a full run,
-and include the baseline diff with the change. The comparator does not check model or configuration identity.
+The comparator does not check model or configuration identity. The
+[comparison guide](../guides/evals.md) covers reviewed baseline selection and replacement.
 
 ## CI
 

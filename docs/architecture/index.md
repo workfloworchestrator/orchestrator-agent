@@ -28,10 +28,11 @@ Core makes these operations available as tools through its MCP server. Each tool
 use it, so the model can choose an operation that fits the question. The agent's instructions describe its purpose;
 the knowledge of how to search your orchestrator stays with Core's tools.
 
-Core is also the agent's only tool connection. To bring in another system,
+Core is the only MCP server configured by the agent itself. AG-UI callers can also supply frontend tools through
+their adapter, as described in the [endpoint reference](../reference/endpoints.md#ag-ui). To bring in another system,
 [expose it as a tool](https://workfloworchestrator.org/orchestrator-core/reference-docs/mcp/#extending) in your
 orchestrator, or give it an agent of its own and let a planner combine both answers. See
-[Connect another service](../guides/connect-service.md).
+[Connect another system through a planner](https://workfloworchestrator.org/learn/orchestrator-agent/integrations/connect-service/).
 
 For example, a question about active subscriptions becomes a search through Core. Core returns matching records,
 and the agent presents them with an explanation. Tables and charts are built from the returned data by the agent,
@@ -57,7 +58,7 @@ sending it to an external provider may be unsuitable. Whether the provider retai
 training depends on the service, settings and agreement; using a hosted model does not automatically mean that your
 data is used for training. Those terms matter when deciding whether a provider is appropriate for your data.
 A self-hosted model lets you keep that processing within your infrastructure. See
-[Use your own LLM](../guides/own-llm.md) for supported connections and setup.
+[Change the language model](../guides/own-llm.md) for supported connections and setup.
 
 The same applies to tracing. With Langfuse or another tracing backend enabled, prompts and tool results are also sent
 there. See [Tracing and observability](observability.md).
@@ -65,14 +66,14 @@ there. See [Tracing and observability](observability.md).
 ### How a question becomes a search
 
 The agent treats an identifier in a question as a search key. It looks for the field that matches and filters on it
-with `like`, which allows for substrings and typos. If no field clearly matches, it ranks results instead. With
+with `like`, a case-insensitive wildcard match for a known substring. That filter does not itself tolerate typos;
+fuzzy retrieval ranks approximate text matches. If no field clearly matches, the tools can rank results instead. With
 embeddings enabled in Orchestrator Core, it also picks a retriever per question: hybrid for identifiers and names,
 semantic for descriptive questions, and fuzzy otherwise.
 
-What the agent cannot work out are conventions that only your organisation knows, such as which field holds a circuit
-code or what an abbreviation of a product means. The model has never seen them. That knowledge has to come from you,
-as a short domain context added to the system prompt, see
-[How to teach the agent your domain](../guides/domain-context.md).
+The model cannot reliably infer conventions specific to your organisation, such as which field holds a circuit
+code or what an abbreviation of a product means. Add that knowledge to the system prompt through
+[domain context](../guides/domain-context.md).
 
 ## The database stores the conversations
 
@@ -126,7 +127,7 @@ agents. These interfaces connect different kinds of callers to the same WFO oper
   [Connect another agent over A2A](../guides/a2a-planner.md).
 - **Your own web frontend** can display the conversation and results as part of your application. AG-UI carries
   the events the frontend needs to show the agent's progress and answers. See
-  [Build a frontend with AG-UI](../guides/ag-ui.md).
+  [AG-UI endpoint reference](../reference/endpoints.md#ag-ui).
 - **An MCP client** can use the agent as a tool that answers WFO questions in plain language. This lets an assistant
   in another application ask the agent for help. See [Use the agent with MCP](../guides/mcp-clients.md).
 
@@ -150,7 +151,7 @@ raw tools. It misses what the Orchestrator Agent adds on top:
 A direct connection still makes sense when the other agent's model should make all the choices itself, for example
 in a harness where a person approves every tool call.
 
-## The agent needs approval before starting workflows [TODO]
+## Why workflow starts need approval
 
 <a id="the-agent-needs-approval-before-starting-workflows"></a>
 <a id="why-workflows-need-approval"></a>
@@ -185,5 +186,6 @@ input. The MCP and AG-UI interfaces do not currently offer workflow forms. See
 
 The boundary covers only Core's three workflow write tools, which the gate hides by name. A custom tool you add to
 Core, or another agent the planner calls, gets no approval step from this agent, so build approval into each
-integration or keep those tools read-only. See [Connect another service](../guides/connect-service.md) and
-[Create your own agent](../guides/create-agent.md).
+integration or keep those tools read-only. See
+[Connect another system through a planner](https://workfloworchestrator.org/learn/orchestrator-agent/integrations/connect-service/) and
+[Run a companion agent with docker-agent](https://workfloworchestrator.org/learn/orchestrator-agent/integrations/create-agent/).

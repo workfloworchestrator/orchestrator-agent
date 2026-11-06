@@ -4,8 +4,8 @@ The agent sits between a client and Orchestrator Core, so identity has two direc
 call the agent. **Outbound** is about who the agent acts as when it calls Orchestrator Core for its tools. They are
 set up separately, but what a user can actually do through the agent comes from how the two work together.
 
-To set it up, see [How to secure the agent](../guides/secure-agent.md). The settings, status codes and the input the
-agent sends to OPA are listed in [Endpoints: authentication](../reference/endpoints.md#authentication).
+To set it up, see [How to configure authentication and authorization](../guides/secure-agent.md). The settings, status
+codes and input sent to OPA are listed in [Endpoints: authentication](../reference/endpoints.md#authentication).
 
 ## The same model as Orchestrator Core
 
@@ -18,7 +18,7 @@ for both can live in the same place.
 
 ## Inbound: who may call the agent
 
-Every request, on every protocol, passes the same two checks. Only the health check and the A2A agent card are open,
+With both checks enabled, requests on every protocol pass through them. Only the health check and A2A agent card are open,
 because monitoring and agent discovery happen before anyone signs in.
 
 ### Authentication: who is this?
@@ -26,13 +26,16 @@ because monitoring and agent discovery happen before anyone signs in.
 The agent does not validate the token itself. It asks the identity provider, through the OIDC userinfo endpoint, who
 the token belongs to. This is a trade-off:
 
-- **It works with any OIDC provider**, without the agent having to know signing keys, audiences or the claim
-  layout of the provider. Providers with incomplete discovery documents, such as AWS Cognito, work as well.
-- **A revoked token stops working at once**, because nothing is cached.
+- **The provider validates the token.** The agent needs a usable discovery document and userinfo endpoint, rather
+  than its own signing-key and audience validation. It tolerates specific missing discovery fields, including those
+  seen with AWS Cognito; this is not a guarantee of compatibility with every provider configuration.
+- **Userinfo responses are not cached.** Each request asks the provider again. A revoked token stops working when
+  that provider rejects it at userinfo; revocation behavior depends on the provider. The discovery document itself
+  is cached by the authentication object.
 - **Each request costs a round trip to the identity provider.** That adds latency, and the provider has to handle
   the load. Validating the JWT locally would be faster, but it would trust a token until it expires.
 
-For a chat agent, where a single answer already waits seconds for the model, the extra round trip barely shows.
+Its latency and availability therefore contribute to every authenticated agent request, even one that makes no model call.
 
 ### Authorization: may they do this?
 
@@ -48,7 +51,7 @@ of its protocols. If every user with a valid token may use the agent, it adds a 
 outcome, and turning it off is a reasonable choice.
 
 One side effect to keep in mind: OPA receives the request body, and on the chat protocols that body holds the user's
-message. Decision logs in OPA will therefore contain prompts.
+message. If OPA decision logging is enabled without masking that input, its logs can contain prompts.
 
 ## Outbound: who the agent acts as
 
@@ -58,10 +61,13 @@ most for safety is not "may this user call the agent?" but "whose token does the
 There are two answers.
 
 - **The user's token.** The agent forwards the token of the request to Orchestrator Core for that run. Orchestrator
-  Core sees the real user, applies that user's policies and records that user in its audit log. The agent can do no
-  more than the user could do in the Orchestrator UI.
+  Core sees the user and applies its policies to the MCP-backed operations. The available operations and permissions
+  depend on Core's route policies; forwarding a token does not establish that they match the Orchestrator UI exactly.
 - **A service account.** When there is no user token, the agent signs in as itself with the OAuth2
-  client-credentials grant. Orchestrator Core then sees the agent, not the person.
+  client-credentials grant when outbound authentication is enabled. Orchestrator Core then sees the agent, not the person.
+
+With outbound authentication disabled and no forwarded token, the call carries no bearer token. Core must allow
+that unauthenticated request for it to succeed. The table below describes authenticated calls.
 
 Which of the two applies depends on the protocol:
 
@@ -77,18 +83,20 @@ Orchestrator Core travels inside the A2A message, so a planner that sends only t
 service account. On the agent's MCP endpoint the user's token is not passed on at all: the caller is checked
 inbound, but Orchestrator Core always sees the service account.
 
-### Why the user's token is better than a service account
+<a id="why-the-users-token-is-better-than-a-service-account"></a>
 
-A service account has to be allowed everything that any of its users needs. Every user then gets the sum of those
-rights, and the audit log of Orchestrator Core names the agent instead of the person. A service account is simpler to
-set up and works for clients that have no user token, such as scheduled jobs, but it moves the decision about what a
+### User identity and service-account permissions
+
+A shared service account exposes the same Core permissions to every caller using it. Giving it the union of all
+callers' rights broadens what each caller can ask it to do, and Core sees the agent instead of the person. It is simpler
+to set up and works for clients that have no user token, such as scheduled jobs, but it moves the decision about what a
 user may do out of Orchestrator Core and into whoever picks the service account's rights.
 
-Forwarding the user's token has its own limit. It only works when the agent and Orchestrator Core accept the same
-token, which means the token has to be issued for an audience both trust. When they don't,
+Forwarding the user's token has its own limit. It only works when the agent's userinfo check and Core's authentication
+and authorization accept the same token. When separate token audiences or scopes are required,
 [token exchange (RFC 8693)](https://datatracker.ietf.org/doc/html/rfc8693) is the standard answer: it swaps the
-user's token for one meant for the next hop and keeps the user's identity. The agent does not do this itself; an
-identity provider or a gateway in front of it can.
+user's token for one meant for the next hop; the identity carried and rights granted depend on the exchange policy.
+The agent does not do this itself; an identity provider or a gateway in front of it can.
 
 ## What the agent does not do: gateways
 
@@ -100,4 +108,9 @@ directly, without passing the agent.
 These are questions for a layer in front of all of them, not for each agent on its own. The
 [example orchestrator](https://github.com/workfloworchestrator/example-orchestrator) shows the minimal version: a small
 proxy that lets LibreChat talk to agents over A2A, but accepts any API key. That is fine on a laptop and a liability
-anywhere else. In [gateways](https://workfloworchestrator.org/learn/orchestrator-agent/production/#gateways) you can read more about a gateway can solve these issues.
+anywhere else. See [Gateways](https://workfloworchestrator.org/learn/orchestrator-agent/production/#gateways) for the wider deployment controls.
+
+Conversation storage is a separate boundary. The agent loads snapshots by a caller-supplied conversation identifier,
+without checking the stored conversation's owner. Authentication of a request therefore does not establish that the
+caller owns the conversation it names. Trusted clients must isolate identifiers between users; see
+[Conversation persistence](../reference/runtime.md#conversation-persistence).

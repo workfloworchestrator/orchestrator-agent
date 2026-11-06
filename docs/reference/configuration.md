@@ -4,7 +4,9 @@ render_macros: false
 
 # Configuration
 
-The agent is configured through environment variables. Copy `.env.example` from the repository to `.env` and edit it.
+The agent reads process environment variables at import time. The application does not automatically load `.env`.
+`uv run --env-file .env ...` loads it for a source launch; Docker Compose's `env_file` passes it to a container.
+See [Run the agent with your Orchestrator Core](../getting-started.md) for setup.
 
 ## Connection
 
@@ -27,9 +29,10 @@ When `AGENT_API_BASE`, `AGENT_API_KEY` and `AGENT_API_VERSION` are all unset, th
 variable for the key, such as `OPENAI_API_KEY` or `ANTHROPIC_API_KEY`.
 
 When one of them is set, the `azure:` prefix in `AGENT_MODEL`, or a set `AGENT_API_VERSION`, selects the Azure OpenAI
-provider.
+provider. Otherwise the custom path always constructs an OpenAI chat model, even if `AGENT_MODEL` names another
+provider. An empty environment value is still set; only unset values select the native provider path.
 
-See [How to use your own LLM](../guides/own-llm.md) for examples.
+See [How to change the language model](../guides/own-llm.md) for examples and provider dependencies.
 
 ## Domain context
 
@@ -37,7 +40,7 @@ See [How to use your own LLM](../guides/own-llm.md) for examples.
 | --- | --- | --- |
 | `AGENT_DOMAIN_CONTEXT` | *(empty)* | Free text appended to the system prompt, for example identifier conventions and the fields they map to. Empty disables the section |
 
-See [Teach the agent your domain](../guides/domain-context.md).
+See [Add domain context](../guides/domain-context.md).
 
 ## Authentication
 
@@ -45,12 +48,12 @@ See [Teach the agent your domain](../guides/domain-context.md).
 | --- | --- | --- |
 | `OAUTH2_ACTIVE` | `true` | Authenticate incoming requests with OIDC |
 | `OAUTH2_AUTHORIZATION_ACTIVE` | `true` | Authorize authenticated incoming requests with an Open Policy Agent (OPA). Only applies when `OAUTH2_ACTIVE=true`. Set to `false` if you do not run OPA |
-| `OPA_URL` | *(none)* | OPA decision endpoint. Required when `OAUTH2_ACTIVE=true` and `OAUTH2_AUTHORIZATION_ACTIVE=true`, otherwise every request fails with 503 |
-| `OAUTH2_OUTBOUND_ACTIVE` | *(unset)* | Authenticate outgoing requests to Orchestrator Core with OAuth2 client credentials. When unset it follows `OAUTH2_ACTIVE` |
-| `OIDC_BASE_URL` | *(none)* | Base URL of the OIDC provider. Required when `OAUTH2_ACTIVE=true` |
+| `OPA_URL` | *(none)* | OPA decision endpoint. Required when `OAUTH2_ACTIVE=true` and `OAUTH2_AUTHORIZATION_ACTIVE=true`; without it protected requests fail with 503 |
+| `OAUTH2_OUTBOUND_ACTIVE` | *(unset)* | Enable service-account client-credentials authentication to Core. When unset it follows `OAUTH2_ACTIVE`; it does not suppress forwarding a user token bound to a run |
+| `OIDC_BASE_URL` | *(none)* | Provider base URL accepted by `oauth2_lib`; this agent resolves discovery and userinfo through `OIDC_CONF_URL` |
 | `OIDC_CONF_URL` | *(none)* | OIDC discovery document URL. Required when `OAUTH2_ACTIVE=true` |
-| `OAUTH2_RESOURCE_SERVER_ID` | *(none)* | OAuth2 client id. Required when incoming or outgoing authentication is on |
-| `OAUTH2_RESOURCE_SERVER_SECRET` | *(none)* | OAuth2 client secret. Required when incoming or outgoing authentication is on |
+| `OAUTH2_RESOURCE_SERVER_ID` | *(none)* | Client id used for the outbound service account's client-credentials grant |
+| `OAUTH2_RESOURCE_SERVER_SECRET` | *(none)* | Client secret used for the outbound service account's client-credentials grant; inbound userinfo lookup does not use these client credentials |
 | `OAUTH2_TOKEN_URL` | *(none)* | Token endpoint for the outgoing client-credentials requests. Required when outgoing authentication is on |
 
 ## Observability
@@ -59,7 +62,7 @@ See [Teach the agent your domain](../guides/domain-context.md).
 | --- | --- | --- |
 | `LANGFUSE_ENABLED` | `false` | Send OpenTelemetry traces to Langfuse. Needs the `langfuse` extra and `LANGFUSE_PUBLIC_KEY`, `LANGFUSE_SECRET_KEY` and `LANGFUSE_HOST` |
 
-See [How to secure the agent](../guides/secure-agent.md) and [How to trace the agent](../guides/tracing.md).
+See [How to configure authentication and authorization](../guides/secure-agent.md) and [How to trace the agent](../guides/tracing.md).
 
 ## LibreChat
 

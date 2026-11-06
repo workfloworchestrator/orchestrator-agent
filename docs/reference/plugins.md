@@ -49,7 +49,7 @@ Example: *Export the last search results as CSV.*
 
 ## workflow
 
-Starts a workflow, whether it creates, modifies or terminates something, or runs a task. The agent lists the
+Hands off a workflow start, whether it creates, modifies or terminates something, or runs a task. The agent lists the
 workflows, picks the right one and hands over to the form-fill skill, which asks the user the questions of the form
 and asks for approval before it starts the process. The agent never starts a workflow on chat text alone. See
 [Start workflows from chat](https://workfloworchestrator.org/learn/orchestrator-agent/use-cases/workflows-from-chat/).
@@ -58,24 +58,24 @@ Example: *Start the terminate workflow for subscription abc123.*
 
 ## Frontmatter
 
-| Key | Description |
-| --- | --- |
-| `id` | Name of the plugin |
-| `description` | Shown in the A2A agent card |
-| `advertise` | `true` (the default) to advertise the plugin as a skill in the A2A agent card |
-| `a2a_tags`, `examples` | Tags and example prompts for the A2A skill |
-| `defer_loading` | `false` for always on, `true` to load on demand: the instructions and the tools stay hidden until the model loads the [capability](../architecture/index.md#capabilities) |
-| `tools` | The tools the plugin owns, for result mapping and deferred loading |
-| `artifact` | Maps the tool results to `query`, `data` or `export` output. Omit for instructions only |
+| Key | Required / default | Description |
+| --- | --- | --- |
+| `id` | Required | Stable plugin name |
+| `description` | Required | Capability description and A2A skill description |
+| `advertise` | `true` | Advertise an A2A skill and, where eligible, an MCP entry-point tool |
+| `a2a_tags` | `[]` | A2A tags; the advertised skill falls back to the plugin id when empty |
+| `examples` | `[]` | Example prompts for the A2A skill and MCP tool description |
+| `defer_loading` | Required | `false` for always on, `true` to hide instructions and owned tools until the model loads the [capability](../architecture/index.md#capabilities) |
+| `tools` | `[]` | Symbolic constants from `tool_names.py`, such as `SEARCH_TOOL`, resolved to Core tool names for result mapping and deferred loading |
+| `artifact` | Omitted | Maps tool results to `query`, `data` or `export` output; omitted means instructions only |
+
+Unknown frontmatter keys and unknown tool constants are rejected during loading. The Markdown body supplies the
+instructions; it is not a template. Files whose names start with `_` are not loaded.
 
 ## Customise a plugin
 
-The agent only loads plugins from its own `capabilities/plugins/` directory. You cannot add one from outside, so to
-change a prompt or add a plugin, fork the agent, edit or add a file in that directory, and restart.
+The application loads plugins from its packaged `capabilities/plugins/` directory. There is no environment setting
+for an external plugin directory. The body describes intent; Core's tool descriptions describe how the tools are used.
 
-A plugin says *what* the agent should do, not *which tool* to call. How each tool is used comes from the tool
-descriptions that Orchestrator Core serves. To change how a tool is used, change its description in Orchestrator
-Core rather than naming the tool in a plugin.
-
-To give the agent knowledge about your identifiers and terminology without forking, see
-[Teach the agent your domain](../guides/domain-context.md).
+For changes, see [How to customise a plugin](../guides/customise-plugin.md). Deployment-specific identifiers and
+terminology can be supplied without a fork through [domain context](../guides/domain-context.md).

@@ -1,4 +1,4 @@
-# How to teach the agent your domain
+# How to add domain context
 
 This guide shows you how to tell the agent about your organisation's identifiers and terms, so that a question like
 *Show circuit IS4443* becomes a filter on the right field. To learn why the agent needs this, see
@@ -20,7 +20,7 @@ build a link to a subscription or a process.
 ### 2. Set `AGENT_DOMAIN_CONTEXT`
 
 ```shell
-AGENT_DOMAIN_CONTEXT="Circuit codes look like IS#### and map to the imsCircuitId field — filter with like. Customer references are 8-digit numbers — field customerId."
+AGENT_DOMAIN_CONTEXT="Circuit codes look like IS#### and map to the imsCircuitId field. Match a circuit code with a like pattern such as %IS4443%. Customer references are 8-digit numbers in customerId."
 ```
 
 With links to your UI:
@@ -31,7 +31,8 @@ AGENT_DOMAIN_CONTEXT="The WFO UI is at http://localhost:3000. Link a subscriptio
 
 ### 3. Restart the agent
 
-The agent reads the value at startup, so restart it after every change.
+Put the setting in the `.env` loaded by your source launch or in your container's environment. Restart the source
+process with `--env-file .env`, or recreate the container after changing its environment.
 
 ## Verify it works
 
@@ -41,11 +42,10 @@ The agent reads the value at startup, so restart it after every change.
 
 ## Next steps
 
-- To change how a capability works, not just what it knows, edit the plugin prompts, see
-  [Customise a plugin](../reference/plugins.md#customise-a-plugin).
+- To change a capability's instructions, follow [How to customise a plugin](customise-plugin.md).
 - To give the agent data that no tool serves yet,
   [expose a route of your orchestrator as a tool](https://workfloworchestrator.org/orchestrator-core/reference-docs/mcp/#extending)
-  or [connect another service](connect-service.md).
+  or [connect another system through a planner](https://workfloworchestrator.org/learn/orchestrator-agent/integrations/connect-service/).
 
 ## Reference
 

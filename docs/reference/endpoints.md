@@ -1,12 +1,13 @@
 # Endpoints and protocols
 
-The agent is one HTTP service that exposes the same agent over four protocols.
+The agent is one HTTP service with four protocol interfaces. Their capabilities, identity forwarding and
+conversation handling differ as described below.
 
 | Client | Protocol | Endpoint |
 | --- | --- | --- |
 | LibreChat and other OpenAI-compatible clients | OpenAI chat completions | `POST /v1/chat/completions`, `GET /v1/models` |
 | Other agents | A2A (protocol v1.0) | `POST /`, agent card at `GET /.well-known/agent-card.json` |
-| Web frontends | AG-UI | `POST /agui` |
+| Web frontends | AG-UI | `POST /agui/` |
 | MCP clients | MCP | `/mcp` |
 | Monitoring | REST | `GET /health` |
 
@@ -58,8 +59,26 @@ For the protocol itself, see the [A2A specification](https://a2a-protocol.org/la
 
 ## AG-UI
 
-`POST /agui` streams the agent's answer to a frontend as server-sent events. A follow-up question on the same
-thread keeps its history. See [Build a frontend with AG-UI](../guides/ag-ui.md).
+`POST /agui/` streams events to a frontend. `/agui` redirects to this trailing-slash route. `runId` must be a UUID;
+`threadId` selects persisted agent state. Conversation messages come from `RunAgentInput.messages`: the endpoint
+does not replay a stored message history merely because the thread id is reused.
+
+Artifact-bearing `TOOL_CALL_RESULT` events contain a JSON-encoded reference:
+
+| Result | Reference fields, in addition to `description` |
+| --- | --- |
+| Search or aggregation | `query_id`, `total_results`, `visualization_type`, `search_type`, optional `rendered_block` |
+| Entity lookup | `entity_id`, `entity_type` |
+| Export | `query_id`, `download_url` |
+
+Query rows can be fetched from Core's `GET /api/search/queries/{id}/results` endpoint with the caller's Core
+credentials. A `rendered_block` contains a `type` (`markdown` or `mermaid`) and `content`; this frontend is responsible
+for displaying it. Unlike the A2A and chat adapters, the AG-UI adapter does not append these blocks to the final text.
+An export URL may be a relative path on Core and must be resolved against Core's base URL, not the agent's.
+
+Frontend tools supplied in `RunAgentInput.tools` are passed to the underlying Pydantic AI adapter. They are not
+filtered out by this implementation. The endpoint has no workflow form-fill skill or built-in approval path;
+the model can also call Core's write tools. See [Read tools and write tools](runtime.md#read-tools-and-write-tools).
 
 The endpoint uses the AG-UI adapter of pydantic-ai, so what it supports is what that adapter supports. See
 [AG-UI in pydantic-ai](https://pydantic.dev/docs/ai/integrations/ui/ag-ui/) for how messages, tool calls and state
@@ -73,8 +92,12 @@ For the protocol itself, see the [AG-UI documentation](https://docs.ag-ui.com/).
 [MCP Python SDK](https://github.com/modelcontextprotocol/python-sdk), over stateless streamable HTTP. See
 [Use the agent with MCP](../guides/mcp-clients.md).
 
-It serves tools only: one per [plugin](plugins.md) plus `ask`. It registers no resources or prompts, and workflow
-plugins are not available here.
+It serves tools only: one per advertised [plugin](plugins.md) plus `ask`. It registers no resources or prompts, and
+workflow plugins are not available here. Each call is independent. A previous search is not remembered for a later
+export call; callers must carry the relevant query information, or request the search and export in one call.
+
+Responses contain the model's answer and the raw JSON of artifact-bearing tool results. They do not receive the
+table/chart text appended by the A2A and chat adapters.
 
 For the protocol itself, see the [MCP documentation](https://modelcontextprotocol.io/).
 
@@ -95,7 +118,10 @@ settings and [Authentication and authorization](../architecture/auth.md) for how
 | --- | --- |
 | 401 | No bearer token was sent |
 | 403 | The identity provider's userinfo endpoint rejected the token, or OPA denied the request. A denial includes the OPA decision id |
-| 503 | The OIDC discovery document or OPA could not be reached, or `OPA_URL` is not set while authorization is on |
+| 503 | OIDC discovery returned a non-200 response, an OPA transport error occurred, or `OPA_URL` is not set while authorization is on |
+
+These are the handled authentication and authorization responses, not an exhaustive error mapping. Unhandled errors,
+including an OIDC network failure or a malformed upstream response, can result in 500.
 
 ### OPA input
 
@@ -128,9 +154,11 @@ allow if "network-operators" in input.groups
 | Endpoint | Token read from | When absent |
 | --- | --- | --- |
 | `POST /v1/chat/completions` | `Authorization` header | service account |
-| `POST /agui` | `Authorization` header | service account |
+| `POST /agui/` | `Authorization` header | service account |
 | A2A `POST /` | `auth_token` or `authToken` in the message metadata | service account |
 | `/mcp` | not forwarded | always the service account |
 
 The service account uses the OAuth2 client-credentials grant against `OAUTH2_TOKEN_URL`. Its token is cached and
-fetched again when Orchestrator Core answers 401 or 403.
+refreshed before its reported expiry and once after a Core 401 or 403. A forwarded user token is not refreshed by the
+agent. `OAUTH2_OUTBOUND_ACTIVE` controls service-account authentication; a token bound to a run is forwarded as-is.
+When service-account authentication is disabled and there is no forwarded token, the request carries no bearer token.

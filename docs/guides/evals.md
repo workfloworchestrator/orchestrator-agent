@@ -17,10 +17,11 @@ cd evals
 uv sync --locked
 ```
 
-Create `evals/.env` from `evals/.env.example` if it does not already exist. Reuse your working model and credentials.
+Create `.env` from `.env.example` in this directory if it does not already exist. Reuse your working model and credentials.
 Export any additional proxy, Azure or domain-context settings as listed in [Eval settings](../reference/evals.md#settings).
 
-Use the bundled seeded Core and database for these cases. Make host ports 5433 and 8086 available, then start them:
+The runner builds a separate agent instance from this checkout in-process; it does not call your running agent
+server. Use the bundled seeded Core and database for these cases. Make host ports 5433 and 8086 available, then start them:
 
 ```shell
 docker compose -f docker-compose.yml up -d --wait

@@ -4,6 +4,8 @@ hide:
   - toc
 ---
 
+# Orchestrator Agent
+
 <p align="center"><em>An AI agent for Workflow Orchestrator. Search your data in plain language and start workflows with approval.</em></p>
 
 <p align="center">
@@ -21,10 +23,10 @@ hide:
 <br>
 
 __The Orchestrator Agent lets people and other agents work with the data and workflows in
-[Workflow Orchestrator](https://www.workfloworchestrator.org) (WFO) in plain language. Connect it to your
+[Workflow Orchestrator](https://workfloworchestrator.org) (WFO) in plain language. Connect it to your
 Orchestrator Core and a language model, then use it from a chat application or another agent.__
 
-__The Programme is funded by [GÉANT](https://geant.org) through
+__This project is funded by [GÉANT](https://geant.org) through
 [the incubator process](https://wiki.geant.org/spaces/NETDEV/pages/613122207/NETDEV+Incubator) within the Network
 Development Work Package (WP6) of the GN5-2 project.__
 
@@ -46,7 +48,7 @@ Orchestrator Core provides the tools through MCP and owns the search index, inpu
 The agent stores conversation state in the WFO database; it does not maintain a separate search index or its own
 workflow logic. See [How the agent fits on top of Orchestrator Core](architecture/index.md).
 
-## Key Features
+## Key features
 
 - **Search and analyse WFO data**: find records, count and group results, look up an entity by id and export results
   as CSV. Tables and charts are built in code from tool results. See the [plugins reference](reference/plugins.md).
@@ -56,14 +58,14 @@ workflow logic. See [How the agent fits on top of Orchestrator Core](architectur
 - **Connect your clients**: use the agent from [LibreChat](guides/librechat.md),
   [MCP clients](guides/mcp-clients.md) or [other agents over A2A](guides/a2a-planner.md).
 - **Choose your model**: use a hosted provider or a model in your own environment. The model processes requests,
-  conversation history and tool results, so choose where that data may go. See [Use your own LLM](guides/own-llm.md).
+  conversation history and tool results, so choose where that data may go. See [Change the language model](guides/own-llm.md).
 - **Adapt it to your domain**: supply your identifiers and terminology through
-  [domain context](guides/domain-context.md), customise [plugins](reference/plugins.md#customise-a-plugin), or
-  [connect another service](guides/connect-service.md).
+  [domain context](guides/domain-context.md), [customise a plugin](guides/customise-plugin.md), or
+  [connect another system through a planner](https://workfloworchestrator.org/learn/orchestrator-agent/integrations/connect-service/).
 - **Evaluate and observe**: [benchmark prompt and model changes](guides/evals.md),
   [add evaluation cases](guides/add-eval-case.md) and [trace requests and costs](guides/tracing.md).
 
-## What's Included?
+## What's included?
 
 The agent is published as a container image on the
 [GitHub Container Registry](https://github.com/workfloworchestrator/orchestrator-agent/pkgs/container/orchestrator-agent)
@@ -73,7 +75,7 @@ and can also be run from source. One service exposes the agent over several prot
 | --- | --- | --- |
 | `POST /v1/chat/completions` | OpenAI chat completions | LibreChat and other OpenAI-compatible clients |
 | `POST /` | A2A | Other agents, such as a planner |
-| `POST /agui` | AG-UI | Streaming answers, tables and charts into your own frontend |
+| `POST /agui/` | AG-UI | Streaming answers and result artifacts into your own frontend |
 | `/mcp` | MCP | MCP clients such as Claude Code or an agent framework |
 
 Search, aggregation, entity lookup and export are available through all four interfaces. Workflow forms require
@@ -82,30 +84,30 @@ AG-UI do not offer these forms. See [Endpoints and protocols](reference/endpoint
 [Read tools and write tools](reference/runtime.md#read-tools-and-write-tools) for the write-tool policy on each
 interface.
 
-## Getting Started
+## Getting started
 
-To run the agent with your own orchestrator, follow [Getting started](getting-started.md). You need an Orchestrator
+To run the agent with your own orchestrator, follow [How to run the agent with your Orchestrator Core](getting-started.md). You need an Orchestrator
 Core with MCP enabled, access to its PostgreSQL database and a language model connection.
 
 To try it on the public example setup, follow
 [Run it on the example orchestrator](https://workfloworchestrator.org/learn/orchestrator-agent/tutorials/example-orchestrator/).
 The tutorial sets up Core, the agent and a chat client together.
 
-Before exposing the agent to other users, follow [How to secure the agent](guides/secure-agent.md). For the wider
+Before exposing the agent to other users, follow [How to configure authentication and authorization](guides/secure-agent.md). For the wider
 deployment picture, see [Running the agent in your own stack](https://workfloworchestrator.org/learn/orchestrator-agent/production/).
 
-## Technology Stack
+## Technology stack
 
 - **[Orchestrator Core](https://workfloworchestrator.org/orchestrator-core/)**: the search index and MCP server that
   the agent builds on
 - **[Pydantic AI](https://ai.pydantic.dev)**: the agent framework
 - **[PostgreSQL](https://www.postgresql.org)**: conversation and run storage in the WFO database
-- **[FastAPI](https://fastapi.tiangolo.com)** and **[Uvicorn](https://www.uvicorn.org)**: the HTTP application and ASGI server
+- **[FastAPI](https://fastapi.tiangolo.com)** and **[Uvicorn](https://uvicorn.dev/)**: the HTTP application and ASGI server
 - **[A2A](https://a2a-protocol.org)**: the agent-to-agent protocol
 - **[AG-UI](https://docs.ag-ui.com)**: the protocol for streaming agent output into a frontend
 - **[MCP](https://modelcontextprotocol.io)**: the Model Context Protocol, for tools and clients
 
-## Community & Support
+## Community and support
 
 - 💬 **Questions?** Join us on [Discord](https://discord.gg/fQkQn5ajFR)
 - 🐛 **Found a bug?** [Open an issue](https://github.com/workfloworchestrator/orchestrator-agent/issues)

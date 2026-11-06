@@ -10,7 +10,8 @@ guide.
 
 !!! warning "Use this endpoint for questions, not for workflows"
     The agent's `/mcp` has no workflow approval step, and the model behind it can call the write tools of Core. Its
-    calls to Orchestrator Core also always run as the agent's service account, not as you. Start workflows from
+    calls to Orchestrator Core use the agent's service account when outbound authentication is enabled; your token
+    is not forwarded. Start workflows from
     [chat](https://workfloworchestrator.org/learn/orchestrator-agent/use-cases/workflows-from-chat/) instead. See
     [Read tools and write tools](../reference/runtime.md#read-tools-and-write-tools) and
     [Authentication and authorization](../architecture/auth.md#outbound-who-the-agent-acts-as).
@@ -30,14 +31,18 @@ guide.
     }
     ```
 
-2. If the agent authenticates requests (`OAUTH2_ACTIVE=true`, the default), add a bearer token from your OIDC
-   provider to the server entry. Claude Code reads `${WFO_TOKEN}` from your environment:
+2. Replace the address if your agent listens elsewhere. If it authenticates requests (`OAUTH2_ACTIVE=true`, the
+   default), export a valid user token as `WFO_TOKEN` in the shell that launches Claude Code and add this `headers`
+   object inside the `orchestrator-agent` server entry:
 
     ```json
     "headers": {
       "Authorization": "Bearer ${WFO_TOKEN}"
     }
     ```
+
+   Claude Code expands `${WFO_TOKEN}` from its environment. See its
+   [MCP configuration documentation](https://code.claude.com/docs/en/mcp#environment-variable-expansion-in-mcp-json).
 
 ## Verify it works
 
@@ -56,9 +61,12 @@ guide.
     Using the orchestrator-agent tools, how many active subscriptions are there per product?
     ```
 
-    Claude Code asks permission to call a tool such as `mcp__orchestrator-agent__aggregate`, and answers with the
-    counts the agent returns. If the call fails with a 401, the `Authorization` header from step 2 is missing or the
-    token is not valid.
+    Depending on your permission settings, Claude Code may ask to call a tool such as
+    `mcp__orchestrator-agent__aggregate`. Its answer should contain the counts returned by the agent. If the call fails
+    with a 401, the `Authorization` header from step 2 is missing or the token is not valid.
+
+Each MCP tool call starts independently. To export a search result, request the search and export together or pass
+the query id returned earlier; the agent does not remember a previous MCP call's results.
 
 ## Reference
 

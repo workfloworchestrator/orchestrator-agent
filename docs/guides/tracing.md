@@ -1,6 +1,6 @@
 # How to trace the agent
 
-This guide shows you how to send every model call and tool call of the agent to [Langfuse](https://langfuse.com/) or
+This guide shows you how to send Pydantic AI's model and tool-call spans to [Langfuse](https://langfuse.com/) or
 another OpenTelemetry backend. To learn what traces show and how they relate to evals, see
 [Tracing and observability](../architecture/observability.md).
 
@@ -12,8 +12,15 @@ another OpenTelemetry backend. To learn what traces show and how they relate to 
 
 === "Langfuse"
 
-    1. Install the `langfuse` extra.
-    2. Set:
+    1. In the agent checkout, install its optional integration:
+
+        ```shell
+        uv sync --locked --extra langfuse
+        ```
+
+        For the repository's Dockerfile, build with `--build-arg 'UV_EXTRA_ARGS=--extra langfuse'` to include the extra.
+
+    2. Add these settings to the agent's `.env` or container environment:
 
         ```shell
         LANGFUSE_ENABLED=true
@@ -22,15 +29,21 @@ another OpenTelemetry backend. To learn what traces show and how they relate to 
         LANGFUSE_HOST=https://cloud.langfuse.com
         ```
 
-    3. Restart the agent.
+    3. Restart the source process with the extra enabled and `.env` loaded:
+
+        ```shell
+        uv run --locked --extra langfuse --env-file .env \
+          uvicorn orchestrator_agent.app:app --host 127.0.0.1 --port 8080
+        ```
+
+        For a container, recreate it with the image containing the extra and the updated environment.
 
 === "Another OpenTelemetry backend"
 
     !!! note
         The setup has only been tested and run with Langfuse. Other backends should work, but are untested.
 
-    1. Install `opentelemetry-sdk` and `opentelemetry-exporter-otlp-proto-http`.
-    2. Create `traced_agent.py`, which wraps the app:
+    1. Create `traced_agent.py` in the agent checkout, alongside `pyproject.toml`:
 
         ```python
         from opentelemetry import trace
@@ -47,13 +60,14 @@ another OpenTelemetry backend. To learn what traces show and how they relate to 
         from orchestrator_agent.app import app  # noqa: E402
         ```
 
-    3. Leave `LANGFUSE_ENABLED` off, point the exporter at your backend and start this module instead of
-       `orchestrator_agent.app`:
+    2. Set `LANGFUSE_ENABLED=false` in `.env`. Launch the wrapper with its exporter dependencies and configuration
+       passed into the process:
 
         ```shell
-        OTEL_EXPORTER_OTLP_ENDPOINT=http://localhost:4318
-        OTEL_SERVICE_NAME=orchestrator-agent
-        uv run uvicorn traced_agent:app --port 8080
+        OTEL_EXPORTER_OTLP_ENDPOINT=http://localhost:4318 \
+        OTEL_SERVICE_NAME=orchestrator-agent \
+        uv run --with opentelemetry-sdk --with opentelemetry-exporter-otlp-proto-http --env-file .env \
+          uvicorn traced_agent:app --host 127.0.0.1 --port 8080
         ```
 
 ## Verify it works
@@ -64,8 +78,8 @@ another OpenTelemetry backend. To learn what traces show and how they relate to 
         - If it logs `Langfuse auth check failed`, check the keys and `LANGFUSE_HOST`.
         - If it logs that the `langfuse` extra is not installed, install it and restart.
     2. Ask the agent a question, for example "How many active subscriptions are there?".
-    3. Open your project in the Langfuse dashboard and go to **Tracing > Traces**. A new trace should appear within a
-       few seconds.
+    3. Open your project's traces view in Langfuse and look for the new model run. Allow time for batched spans to
+       arrive.
     4. Open the trace. It should show the model calls and each tool call, with the arguments the agent passed and
        what Orchestrator Core returned.
 
@@ -73,7 +87,7 @@ another OpenTelemetry backend. To learn what traces show and how they relate to 
 
     1. Ask the agent a question, for example "How many active subscriptions are there?".
     2. In your backend, search for traces of the service `orchestrator-agent` (the `OTEL_SERVICE_NAME` you set).
-    3. Open the trace. It should have a span for each model call and each tool call.
+    3. Open the trace and check the instrumented model calls and tools.
 
     If no trace arrives, check that `OTEL_EXPORTER_OTLP_ENDPOINT` is reachable from the agent and that you started
     `traced_agent:app`, not `orchestrator_agent.app`.
@@ -83,3 +97,4 @@ another OpenTelemetry backend. To learn what traces show and how they relate to 
 - [Configuration: observability](../reference/configuration.md#observability)
 - [Tracing and observability](../architecture/observability.md)
 - [Langfuse documentation](https://langfuse.com/docs)
+- [Langfuse's Pydantic AI integration](https://langfuse.com/integrations/frameworks/pydantic-ai)

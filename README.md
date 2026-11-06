@@ -9,19 +9,15 @@ published as a sub-project of workfloworchestrator.org; preview them with `uv ru
 
 ## Quick Start
 
-```bash
-cp .env.example .env
-# Edit .env with your DATABASE_URI and LLM settings
-
-uv sync
-uv run uvicorn orchestrator_agent.app:app --port 8080
-```
+Follow [Run the agent with your Orchestrator Core](docs/getting-started.md) to configure the database, Core MCP
+connection and model before launching. Keep the agent on its default port 8080; when sharing one host, give Core
+another port. The source launch explicitly loads `.env` with `uv run --env-file .env`.
 
 ## Endpoints
 
 | Path | Protocol | Description |
 | --- | --- | --- |
-| `POST /agui` | AG-UI | SSE streaming for frontend |
+| `POST /agui/` | AG-UI | SSE streaming for frontend; `/agui` redirects here |
 | `POST /` | A2A | Agent-to-agent JSON-RPC, protocol v1.0 (`SendMessage`, `SendStreamingMessage`) |
 | `GET /.well-known/agent-card.json` | A2A | Agent card discovery |
 | `POST /v1/chat/completions` | OpenAI chat completions | The agent as a chat model for LibreChat; workflow forms through its ask-user tool |
@@ -31,11 +27,17 @@ uv run uvicorn orchestrator_agent.app:app --port 8080
 
 ## Docker
 
+The repository's Compose file builds the agent image, loads `.env` and uses host networking. Its command listens on
+8080. Set `BASE_URL` to the address of that listener, and point `WFO_CORE_MCP_URL` at Core on a different port or host
+before starting it. Services on separate hosts or container addresses can each use 8080.
+
 ```bash
 docker compose up --build
 ```
 
 ## Demos
+
+The demo scripts use the agent's default address, `http://localhost:8080`. They do not send an authentication token.
 
 ```bash
 # Install demo dependencies (included in the default dev group)
@@ -68,13 +70,18 @@ uv run demos/mcp_client.py search "active subscriptions"
 | `AGENT_API_VERSION` | *(none)* | API version for Azure OpenAI (e.g. `2024-12-01-preview`) |
 | `AGENT_DOMAIN_CONTEXT` | *(empty)* | Optional free-text domain knowledge appended to the agent system prompt (e.g. identifier conventions and their filter fields). Empty disables the section |
 | `OAUTH2_ACTIVE` | `true` | Enable OIDC authentication on incoming requests (via `oauth2_lib`) |
+| `OAUTH2_AUTHORIZATION_ACTIVE` | `true` | Enable request authorization through OPA when incoming authentication is on |
+| `OPA_URL` | *(none)* | OPA decision URL; required when authentication and authorization are on |
 | `OAUTH2_OUTBOUND_ACTIVE` | *(unset)* | Enable OAuth2 client-credentials auth on outgoing requests to orchestrator-core. When unset, follows `OAUTH2_ACTIVE`; set to `true`/`false` to control outbound auth independently of incoming auth |
-| `OIDC_BASE_URL` | *(none)* | Base URL of the OIDC provider (required when `OAUTH2_ACTIVE=true`) |
+| `OIDC_BASE_URL` | *(none)* | Provider base URL accepted by `oauth2_lib`; the agent uses `OIDC_CONF_URL` for discovery |
 | `OIDC_CONF_URL` | *(none)* | OIDC discovery document URL (required when `OAUTH2_ACTIVE=true`) |
-| `OAUTH2_RESOURCE_SERVER_ID` | *(none)* | OAuth2 client ID / resource server ID (required when `OAUTH2_ACTIVE=true`) |
-| `OAUTH2_RESOURCE_SERVER_SECRET` | *(none)* | OAuth2 client secret / resource server secret (required when `OAUTH2_ACTIVE=true`) |
+| `OAUTH2_RESOURCE_SERVER_ID` | *(none)* | OAuth2 client id for the outbound service-account grant |
+| `OAUTH2_RESOURCE_SERVER_SECRET` | *(none)* | OAuth2 client secret for the outbound service-account grant |
 | `OAUTH2_TOKEN_URL` | *(none)* | OAuth2 token endpoint for outgoing client-credentials requests |
 | `LANGFUSE_ENABLED` | `false` | Enable Langfuse OpenTelemetry tracing. Requires the `langfuse` extra and the `LANGFUSE_PUBLIC_KEY` / `LANGFUSE_SECRET_KEY` / `LANGFUSE_HOST` environment variables |
+
+The application reads the process environment, not `.env` automatically. See [Configuration](docs/reference/configuration.md)
+for the complete settings and [authentication setup](docs/guides/secure-agent.md) for identity forwarding and service accounts.
 
 ### Custom LLM endpoint
 
@@ -82,7 +89,7 @@ By default the agent uses the standard OpenAI API with the `OPENAI_API_KEY` envi
 
 ```bash
 # Local Ollama
-AGENT_MODEL=openai:llama3
+AGENT_MODEL=openai:llama3.1
 AGENT_API_BASE=http://localhost:11434/v1
 
 # LiteLLM proxy or other OpenAI-compatible endpoint
@@ -99,9 +106,15 @@ AGENT_API_VERSION=2024-12-01-preview
 
 The `azure:` prefix on `AGENT_MODEL` (or setting `AGENT_API_VERSION`) selects the Azure provider automatically. When none of `AGENT_API_BASE`, `AGENT_API_KEY`, or `AGENT_API_VERSION` is set, `AGENT_MODEL` is passed directly to pydantic-ai as a model string (existing behavior).
 
+Put these settings in the environment loaded by your launch. Remove unused overrides entirely before selecting a
+native provider; an empty assignment is still set. The custom path always constructs an OpenAI chat model unless
+Azure is selected. Other providers can require additional SDK dependencies; see [Change the language model](docs/guides/own-llm.md).
+
 ### Identifier-aware search
 
-When a user references an entity by a concrete identifier — a customer name, a subscription id, or a code/number such as `IS4443`, `4433`, or `id 1234` — the search skill is guided to extract that token and use it as a high-signal search key: it discovers the matching field and filters with `like` (substring/typo-tolerant), and only falls back to plain ranking when no field clearly matches.
+Core's search-tool descriptions guide identifier lookups toward the corresponding field and a `like` filter when
+appropriate. `like` is a case-insensitive wildcard match, for example `%IS4443%`; it does not itself tolerate typos.
+Fuzzy retrieval provides approximate text ranking. See [Search behavior](docs/architecture/index.md#how-a-question-becomes-a-search).
 
 The agent also picks a **retriever** per query:
 
@@ -109,7 +122,9 @@ The agent also picks a **retriever** per query:
 - **SEMANTIC** — for descriptive or sentence-like queries.
 - **FUZZY** — for exact tokens, and whenever embeddings are unavailable.
 
-SEMANTIC and HYBRID require embeddings (configured in orchestrator-core via `EMBEDDING_API_ENABLED`). When embeddings are disabled, the agent automatically uses FUZZY and the prompt stops offering the embedding-based options — so the feature degrades safely with no configuration change.
+SEMANTIC and HYBRID require embeddings configured in Core via `EMBEDDING_API_ENABLED`. Core's tool descriptions
+describe the retrievers available in that deployment. See [Core search](https://workfloworchestrator.org/orchestrator-core/reference-docs/ai-search/#running-without-embeddings)
+for fallback behavior and explicit retriever requests.
 
 Use `AGENT_DOMAIN_CONTEXT` to teach the agent deployment-specific conventions that it cannot infer, for example:
 
@@ -130,7 +145,18 @@ Request ──► AG-UI adapter ──► async with Agent: ──► run_stream
          ──► MCP adapter  ──►   └─► MCPToolset ──► orchestrator-core /mcp
 ```
 
-Capabilities are always-on (`defer_loading=False`). The domain capabilities — **search**, **aggregate**, **entity** (details/lookup), **export**, **workflow** (start a workflow via its input form) — are **plugins**: authored Markdown files loaded at startup (see [Plugins](#plugins) below). Each plugin becomes one pydantic-ai capability that bundles its instructions and, when it declares `artifact:`, the matching behaviour — mapping *its* tools' JSON results into `QueryArtifact` / `DataArtifact` / `ExportArtifact` metadata for the AG-UI/A2A transport (`capabilities/behavior/`). Three hooks remain cross-cutting (single invariants across all tools, not plugin-owned): `FilterPathGuard` enforces that any `filters`/`group_by` call is preceded by `discover_filter_paths` (paths are DB-specific and must not be guessed), `WriteToolGate` hides core's write tools from the model (starting a workflow is the deterministic form-fill skill's job — see [Workflow form-fill](#workflow-form-fill-a2a-deterministic-jev-decided)), and `ProcessHistory` does sliding-window history trimming. Grouped aggregations and search results are rendered deterministically in code (a Mermaid chart / Markdown table carried as a `RenderedBlock`) and injected into the answer, so they appear even on text-only clients. MCP tools require an open session, so every run happens inside `async with agent:`.
+All built-in plugins are always on (`defer_loading=False`). **Search**, **aggregate**, **entity** and **export** are
+Markdown plugins loaded at startup; **workflow** is added where the form-fill skill runs, on A2A and chat completions.
+Each plugin contributes instructions and, when it declares `artifact:`, maps its tools' results to typed metadata
+in `capabilities/behavior/`. See [Plugins](#plugins).
+
+The cross-cutting guards cover deferred-tool visibility, discovery before filtering/grouping and history trimming.
+On A2A and chat completions, `WriteToolGate` also hides Core's three workflow mutations so the
+[form-fill skill](#workflow-form-fill-a2a-human-in-the-loop) controls starts. This gate is absent from MCP and AG-UI.
+
+Search tables and grouped charts are rendered in code. A2A and chat completions append them to the answer; AG-UI
+carries rendered blocks in artifact metadata, while MCP returns raw JSON. MCP sessions are opened per run with
+`async with agent:`. See [Endpoints and protocols](docs/reference/endpoints.md) for protocol-specific behavior.
 
 ### Plugins
 
@@ -274,15 +300,14 @@ and its tool arguments are built from core's request models (the agent depends o
 the skill never picks keys out of a dict; only the page schema itself, written for a browser form, is
 read here, and that half of the bridge goes once core's form tool returns a field spec.
 
-On every interface automatically discovered Core tools must have MCP annotations explicitly declaring
-`readOnlyHint: true`. New read-only tools are discovered automatically; tools marked as writes or missing
-the annotation are blocked. Core authors must label their tools accurately: the agent does not inspect
-their implementation. Known workflow write tools stay blocked during automatic discovery even if
-mislabeled, and frontend tools are excluded. Trusted capability code can explicitly expose selected
-local or Core mutations using `allow_capability_mutations`; the capability then owns approval and
-authorization for those calls. `WriteToolGate` runs with or without the form skill; the MCP and AG-UI agents have no
-`workflow` plugin. Workflow starts go through the separate form skill after a matching structured approval
-response. The capability bypass does not change that built-in flow or add approval to custom tools.
+The write-tool gate hides Core's three known workflow mutations only where the form-fill skill runs: A2A and
+chat completions. The MCP and AG-UI agents have neither that gate nor the workflow plugin, so their model can call
+Core's write tools directly. The gate matches tool names, not `readOnlyHint` annotations, and custom tools are not
+given an approval step automatically. AG-UI frontend tools are also passed to its underlying adapter. See
+[Read tools and write tools](docs/reference/runtime.md#read-tools-and-write-tools).
+
+On A2A and chat completions, built-in workflow starts go through the separate form skill after a matching approval
+response.
 The calling client must obtain that approval from a person. Conversation and query persistence
 still write to the database. Routing in front of the model and prefilling pages from the
 conversation with a typed decision engine (Jev) live on a separate branch; a handed-off key core does not
@@ -367,4 +392,4 @@ modelSpecs:
 A pending card survives a browser reload; it survives a LibreChat restart only when LibreChat runs with
 Redis (`USE_REDIS=true`).
 
-The **A2A adapter** uses [a2a-sdk](https://github.com/google/a2a-sdk) server primitives (`AgentExecutor`, `DefaultRequestHandler`, and the route factories). The SDK handles JSON-RPC routing, SSE streaming, task lifecycle, and agent card serving. The adapter implements a single `WFOAgentExecutor.execute()` method that drives the pydantic-ai event stream and publishes A2A events via `TaskUpdater`. The `AgentCard.skills` list is projected from the advertised capability specs (`skills_from_specs`), keeping the advertised skills in sync with the configured capabilities.
+The **A2A adapter** uses [a2a-sdk](https://github.com/a2aproject/a2a-python) server primitives (`AgentExecutor`, `DefaultRequestHandler`, and the route factories). The SDK handles JSON-RPC routing, SSE streaming, task lifecycle, and agent card serving. The adapter implements a single `WFOAgentExecutor.execute()` method that drives the pydantic-ai event stream and publishes A2A events via `TaskUpdater`. The `AgentCard.skills` list is projected from the advertised capability specs (`skills_from_specs`), keeping the advertised skills in sync with the configured capabilities.

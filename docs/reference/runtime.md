@@ -68,8 +68,8 @@ in the A2A agent card.
 
 Ownership of a tool drives two things. The results of the tool are mapped to the declared output type: a query result
 for a table or chart, a data result for one entity, or an export. And when a plugin is set to load on demand, its
-tools stay hidden together with its instructions until the model loads it. Tools owned by no plugin are always
-available.
+tools stay hidden together with its instructions until the model loads it. Tools owned by no plugin remain available
+unless the interface's write tool gate hides them.
 
 A few guards hold for all tools, so they are not part of a plugin. They are capabilities too, written in Python instead
 of Markdown:
@@ -80,9 +80,10 @@ of Markdown:
   through the form-fill skill. See [Read tools and write tools](#read-tools-and-write-tools).
 - **History trimming** keeps a sliding window of the conversation.
 
-Tables and charts are **rendered blocks**: the agent builds a Markdown table or a Mermaid chart from the result in code
-and adds it to the answer. The model only summarises, so the numbers and rows are not retyped by a model, and they
-appear on clients that only show text.
+Tables and charts are **rendered blocks**: the agent builds a Markdown table or a Mermaid chart from the result in
+code. The A2A and chat adapters append these blocks to the answer, so the rendered rows and numbers are not retyped
+by the model. AG-UI exposes the blocks as artifact metadata for the frontend to render. MCP returns the raw result
+JSON alongside the model's answer. See [Endpoints and protocols](endpoints.md).
 
 ## Workflow forms
 
@@ -96,7 +97,9 @@ The model selects a workflow through the workflow plugin. A form-fill skill then
    the options as choices. Consent fields are only ever accepted by an explicit answer of the person.
 4. **Confirm.** When the form is complete, the person approves the exact call that will be made. Approve starts the
    workflow and reject cancels it.
-5. **Start.** The skill makes the call with exactly the validated pages. A start is sent once per approval.
+5. **Start.** The skill makes the call with exactly the validated pages. Within a serialized conversation turn it
+   makes one start attempt for the matching approval. Core validation errors reopen the form; other failures close
+   it because the outcome may be unknown. This is not a distributed exactly-once execution guarantee.
 
 No chat text is read as an answer: a person who types *yes* has not approved anything. The questions and the approval
 travel as native pauses of the protocol, which is the human-in-the-loop extension of kagent over A2A, and the ask-user
@@ -115,8 +118,20 @@ The agent connects directly to the WFO PostgreSQL database using `DATABASE_URI`.
 and state snapshots in `graph_snapshots`, using the models supplied by Orchestrator Core. A snapshot includes
 message history, query state and any open workflow form. Later turns load the latest snapshot for the conversation.
 
-A2A and OpenAI chat completions share this conversation handling; AG-UI also uses PostgreSQL state persistence.
-The MCP endpoint runs independent requests without this conversation persistence.
+A2A and OpenAI chat completions replay stored message history. AG-UI loads and snapshots state, but passes the
+messages supplied by the frontend to its adapter instead of replaying stored history. The MCP endpoint records
+individual runs but does not load or snapshot conversation state.
+
+| Interface | Conversation identifier |
+| --- | --- |
+| OpenAI chat completions | `X-Conversation-Id`; without it, each request gets a new identifier |
+| A2A | `x-kagent-root-context-id`, then `x-kagent-parent-context-id`, then the A2A context id |
+| AG-UI | `threadId` for saved state; messages are supplied by the client |
+| MCP | Independent calls; no conversation continuation |
+
+Snapshots are looked up by conversation identifier, without a user-owner check. These identifiers are not access
+controls. A2A and chat adapters serialize turns with in-memory locks within their process; the database persistence
+does not provide cross-process locking for concurrent workers or replicas.
 
 See [Configuration](configuration.md) for the database connection setting and
 [Endpoints and protocols](endpoints.md) for conversation identifiers and client requirements.

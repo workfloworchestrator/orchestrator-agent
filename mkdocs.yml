@@ -5,17 +5,15 @@ repo_url: "https://github.com/workfloworchestrator/orchestrator-agent"
 repo_name: "workfloworchestrator/orchestrator-agent"
 nav:
   - Overview: index.md
-  - Getting started: getting-started.md
+  - How to run the agent with your Orchestrator Core: getting-started.md
   - Guides:
       - How to connect LibreChat: guides/librechat.md
       - How to use the agent with MCP: guides/mcp-clients.md
       - How to connect another agent over A2A: guides/a2a-planner.md
-      - Build a frontend with AG-UI: guides/ag-ui.md
-      - How to use your own LLM: guides/own-llm.md
-      - How to teach the agent your domain: guides/domain-context.md
-      - How to connect another service: guides/connect-service.md
-      - How to create your own agent: guides/create-agent.md
-      - How to secure the agent: guides/secure-agent.md
+      - How to change the language model: guides/own-llm.md
+      - How to add domain context: guides/domain-context.md
+      - How to customise a plugin: guides/customise-plugin.md
+      - How to configure authentication and authorization: guides/secure-agent.md
       - How to trace the agent: guides/tracing.md
       - How to benchmark prompt and model changes: guides/evals.md
       - How to add an evaluation case: guides/add-eval-case.md
@@ -29,7 +27,7 @@ nav:
       - Configuration: reference/configuration.md
       - Plugins: reference/plugins.md
       - Runtime behaviour: reference/runtime.md
-      - Evals: reference/evals.md
+      - Evaluation benchmark: reference/evals.md
 theme:
   name: material
   palette:

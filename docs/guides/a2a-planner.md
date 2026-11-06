@@ -3,7 +3,7 @@
 This guide shows you how to let another agent, usually a planner, call the Orchestrator Agent over
 [A2A](https://a2a-protocol.org/latest/). To see a working planner first, follow the
 [tutorial](https://workfloworchestrator.org/learn/orchestrator-agent/tutorials/example-orchestrator/). To build the
-second agent, see [How to create your own agent](create-agent.md).
+second agent, see [How to run a companion agent with docker-agent](https://workfloworchestrator.org/learn/orchestrator-agent/integrations/create-agent/).
 
 ## Steps
 
@@ -47,15 +47,16 @@ second agent, see [How to create your own agent](create-agent.md).
    `Authorization` header to pass the agent's check, and as `auth_token` in the message metadata so that Orchestrator
    Core sees the user. Without the metadata, calls to Orchestrator Core run as the agent's service account. See
    [Authentication and authorization](../architecture/auth.md#outbound-who-the-agent-acts-as).
-6. If users should start workflows through the calling agent, make it request the
-   [kagent human-in-the-loop extension](../reference/runtime.md#workflow-forms), as kagent 1.0 and later does. Without
+6. If users should start workflows through the calling agent, make it request and handle the
+   [kagent human-in-the-loop extension](../reference/runtime.md#workflow-forms). Verify that your runtime and version
+   relay both the questions and approval responses; the docker-agent toolset above alone does not establish this. Without
    it, the calling agent can ask questions but cannot start workflows.
 7. If your clients do not speak A2A, such as most chat UIs, put a gateway in front of the planner. Do not reuse the
    proxy of the example orchestrator: it checks no identity and sets no limits. See
    [Gateways](https://workfloworchestrator.org/learn/orchestrator-agent/production/#gateways).
 
-Restart the calling agent whenever you restart the Orchestrator Agent or change its plugins: most runtimes read the
-card only at startup.
+Refresh the calling agent's card cache after a change to `BASE_URL` or advertised skills. Restart it if its runtime
+loads agent cards only at startup.
 
 ## Verify it works
 

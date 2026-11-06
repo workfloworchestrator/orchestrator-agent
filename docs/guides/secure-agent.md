@@ -1,7 +1,8 @@
-# How to secure the agent
+# How to configure authentication and authorization
 
-This guide shows you how to let only signed-in users call the agent, and have it call Orchestrator Core as those
-users. To learn how the checks work, see [Authentication and authorization](../architecture/auth.md).
+Configure who may call the agent and which identity it uses when calling Orchestrator Core. Have a running agent
+and the client details from your identity provider ready. Edit the agent's `.env` for a source launch, or the
+environment supplied to your container. See [Authentication and authorization](../architecture/auth.md) for the design.
 
 ## Steps
 
@@ -24,6 +25,7 @@ OAUTH2_RESOURCE_SERVER_SECRET=<client secret>
     Set the decision endpoint of your policy:
 
     ```shell
+    OAUTH2_AUTHORIZATION_ACTIVE=true
     OPA_URL=https://opa.example.com/v1/data/agent/allow
     ```
 
@@ -39,13 +41,17 @@ OAUTH2_RESOURCE_SERVER_SECRET=<client secret>
 
 === "Orchestrator Core requires a token"
 
-    Set the token endpoint for the agent's service account:
+    Enable the fallback service account and set its token endpoint. Startup's tool-contract check uses this account
+    before there is a user request:
 
     ```shell
+    OAUTH2_OUTBOUND_ACTIVE=true
     OAUTH2_TOKEN_URL=https://idp.example.com/oauth2/token
     ```
 
-    In Orchestrator Core, give that client only the rights it needs, ideally read-only.
+    Give that client only the Core permissions needed by requests that use it. If it only handles questions, use
+    read permissions. Approved workflow starts need the appropriate workflow permission on the identity used for
+    that call. Do not grant broad write access merely to get a health or search check to pass.
 
 === "Orchestrator Core accepts calls without a token"
 
@@ -55,26 +61,38 @@ OAUTH2_RESOURCE_SERVER_SECRET=<client secret>
 
 ### 4. Send the user's token from your client
 
-Send the user's token in the `Authorization` header. If you connect over A2A, also put it in the message metadata
-as `auth_token`.
+For chat completions and AG-UI, send the user's token in the `Authorization` header. For A2A, send it both in that
+header and in the message metadata as `auth_token`. Configure Core to accept and authorize the forwarded token.
 
-For a client-specific setup, see [Connect LibreChat](librechat.md), [Use the agent with MCP](mcp-clients.md) or
-[Build a frontend with AG-UI](ag-ui.md).
+The agent's MCP endpoint authenticates the caller but does not forward their token to Core. Use a service account
+whose permissions are appropriate for every caller allowed to use that endpoint.
+
+For client details, see [Connect LibreChat](librechat.md), [Use the agent with MCP](mcp-clients.md) or the
+[AG-UI endpoint reference](../reference/endpoints.md#ag-ui).
 
 ### 5. Restrict where the agent listens
 
 1. Bind the published ports to a specific address.
 2. Put the agent behind a reverse proxy that terminates TLS.
 3. Keep the `DATABASE_URI` credentials in a secret store.
-4. Give the agent a read-only database role, if your deployment allows it.
+4. Give the database role the limited access needed to read and insert agent run records and state snapshots.
+   A wholly read-only role cannot run the agent. Core's MCP identity and this database role serve different purposes.
+5. Restrict direct access to the agent to trusted clients. Have each client generate and isolate its conversation
+   identifiers; the agent does not check user ownership when loading a conversation by id.
+
+Restart the source process with `uv run --env-file .env uvicorn orchestrator_agent.app:app --host 127.0.0.1 --port 8080`,
+or recreate your container so it receives the updated environment. For limits and other deployment controls, see
+[Running the agent in your own stack](https://workfloworchestrator.org/learn/orchestrator-agent/production/).
 
 ## Verify it works
 
-- Call an endpoint without a token. The agent should answer 401. `GET /health` stays open for monitoring.
+- Call a protected endpoint without a token, such as `GET /v1/models`. It should answer 401. `GET /health` and the
+  A2A agent card stay open for monitoring and discovery.
 - Call it with a valid token. A 403 with a decision id means OPA denied the request; a 503 means OPA could not be
   reached or `OPA_URL` is not set.
-- Ask a question that starts a workflow and check in Orchestrator Core that the workflow was started by your user,
-  not by the service account.
+- Use a user-token request to query Core and confirm its recorded identity. Through a configured LibreChat or A2A
+  client, complete and approve a workflow form and confirm the start was attributed to that user.
+- For an MCP request, confirm Core sees the intended service account.
 
 ## Reference
 

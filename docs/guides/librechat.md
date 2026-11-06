@@ -98,6 +98,16 @@ Use LibreChat 0.8.8 or later: older versions cannot show workflow forms. Keep `X
 - If the agent runs elsewhere, use an address the container can reach, ending in `/v1`. Do not use `localhost`: inside
   the container that is the container itself.
 
+The source setup guide binds the agent to `127.0.0.1`, which other containers cannot normally reach through the host
+gateway. For this local Compose setup, restart it on a container-reachable host address. For example:
+
+```shell
+uv run --env-file .env uvicorn orchestrator_agent.app:app --host 0.0.0.0 --port 8080
+```
+
+Keep that unauthenticated listener on a trusted development network. For shared access, complete the authenticated
+setup below and [configure access controls](secure-agent.md).
+
 ### 3. Set up sign-in
 
 === "The agent runs with `OAUTH2_ACTIVE=false`"
@@ -142,7 +152,8 @@ Use LibreChat 0.8.8 or later: older versions cannot show workflow forms. Keep `X
 docker compose up -d
 ```
 
-Open <http://localhost:3080> and register an account. After a change to `librechat.yaml` or `docker-compose.yml`, run
+Open <http://localhost:3080>. With the local email-login setup, register an account; with OpenID, use your provider's
+sign-in flow. After a change to `librechat.yaml` or `docker-compose.yml`, run
 `docker compose up -d --force-recreate`.
 
 Before you run it for real users, set permanent values for `CREDS_KEY`, `CREDS_IV`, `JWT_SECRET` and
@@ -165,7 +176,7 @@ answer with a chart. Then ask *Find all active subscriptions* to get a table.
   [Gateways](https://workfloworchestrator.org/learn/orchestrator-agent/production/#gateways).
 - [Enable embeddings](https://workfloworchestrator.org/orchestrator-core/reference-docs/ai-search/#running-it) in
   Orchestrator Core for semantic and hybrid search if you haven't already done so.
-- [Teach the agent your domain](domain-context.md) with your identifiers and terminology.
+- [Add domain context](domain-context.md) with your identifiers and terminology.
 
 ## Reference
 
