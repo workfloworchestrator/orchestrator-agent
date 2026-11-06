@@ -3,6 +3,10 @@ site_name: Orchestrator Agent
 site_description: An AI agent for Workflow Orchestrator to search your data in plain language and start workflows with approval.
 repo_url: "https://github.com/workfloworchestrator/orchestrator-agent"
 repo_name: "workfloworchestrator/orchestrator-agent"
+# Internal development notes stay in their original repository paths, outside the published docs.
+exclude_docs: |
+  /superpowers/
+  /plugin-driven-capabilities.md
 nav:
   - Overview: index.md
   - How to run the agent with your Orchestrator Core: getting-started.md
