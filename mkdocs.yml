@@ -1,6 +1,6 @@
 # workfloworchestrator.github.io uses site_name in the URL, don't change it
 site_name: Orchestrator Agent
-site_description: An AI agent for Workflow Orchestrator that answers questions and starts workflows over OpenAI, A2A, AG-UI and MCP.
+site_description: An AI agent for Workflow Orchestrator to search your data in plain language and start workflows with approval.
 repo_url: "https://github.com/workfloworchestrator/orchestrator-agent"
 repo_name: "workfloworchestrator/orchestrator-agent"
 nav:
