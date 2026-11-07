@@ -6,11 +6,14 @@ import os
 
 os.environ.setdefault("DATABASE_URI", "postgresql://test:test@localhost:5432/test")
 
+import json
+import re
 from datetime import UTC, datetime
 from types import SimpleNamespace
 from typing import Any
 from unittest.mock import AsyncMock, MagicMock, patch
 
+import httpx
 import pytest
 from ag_ui.core import ResumeEntry, RunAgentInput, UserMessage
 from fastapi import FastAPI
@@ -31,7 +34,7 @@ from orchestrator_agent.adapters.ag_ui.chats import UNTITLED, pending_stop, titl
 from orchestrator_agent.adapters.ag_ui.interrupts import pause
 from orchestrator_agent.adapters.words import shown
 from orchestrator_agent.api.endpoints import chats
-from orchestrator_agent.artifacts import QueryArtifact
+from orchestrator_agent.artifacts import ExportArtifact, QueryArtifact
 from orchestrator_agent.form_fill.skill import FormFillSkill
 from orchestrator_agent.form_fill.widgets import Option
 from orchestrator_agent.persistence import StoredThread, dump_messages
@@ -388,3 +391,103 @@ def test_only_a_searchable_question_of_the_pending_stop_is_searched(searching_cl
         assert searching_client.get("/chats/t3/options/port?q=a").status_code == 404
     with patch("orchestrator_agent.api.endpoints.chats.load_thread", return_value=_threads()[0]):  # no form open
         assert searching_client.get("/chats/t1/options/customer_id?q=a").status_code == 404
+
+
+# --- an export the chat prepared, as a CSV file ---------------------------------------------------------------
+
+
+EXPORT = ExportArtifact(
+    description="Prepared export for download", query_id="q1", download_url="/api/search/queries/q1/export"
+)
+ROWS = [
+    {
+        "subscription_id": "s-1",
+        "description": "Port 1",
+        "customer": {"name": "Alder College"},
+        "insync": True,
+        "note": None,
+    },
+    {
+        "subscription_id": "s-2",
+        "description": "Port 2\nsecond line",
+        "customer": {"name": "Birch"},
+        "insync": False,
+        "note": "x",
+    },
+]
+
+
+def _exporting_thread() -> StoredThread:
+    """A thread whose history holds a search and the export prepared for it."""
+    history = dump_messages(
+        [
+            ModelRequest(parts=[UserPromptPart(content="find subscriptions")]),
+            ModelResponse(parts=[ToolCallPart(tool_name="search", args={"q": "x"}, tool_call_id="c1")]),
+            ModelRequest(
+                parts=[
+                    ToolReturnPart(tool_name="search", content={"rows": [1, 2]}, tool_call_id="c1", metadata=ARTIFACT)
+                ]
+            ),
+            ModelResponse(parts=[TextPart(content="Two found.")]),
+            ModelRequest(parts=[UserPromptPart(content="export them")]),
+            ModelResponse(parts=[ToolCallPart(tool_name="export_query", args={"query_id": "q1"}, tool_call_id="c2")]),
+            ModelRequest(
+                parts=[
+                    ToolReturnPart(
+                        tool_name="export_query", content=EXPORT.model_dump_json(), tool_call_id="c2", metadata=EXPORT
+                    )
+                ]
+            ),
+            ModelResponse(parts=[TextPart(content="Here is your export.")]),
+        ]
+    )
+    return StoredThread(
+        "t4", AGENT_TYPE, datetime(2026, 10, 20, 11, 0, tzinfo=UTC), SearchState(message_history=history)
+    )
+
+
+@pytest.fixture
+def exporting_client(client):
+    client.app.state.core_api = Fetches({"/api/search/queries/q1/export": {"page": ROWS}})
+    return client
+
+
+def test_an_exports_reference_points_at_the_chats_own_export():
+    tool_messages = [m for m in transcript(_exporting_thread().state) if m.role == "tool"]
+    assert json.loads(tool_messages[-1].content)["download_url"] == "exports/q1"
+
+
+def test_an_export_is_served_as_a_csv_file_of_cores_rows_fetched_as_the_person_asking(exporting_client):
+    with (
+        patch("orchestrator_agent.api.endpoints.chats.load_thread", return_value=_exporting_thread()),
+        patch("orchestrator_agent.api.endpoints.chats.bind_outbound_token") as bound,
+    ):
+        response = exporting_client.get("/chats/t4/exports/q1", headers={"Authorization": "Bearer tok-1"})
+    assert bound.call_args.args == ("tok-1",)
+    assert exporting_client.app.state.core_api.urls == ["/api/search/queries/q1/export"]
+    assert response.status_code == 200
+    assert response.headers["content-type"].startswith("text/csv")
+    assert re.fullmatch(
+        r'attachment; filename="export_\d{4}-\d{2}-\d{2}-\d{6}\.csv"', response.headers["content-disposition"]
+    )
+    assert response.text.splitlines() == [
+        '"subscription_id";"description";"customer";"insync";"note"',
+        '"s-1";"Port 1";"{""name"": ""Alder College""}";"true";""',
+        '"s-2";"Port 2 second line";"{""name"": ""Birch""}";"false";"x"',
+    ]
+
+
+def test_only_an_export_the_chat_prepared_is_served(exporting_client):
+    with patch("orchestrator_agent.api.endpoints.chats.load_thread", return_value=_exporting_thread()):
+        assert exporting_client.get("/chats/t4/exports/q9").status_code == 404
+    assert exporting_client.app.state.core_api.urls == []
+
+
+@pytest.mark.parametrize(("status", "expected"), [(404, 404), (500, 502)])
+def test_what_core_answers_about_the_export_is_passed_on(client, status, expected):
+    async def failing(url: str) -> Any:
+        raise httpx.HTTPStatusError("no", request=httpx.Request("GET", url), response=httpx.Response(status))
+
+    client.app.state.core_api = failing
+    with patch("orchestrator_agent.api.endpoints.chats.load_thread", return_value=_exporting_thread()):
+        assert client.get("/chats/t4/exports/q1").status_code == expected

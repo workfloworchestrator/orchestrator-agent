@@ -22,6 +22,7 @@ def test_the_document_carries_what_travels_inside_agui_messages():
         "ChatSummary",
         "Chat",
         "QueryArtifact",
+        "ExportArtifact",
         "ChartData",
         "AskStop",
         "AskedQuestion",

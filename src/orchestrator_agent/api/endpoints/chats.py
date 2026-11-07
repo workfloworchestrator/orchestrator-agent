@@ -20,17 +20,24 @@ threads are listed, read or deleted here: kagent's and LibreChat's conversations
 
 from __future__ import annotations
 
-from typing import Annotated
+import csv
+import io
+import json
+from datetime import UTC, datetime
+from typing import Annotated, Any
 
-from fastapi import APIRouter, HTTPException, Query, Request
+import httpx
+from fastapi import APIRouter, HTTPException, Query, Request, Response
 from orchestrator.core.db import db
 from pydantic import BaseModel
 
-from orchestrator_agent.adapters.ag_ui.chats import Chat, ChatSummary, pending_stop, title_of, transcript
+from orchestrator_agent.adapters.ag_ui.chats import Chat, ChatSummary, exports_of, pending_stop, title_of, transcript
 from orchestrator_agent.adapters.ag_ui.worker import AGUI_AGENT_TYPES
 from orchestrator_agent.api.dependencies import bearer_token
 from orchestrator_agent.form_fill.pending import pending_of
 from orchestrator_agent.form_fill.skill import FormFillSkill
+from orchestrator_agent.form_fill.widgets.base import Fetch
+from orchestrator_agent.form_fill.widgets.source import SourceError
 from orchestrator_agent.mcp_client import bind_outbound_token
 from orchestrator_agent.persistence import StoredThread, delete_thread, list_threads, load_thread
 from orchestrator_agent.security import subject_of
@@ -108,6 +115,59 @@ async def search_options(
     if options is None:
         raise HTTPException(status_code=404, detail="No question is being searched by that name")
     return [FieldOption(value=option.value, label=option.label) for option in options]
+
+
+@router.get("/{thread_id}/exports/{query_id}")
+async def download_export(request: Request, thread_id: str, query_id: str) -> Response:
+    """An export the chat prepared, as a CSV file: core's rows for the query, fetched as the person asking.
+
+    The export's ``download_url`` in the chat points here. Core's own export endpoint answers JSON rows,
+    behind the person's token, on another origin than the page: this route forwards the token, fetches the
+    rows and writes them as the WFO UI writes a CSV. Only an export this chat prepared is served, so a query
+    id picked up elsewhere does not open another person's results.
+    """
+    thread = _mine(request, thread_id)
+    path = exports_of(thread.state).get(query_id)
+    if path is None:
+        raise HTTPException(status_code=404, detail="No such export in this chat")
+    core: Fetch = request.app.state.core_api
+    with bind_outbound_token(bearer_token(request)):
+        try:
+            document = await core(path)
+        except httpx.HTTPStatusError as error:
+            if error.response.status_code == 404:
+                raise HTTPException(status_code=404, detail="Core no longer has this export") from error
+            raise HTTPException(status_code=502, detail="Core could not export this query") from error
+        except (httpx.HTTPError, SourceError) as error:
+            raise HTTPException(status_code=502, detail="Core could not be reached for this export") from error
+    rows = document.get("page") if isinstance(document, dict) else None
+    if not isinstance(rows, list) or not all(isinstance(row, dict) for row in rows):
+        raise HTTPException(status_code=502, detail="Core's export is not rows")
+    name = f"export_{datetime.now(UTC):%Y-%m-%d-%H%M%S}.csv"
+    return Response(
+        _csv(rows), media_type="text/csv", headers={"Content-Disposition": f'attachment; filename="{name}"'}
+    )
+
+
+def _csv(rows: list[dict[str, Any]]) -> str:
+    """The rows as the WFO UI writes a CSV: semicolons, every value quoted, nested values as JSON, a row a line."""
+    columns = list(dict.fromkeys(key for row in rows for key in row))
+    text = io.StringIO()
+    writer = csv.writer(text, delimiter=";", quoting=csv.QUOTE_ALL, lineterminator="\n")
+    writer.writerow(columns)
+    writer.writerows([_cell(row.get(column)) for column in columns] for row in rows)
+    return text.getvalue()
+
+
+def _cell(value: Any) -> str:
+    """A value as the CSV carries it: nothing for None, JSON for a nested value, otherwise its words on one line."""
+    if value is None:
+        return ""
+    if isinstance(value, bool):
+        return "true" if value else "false"
+    if isinstance(value, dict | list):
+        return json.dumps(value)
+    return " ".join(str(value).splitlines())
 
 
 @router.delete("/{thread_id}", status_code=204)

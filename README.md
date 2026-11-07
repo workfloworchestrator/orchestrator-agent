@@ -19,7 +19,7 @@ uv run uvicorn orchestrator_agent.app:app --port 8080
 | Path | Protocol | Description |
 | --- | --- | --- |
 | `POST /agui/` | AG-UI | The agent behind a frontend (the chat popup, [orchestrator-agent-chat](https://github.com/workfloworchestrator/orchestrator-agent-chat); a bare page for it in `demos/web`); workflow forms through AG-UI interrupts |
-| `GET /chats/`, `GET /chats/{thread_id}`, `DELETE /chats/{thread_id}`, `GET /chats/{thread_id}/options/{field}` | REST | The person's AG-UI chats: list them, read one (its last messages, its pending form stop), forget one, search the options of a form question the stop asks |
+| `GET /chats/`, `GET /chats/{thread_id}`, `DELETE /chats/{thread_id}`, `GET /chats/{thread_id}/options/{field}`, `GET /chats/{thread_id}/exports/{query_id}` | REST | The person's AG-UI chats: list them, read one (its last messages, its pending form stop), forget one, search the options of a form question the stop asks, download an export the chat prepared as a CSV file |
 | `POST /` | A2A | Agent-to-agent JSON-RPC, protocol v1.0 (`SendMessage`, `SendStreamingMessage`) |
 | `GET /.well-known/agent-card.json` | A2A | Agent card discovery |
 | `POST /v1/chat/completions` | OpenAI chat completions | The agent as a chat model for LibreChat; workflow forms through its ask-user tool |
@@ -90,7 +90,8 @@ Typing a message while a card is open cancels the form first, then sends the mes
 turns from its own store (core's `graph_snapshots`, where the other routes keep their memory too) and records
 the run's messages. A small API next to the route serves them back: `GET /chats/` lists the person's chats,
 newest first; `GET /chats/{thread_id}?last=50` gives one with its last messages as AG-UI messages and the form
-stop it waits on; `DELETE /chats/{thread_id}` forgets it. The popup opens on that list (a chat whose form
+stop it waits on; `DELETE /chats/{thread_id}` forgets it; `GET /chats/{thread_id}/exports/{query_id}` serves an
+export the chat prepared as a CSV file, as the person asking. The popup opens on that list (a chat whose form
 waits is marked), and opening one loads its history and shows a pending form card again. A thread belongs to the subject of the bearer that
 created it: only that subject continues, reads or deletes it, and a thread written by another route (kagent,
 LibreChat) is never served here. The other routes are unchanged: they keep trusting the conversation id their

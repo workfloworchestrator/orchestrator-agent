@@ -37,7 +37,7 @@ from orchestrator_agent.adapters.a2a import A2A_SKILLS, NO_RESULTS, A2AAdapter, 
 from orchestrator_agent.adapters.a2a.kagent import HITL_EXTENSION_URI
 from orchestrator_agent.adapters.ag_ui import AGUIEventStream, AGUIWorker, _AGUIAdapter
 from orchestrator_agent.adapters.mcp import MCPApp, MCPWorker
-from orchestrator_agent.artifacts import QueryArtifact
+from orchestrator_agent.artifacts import ExportArtifact, QueryArtifact
 from orchestrator_agent.persistence import StoredThread
 from orchestrator_agent.state import Approval, AskField, Decision, FormFillSession, FormInput, Reply, SearchState
 
@@ -104,6 +104,17 @@ class TestAGUIEventStream:
 
         assert isinstance(results[0], ToolCallResultEvent)
         assert results[0].content == SAMPLE_ARTIFACT.model_dump_json()
+
+    @pytest.mark.asyncio
+    async def test_an_export_points_at_the_chats_own_export(self):
+        stream = self._make_stream()
+        export = ExportArtifact(
+            description="Prepared export", query_id="q1", download_url="/api/search/queries/q1/export"
+        )
+
+        results = [e async for e in stream.handle_function_tool_result(make_artifact_event("export_query", export))]
+
+        assert json.loads(results[0].content)["download_url"] == "exports/q1"
 
     @pytest.mark.asyncio
     async def test_non_artifact_tool_delegates_to_base(self):

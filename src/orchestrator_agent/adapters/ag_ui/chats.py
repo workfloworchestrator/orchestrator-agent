@@ -39,6 +39,7 @@ from pydantic_ai.messages import (
 )
 from pydantic_ai.ui.ag_ui import AGUIAdapter
 
+from orchestrator_agent.adapters.ag_ui.contract import carried
 from orchestrator_agent.adapters.words import shown
 from orchestrator_agent.artifacts import DataArtifact, ExportArtifact, QueryArtifact
 from orchestrator_agent.persistence import load_messages
@@ -126,7 +127,25 @@ def _reference(part: ToolReturnPart) -> ToolReturnPart:
         artifact = _ARTIFACT.validate_python(part.metadata)
     except ValidationError:
         return part
-    return dataclasses.replace(part, content=artifact.model_dump_json(), metadata=None)
+    return dataclasses.replace(part, content=carried(artifact), metadata=None)
 
 
-__all__ = ["UNTITLED", "Chat", "ChatSummary", "pending_stop", "title_of", "transcript"]
+def exports_of(state: SearchState) -> dict[str, str]:
+    """The exports the chat prepared: each query id, and core's path for its rows."""
+    exports: dict[str, str] = {}
+    for message in load_messages(state.message_history) or []:
+        if not isinstance(message, ModelRequest):
+            continue
+        for part in message.parts:
+            if not isinstance(part, ToolReturnPart) or part.metadata is None:
+                continue
+            try:
+                artifact = _ARTIFACT.validate_python(part.metadata)
+            except ValidationError:
+                continue
+            if isinstance(artifact, ExportArtifact):
+                exports[artifact.query_id] = artifact.download_url
+    return exports
+
+
+__all__ = ["UNTITLED", "Chat", "ChatSummary", "exports_of", "pending_stop", "title_of", "transcript"]

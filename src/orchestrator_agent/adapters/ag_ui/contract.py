@@ -36,7 +36,7 @@ from pydantic import BaseModel
 from pydantic.json_schema import JsonSchemaMode, models_json_schema
 
 from orchestrator_agent.adapters.ag_ui.interrupts import ApprovalAnswer, ApprovalStop, AskAnswers, AskStop
-from orchestrator_agent.artifacts import DataArtifact, ExportArtifact, QueryArtifact
+from orchestrator_agent.artifacts import DataArtifact, ExportArtifact, QueryArtifact, ToolArtifact
 
 # What the client reads, as the agent serialises it; what the client sends, as the agent validates it (its
 # optional fields optional).
@@ -49,6 +49,22 @@ CARRIED: tuple[tuple[type[BaseModel], JsonSchemaMode], ...] = (
     (AskAnswers, "validation"),
     (ApprovalAnswer, "validation"),
 )
+
+# The chat's own export, relative to the chat (``GET /chats/{thread_id}/``).
+EXPORT_PATH = "exports/{query_id}"
+
+
+def carried(artifact: ToolArtifact) -> str:
+    """The artifact as the client reads it: its JSON, an export's ``download_url`` pointing at the chat's own export.
+
+    A stored export keeps core's path, which is where the agent fetches the rows; a client could not use it
+    (another origin, behind the person's token, JSON rather than a file). What the client gets instead is
+    ``exports/{query_id}``, relative to the chat, where the chats API serves the rows as a CSV file as the
+    person asking.
+    """
+    if isinstance(artifact, ExportArtifact):
+        artifact = artifact.model_copy(update={"download_url": EXPORT_PATH.format(query_id=artifact.query_id)})
+    return artifact.model_dump_json()
 
 
 def openapi_with_the_agui_contract(app: FastAPI) -> dict[str, Any]:
