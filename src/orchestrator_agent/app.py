@@ -55,9 +55,11 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     ChatCompletionsAdapter(a2a.agent).add_routes(app)
     # And behind the AG-UI route (the chat popup): forms through AG-UI interrupts.
     app.state.agent = a2a.agent
-    # The chats API searches a form field's options with the skill's widgets, as the person asking.
+    # The chats API searches a form field's options with the skill's widgets, as the person asking, and serves
+    # a chat's export as a CSV file with the rows it fetches from core's API the same way.
     app.state.form_fill = form_fill
     app.state.core_toolset = core_toolset
+    app.state.core_api = form_fill.fetch
 
     mcp_app = MCPApp(build_agent(agent_settings.create_model()))
     app.mount("/mcp", mcp_app.app)
