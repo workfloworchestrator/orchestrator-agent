@@ -36,7 +36,7 @@ from pydantic_ai.capabilities import AbstractCapability
 from pydantic_ai.messages import ToolCallPart, ToolReturn
 from pydantic_ai.tools import RunContext, ToolDefinition
 
-from orchestrator_agent.artifacts import ToolArtifact
+from orchestrator_agent.artifacts import ExportArtifact, ToolArtifact
 from orchestrator_agent.capabilities.spec import PluginSpec
 from orchestrator_agent.tool_names import TOOL_NAME_PLACEHOLDERS
 
@@ -121,8 +121,12 @@ def _attach_artifact(result: Any, artifact: ToolArtifact) -> Any:
 
     When a chart/table is injected by the adapter the agent never sees it, so we tell it (only on the
     calls that actually inject) to summarise rather than list the rows — otherwise the prose duplicates.
+    An export's download is the client's to show, beside the step: the model reads the result without the
+    link core wrote in it, and is told not to write one.
     """
     notice = _injection_notice(artifact)
+    if isinstance(artifact, ExportArtifact):
+        result = _without_the_link(result)
     if isinstance(result, ToolReturn):
         result.metadata = artifact
         if notice and result.content is None:
@@ -131,8 +135,32 @@ def _attach_artifact(result: Any, artifact: ToolArtifact) -> Any:
     return ToolReturn(return_value=result, metadata=artifact, content=notice)
 
 
+# Core's export reply carries the link and asks the model to pass it on; neither reaches the model.
+_LINK_FIELDS = frozenset({"download_path", "download_url", "message"})
+
+
+def _without_the_link(result: Any) -> Any:
+    """The export result as the model reads it: what core said, less the link and the words that offer it."""
+    payload = _result_payload(result)
+    if not isinstance(payload, dict):
+        return result
+    stripped = {key: value for key, value in payload.items() if key not in _LINK_FIELDS}
+    if isinstance(result, ToolReturn):
+        result.return_value = stripped
+        return result
+    return stripped
+
+
 def _injection_notice(artifact: ToolArtifact) -> str | None:
-    """A note for the agent when this result carries a chart/table the adapter will append, else None."""
+    """A note for the agent when this result carries a chart/table the adapter will append, else None.
+
+    An export gets a note of its own: the download is shown beside the step, not in the model's words.
+    """
+    if isinstance(artifact, ExportArtifact):
+        return (
+            "The client shows the download beside this step. Reply with exactly this sentence and nothing else: "
+            "Download has been successfully prepared. Never write a URL or a link, which does not work from a chat."
+        )
     block = getattr(artifact, "rendered_block", None)
     if block is None:
         return None

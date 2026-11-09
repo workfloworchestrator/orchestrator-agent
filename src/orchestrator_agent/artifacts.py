@@ -95,4 +95,7 @@ class ExportArtifact(ToolArtifact):
     """Metadata for tools that produce a downloadable export reference."""
 
     query_id: str
-    download_url: str
+    download_url: str = Field(
+        description="Where the export is downloaded. On the AG-UI route it is relative to the chat: "
+        "``exports/{query_id}`` under ``GET /chats/{thread_id}/`` serves the rows as a CSV file, as the person asking."
+    )

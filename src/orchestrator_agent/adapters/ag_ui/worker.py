@@ -60,6 +60,7 @@ from pydantic_ai.ui.ag_ui._utils import INTERRUPT_ID_PREFIX
 from sqlalchemy.orm import Session
 from structlog import get_logger
 
+from orchestrator_agent.adapters.ag_ui.contract import carried
 from orchestrator_agent.adapters.ag_ui.interrupts import AGUIInterrupts, supports_interrupts
 from orchestrator_agent.adapters.hitl import HumanInTheLoop
 from orchestrator_agent.artifacts import ToolArtifact
@@ -114,7 +115,7 @@ class AGUIEventStream(_BaseAGUIEventStream[Any, Any]):
                 type=EventType.TOOL_CALL_RESULT,
                 role="tool",
                 tool_call_id=result.tool_call_id,
-                content=result.metadata.model_dump_json(),
+                content=carried(result.metadata),
             )
             return
 
