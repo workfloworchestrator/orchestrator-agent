@@ -36,8 +36,13 @@ CREATE_WORKFLOW_TOOL = "create_workflow"
 RESUME_WORKFLOW_PROCESS_TOOL = "resume_workflow_process"
 ABORT_WORKFLOW_PROCESS_TOOL = "abort_workflow_process"
 SUBSCRIPTION_WORKFLOWS_TOOL = "get_subscription_available_workflows"
-# Local (non-MCP) tool: the model hands a workflow start to the form-fill skill; not in ALL_TOOL_NAMES.
+# Local (non-MCP) tools of the form-fill skill; not in ALL_TOOL_NAMES. The model hands a workflow start to the
+# skill with the first, and fills the open form's pages with the others (``form_fill.tools``).
 START_WORKFLOW_FORM_TOOL = "start_workflow_form"
+SUBMIT_PAGE_TOOL = "submit_page"
+SEARCH_OPTIONS_TOOL = "search_options"
+RESTART_FROM_PAGE_TOOL = "restart_from_page"
+CANCEL_FORM_TOOL = "cancel_form"
 
 # Parameters of the workflow tools above, as their MCP schemas name them.
 # ``create_workflow`` is a path-plus-body endpoint in core with no request model to build its arguments from;
@@ -64,8 +69,8 @@ ALL_TOOL_NAMES = (
     SUBSCRIPTION_WORKFLOWS_TOOL,
 )
 
-# Tools that change the orchestrator. Hidden from the model by ``WriteToolGate``; the deterministic form-fill
-# skill calls ``create_workflow`` from code after the caller confirmed. Resume/abort are hidden too and not
+# Tools that change the orchestrator. Hidden from the model by ``WriteToolGate``; the form-fill skill calls
+# ``create_workflow`` from code after the person approved the start. Resume/abort are hidden too and not
 # offered through the agent yet.
 WRITE_TOOL_NAMES = (CREATE_WORKFLOW_TOOL, RESUME_WORKFLOW_PROCESS_TOOL, ABORT_WORKFLOW_PROCESS_TOOL)
 
@@ -93,6 +98,7 @@ __all__ = [
     "JSON_DATA_PARAM",
     "WORKFLOW_KEY_PARAM",
     "AGGREGATE_TOOL",
+    "CANCEL_FORM_TOOL",
     "CREATE_WORKFLOW_TOOL",
     "DISCOVER_FILTER_PATHS_TOOL",
     "EXPORT_QUERY_TOOL",
@@ -101,9 +107,12 @@ __all__ = [
     "LIST_WORKFLOWS_TOOL",
     "PATH_CONSUMING_PARAMS",
     "RESOLVE_ENTITY_TOOL",
+    "RESTART_FROM_PAGE_TOOL",
     "RESUME_WORKFLOW_PROCESS_TOOL",
+    "SEARCH_OPTIONS_TOOL",
     "SEARCH_TOOL",
     "START_WORKFLOW_FORM_TOOL",
+    "SUBMIT_PAGE_TOOL",
     "SUBSCRIPTION_WORKFLOWS_TOOL",
     "WRITE_TOOL_NAMES",
 ]

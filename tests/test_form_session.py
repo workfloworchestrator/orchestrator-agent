@@ -1,52 +1,39 @@
-"""The form-fill state machine: every cell of its transition table, and what a turn's input is as an event."""
+"""The form-fill state machine: what a turn's response is as an event, what each does, and the one writer."""
+
+import ast
+from pathlib import Path
 
 import pytest
+from orchestrator.core.schemas.mcp_tools import WorkflowFormPage
 
+from orchestrator_agent.form_fill import session as fs
 from orchestrator_agent.form_fill.session import (
-    TRANSITIONS,
     Action,
-    Answered,
     Approved,
-    Cancelled,
-    Event,
     FormPhase,
-    Opened,
+    Message,
+    Rejected,
     Shown,
-    Unanswered,
     event_of,
     transition,
 )
-from orchestrator_agent.state import Decision, FormInput
-
-EVENTS: tuple[type[Event], ...] = (Opened, Answered, Approved, Cancelled, Unanswered, Shown)
-EXPECTED = {
-    FormPhase.OPENING: (Action.WALK, *([Action.ABANDON] * 5)),
-    FormPhase.GATHERING: (Action.NOTHING, Action.WALK, Action.WALK, Action.CANCEL, Action.ABANDON, Action.WALK),
-    FormPhase.CONFIRMING: (Action.NOTHING, Action.WALK, Action.START, Action.CANCEL, Action.ABANDON, Action.WALK),
-    FormPhase.DONE: tuple([Action.NOTHING] * 6),
-}
-
-
-def test_the_table_covers_every_phase_and_event_once():
-    assert set(TRANSITIONS) == {(phase, event) for phase in FormPhase for event in EVENTS}
-
-
-@pytest.mark.parametrize("phase", list(FormPhase))
-@pytest.mark.parametrize("event", EVENTS, ids=lambda event: event.__name__)
-def test_each_transition(phase, event):
-    instance = event({"speed": "1000"}) if event is Answered else event()
-    assert transition(phase, instance) is EXPECTED[phase][EVENTS.index(event)]
+from orchestrator_agent.state import Decision, FormFillSession, FormInput
 
 
 @pytest.mark.parametrize(
     ("given", "unseen", "expected"),
     [
-        pytest.param(None, False, Unanswered(), id="a-message-is-no-response"),
+        pytest.param(None, False, Message(), id="a-message-is-no-response"),
         pytest.param(None, True, Shown(), id="a-stop-not-shown-yet"),
-        pytest.param(FormInput(decision=Decision.CANCEL), False, Cancelled(), id="rejected"),
-        pytest.param(FormInput(values={"a": 1}, decision=Decision.CANCEL), False, Cancelled(), id="a-cancel-wins"),
-        pytest.param(FormInput(values={"a": 1}), False, Answered({"a": 1}), id="answers"),
-        pytest.param(FormInput(values={}, decision=Decision.START), False, Approved(), id="approved"),
+        pytest.param(FormInput(decision=Decision.CANCEL), False, Rejected(), id="rejected"),
+        pytest.param(
+            FormInput(decision=Decision.CANCEL, reason="make it 1G"),
+            False,
+            Rejected("make it 1G"),
+            id="rejected-with-words",
+        ),
+        pytest.param(FormInput(decision=Decision.CANCEL, reason="  "), False, Rejected(), id="blank-words-are-none"),
+        pytest.param(FormInput(decision=Decision.START), False, Approved(), id="approved"),
         pytest.param(FormInput(), False, Shown(), id="nothing-readable-shows-the-stop-again"),
     ],
 )
@@ -54,12 +41,48 @@ def test_what_a_turns_input_is(given, unseen, expected):
     assert event_of(given, unseen) == expected
 
 
+@pytest.mark.parametrize(
+    ("event", "expected"),
+    [
+        (Approved(), Action.START),
+        (Rejected(), Action.CANCEL),
+        (Rejected("no, 1G"), Action.REOPEN),
+        (Shown(), Action.SUMMARY),
+        (Message(), Action.REOPEN),
+    ],
+    ids=lambda x: getattr(x, "name", type(x).__name__),
+)
+def test_at_the_approval_the_response_decides(event, expected):
+    assert transition(FormPhase.CONFIRMING, event) is expected
+
+
+@pytest.mark.parametrize("phase", [FormPhase.GATHERING, FormPhase.DONE])
+@pytest.mark.parametrize("event", [Approved(), Rejected("x"), Shown(), Message()], ids=lambda e: type(e).__name__)
+def test_outside_the_approval_every_turn_is_the_models(phase, event):
+    assert transition(phase, event) is Action.NOTHING
+
+
+# --- the writes keep the session consistent ---------------------------------------------------------------------
+
+
+def _page(index: int, title: str = "T") -> WorkflowFormPage:
+    return WorkflowFormPage(page=index, complete=False, status="next", title=title, schema={"type": "object"})
+
+
+def test_a_form_with_no_page_left_is_complete_and_an_accepted_page_starts_the_next_one_fresh():
+    session = FormFillSession(workflow_key="w")
+    fs.opened(session, None)
+    assert session.status == "confirming" and fs.current(session) is None
+    fs.opened(session, _page(0))
+    fs.rejected(session, {"a": 1}, [])
+    fs.counted(session)
+    fs.accepted(session, {"a": 1}, _page(1))
+    assert (session.draft, session.rejected, session.calls) == ({}, [], 0)
+    fs.restarted(session, 0, None)  # the form has no page there any more
+    assert session.status == "confirming" and session.pages == [] and session.page_inputs == []
+
+
 # --- one writer: the session is written in session.py and nowhere else --------------------------------------
-
-import ast  # noqa: E402
-from pathlib import Path  # noqa: E402
-
-from orchestrator_agent.state import FormFillSession  # noqa: E402
 
 SRC = Path(__file__).resolve().parents[1] / "src" / "orchestrator_agent"
 FIELDS = set(FormFillSession.model_fields)
@@ -73,7 +96,7 @@ def _is_session(node: ast.AST) -> bool:
 
 
 def _field_of(node: ast.AST) -> str | None:
-    """The session field an expression reaches into (``session.values[...]``, ``session.resolved[...]``)."""
+    """The session field an expression reaches into (``session.found[...]``, ``session.pages.append``)."""
     while isinstance(node, (ast.Subscript, ast.Call, ast.Attribute)):
         if isinstance(node, ast.Attribute) and node.attr in FIELDS and _is_session(node.value):
             return node.attr

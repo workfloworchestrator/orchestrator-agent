@@ -124,9 +124,12 @@ async def test_options_that_wait_for_another_value_mark_the_field():
     assert enriched.choices == {}  # nothing to resolve against yet
 
 
-async def test_a_failing_widget_leaves_the_property_as_it_was():
+async def test_a_source_that_fails_leaves_the_fields_options_unknown_to_be_searched():
     page = await enrich(PAGE, ctx(Customers(RuntimeError("core down"))))
-    assert page.schema == PAGE and page.choices == {}
+    fields = fields_of_schema(page.schema)
+    sourced = {name for name, field in fields.items() if field.widget == {"id": "optionsSource", "unknown": True}}
+    assert sourced == {"customer_id", "backup", "customers"} and fields["note"].widget is None
+    assert page.choices == {} and not any(field.options for field in fields.values())  # nothing was written in
 
 
 async def test_the_options_are_fetched_once_per_page_and_the_schema_is_not_mutated():

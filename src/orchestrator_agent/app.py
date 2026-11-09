@@ -48,17 +48,15 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
 
     a2a_url = f"{agent_settings.BASE_URL}/"
     model = agent_settings.create_model()
-    form_fill = build_form_fill_skill(model)
+    form_fill = build_form_fill_skill()
     a2a = A2AAdapter(build_agent(model, form_fill=form_fill), url=a2a_url)
     a2a.add_routes(app)
-    # The same agent as an OpenAI-compatible chat model (LibreChat): forms through its ask-user tool.
+    # The same agent as an OpenAI-compatible chat model (LibreChat): a form's approval through its ask-user tool.
     ChatCompletionsAdapter(a2a.agent).add_routes(app)
-    # And behind the AG-UI route (the chat popup): forms through AG-UI interrupts.
+    # And behind the AG-UI route (the chat popup): a form's approval through an AG-UI interrupt.
     app.state.agent = a2a.agent
-    # The chats API searches a form field's options with the skill's widgets, as the person asking, and serves
-    # a chat's export by passing on the CSV file it fetches from core's API the same way.
-    app.state.form_fill = form_fill
-    app.state.core_toolset = core_toolset
+    # The chats API serves a chat's export by passing on the CSV file it fetches from core's API, as the person
+    # asking.
     app.state.core_api = form_fill.fetch
 
     mcp_app = MCPApp(build_agent(agent_settings.create_model()))
@@ -79,7 +77,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
         agui_path="/agui/",
         mcp_path="/mcp",
         agent_model=agent_settings.AGENT_MODEL,
-        form_fill_skill="literal",
+        form_fill_skill="hybrid",
     )
 
     yield

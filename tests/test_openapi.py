@@ -24,13 +24,12 @@ def test_the_document_carries_what_travels_inside_agui_messages():
         "QueryArtifact",
         "ExportArtifact",
         "ChartData",
-        "AskStop",
-        "AskedQuestion",
         "ApprovalStop",
-        "AskAnswers",
+        "ApprovalAnswer",
     ):
         assert name in schemas, name
-    assert "values" not in schemas["AskedQuestion"]["properties"], (
-        "the form values behind the choices stay on the agent"
-    )
+    # The form's pages are filled in conversation: no question card, no options route.
+    assert not {"AskStop", "AskedQuestion", "AskAnswers", "FieldOption"} & set(schemas)
+    assert "/chats/{thread_id}/options/{field}" not in app.openapi()["paths"]
+    assert schemas["ApprovalAnswer"]["properties"]["reason"]["anyOf"][0] == {"type": "string"}
     assert schemas["QueryArtifact"]["properties"]["chart"]["anyOf"][0] == {"$ref": "#/components/schemas/ChartData"}

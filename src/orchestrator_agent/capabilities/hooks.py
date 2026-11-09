@@ -21,8 +21,8 @@ across all tools:
 - ``FilterPathGuard`` — a filtered/grouped call must follow ``discover_filter_paths``. It self-scopes
   by tool *schema* (any tool exposing ``filters``/``group_by``), so it is one cross-cutting instance,
   not something each filtering plugin owns a copy of.
-- ``WriteToolGate`` — where the form-fill skill runs (A2A), core's write tools (start/resume/abort a
-  workflow) are hidden from the model; writes happen only through the deterministic skill (``form_fill``).
+- ``WriteToolGate`` — where the form-fill skill runs, core's write tools (start/resume/abort a workflow)
+  are hidden from the model; a workflow is started only by the skill, after the person approved (``form_fill``).
 - ``ProcessHistory`` — sliding-window history trimming, agent-wide.
 
 Per-tool *result* behavior (mapping a tool's JSON into rich artifacts) is owned by the plugins
@@ -127,10 +127,10 @@ class DeferredToolGate(AbstractCapability[Any]):
 class WriteToolGate(AbstractCapability[Any]):
     """Hide core's write tools from the model (in the agent the form-fill skill runs in).
 
-    Starting a workflow is done by the deterministic form-fill skill (``orchestrator_agent.form_fill``),
-    which walks the form, has the calling agent confirm, and calls ``create_workflow`` from code. The model
-    only ever reads, so it cannot start a workflow on a half-filled form or on a confirmation it inferred —
-    the write tools are simply not in its toolset. Resuming and aborting processes are hidden for the same
+    Starting a workflow is done by the form-fill skill (``orchestrator_agent.form_fill``): the model fills the
+    form's pages, the person approves the start, and code calls ``create_workflow``. The model never writes,
+    so it cannot start a workflow on a half-filled form or on a confirmation it inferred — the write tools
+    are simply not in its toolset. Resuming and aborting processes are hidden for the same
     reason and are not offered through the agent yet (a follow-up for the skill).
     """
 
