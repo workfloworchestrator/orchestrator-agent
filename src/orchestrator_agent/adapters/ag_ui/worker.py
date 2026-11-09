@@ -16,12 +16,12 @@
 pydantic-ai's AG-UI adapter turns a run into the protocol's events: the frontend sends the thread's
 messages with each run and streams the text, the tool calls and their results back. Two things are this
 module's: tool results that carry an artifact go out as the artifact's lightweight reference (the UI
-fetches the full result lazily), and the workflow form-fill skill runs in front of the model, answered by
-a person through AG-UI interrupts (``interrupts``).
+fetches the full result lazily), and a workflow form's start is approved by a person through an AG-UI
+interrupt (``interrupts``); the form's pages are filled by the model in the conversation itself.
 
 A form turn works as on the other protocols (``adapters.a2a``, ``adapters.chat``): before the run, the
 conversation's open form and the person's response carried by the run (a resume entry) go on the run
-state; the skill claims the turn inside the run; after it, the skill's reply is streamed in the
+state; the skill handles the response inside the run; after it, the skill's reply is streamed in the
 transport's words and its stop ends the run with an interrupt outcome, recorded on the session before the
 state is snapshotted. The state the run uses is the server's own, keyed on the thread: what the frontend
 sends as AG-UI state is not read.
@@ -49,6 +49,7 @@ from ag_ui.core import (
     TextMessageEndEvent,
     TextMessageStartEvent,
     ToolCallResultEvent,
+    UserMessage,
 )
 from orchestrator.core.db.models import AgentRunTable
 from pydantic_ai.messages import FunctionToolResultEvent, TextPart, ToolReturnPart
@@ -229,15 +230,16 @@ class AGUIWorker:
             db_session.commit()
             logger.debug("Created new agent run", run_id=str(run_id), thread_id=thread_id)
 
-        state.user_input = FORM_RESPONSE if run_input.resume else AGUIWorker._extract_user_input(run_input)
+        said = AGUIWorker._extract_user_input(run_input)
+        state.user_input = said or (FORM_RESPONSE if run_input.resume else "")
         state.run_id = run_id
         logger.debug("Run state", user_input=state.user_input[:100], resumed=bool(run_input.resume))
 
         response = transport.read(state.form_fill, run_input) if transport is not None else None
         if isinstance(response, Interrupt):  # the transport answers this run itself: the stop, shown again
             return AGUIWorker._shows(run_input, response)
-        if run_input.resume and response is None:
-            # A response to a stop that is not pending (the form closed): say so, and run nothing.
+        if run_input.resume and response is None and not said:
+            # A response to a stop that is not pending (the form closed), and nothing else: say so, run nothing.
             return AGUIWorker._says(run_input, NOT_OPEN)
         state.hitl = transport is not None
         state.form_input = response
@@ -296,10 +298,18 @@ class AGUIWorker:
 
         pydantic-ai builds the run's state from the input's state. It also maps every resume entry back to a
         tool call of its own (its approval interrupts carry a prefix it knows), so the entry that answered
-        the form-fill skill's stop, already read into the state, is left out.
+        the form-fill skill's stop, already read into the state, is left out. What the person said when
+        they did not approve the start is the run's message when the run carries no other: the model
+        acts on it.
         """
         resume = [entry for entry in run_input.resume or [] if entry.interrupt_id.startswith(INTERRUPT_ID_PREFIX)]
-        return run_input.model_copy(update={"state": AGUIWorker._raw_state(state), "resume": resume or None})
+        messages = list(run_input.messages)
+        reason = state.form_input.reason if state.form_input is not None else None
+        if reason and not AGUIWorker._extract_user_input(run_input):
+            messages.append(UserMessage(id=uuid.uuid4().hex, role="user", content=reason))
+        return run_input.model_copy(
+            update={"state": AGUIWorker._raw_state(state), "resume": resume or None, "messages": messages}
+        )
 
     @staticmethod
     def _raw_state(state: SearchState) -> dict[str, Any]:

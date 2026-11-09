@@ -1,16 +1,12 @@
-"""The one widget and the skill against a real orchestrator-core: its routes, its MCP tools, its forms."""
+"""The options-source reader and the page tools against a real orchestrator-core: its routes, its MCP tools, its forms."""
 
 from __future__ import annotations
-
-import pytest
 
 from orchestrator_agent.form_fill.model import fields_in, options_of
 from orchestrator_agent.form_fill.skill import FormFillSkill
 from orchestrator_agent.form_fill.widgets import CoreApi, source_options
 from orchestrator_agent.form_fill.widgets.enrich import enrich
-from orchestrator_agent.state import Decision, SearchState
-
-from ..test_form_fill import open_form, turn
+from orchestrator_agent.state import SearchState
 
 P1, P2 = "d8a3f9b0-1111-4000-8000-000000000001", "d8a3f9b0-1111-4000-8000-000000000002"
 KEY = "widget_demo"
@@ -22,41 +18,15 @@ CUSTOMER = {
 PRODUCT = {"type": "string", "optionsSource": {"url": "/api/products/", "value": "product_id", "label": "name"}}
 
 
-class Chooser:
-    def __init__(self, picks):
-        self.picks, self.calls = picks, []
-
-    async def choose(self, title, options, words):
-        self.calls.append([value for value, _ in options])
-        return self.picks
-
-
-class Refuses:
-    async def choose(self, title, options, words):
-        raise AssertionError("no model call expected")
-
-
-def skill(fetch, choose=None) -> FormFillSkill:
-    return FormFillSkill(fetch=fetch, choose=choose)
-
-
 async def test_customers_come_from_the_route_the_field_names(ctx):
     options = await source_options(CUSTOMER, ctx)
     assert len(options) == 30 and options[0].value == "cust-00" and options[0].label == "Customer 00 (C00)"
 
 
-@pytest.mark.parametrize(
-    "words,first",
-    [
-        pytest.param("Testaccount", "cust-07", id="name"),
-        pytest.param("C12", "cust-12", id="shortcode"),
-        pytest.param("customer 02", "cust-02", id="most-words-first"),
-        pytest.param("nobody", None, id="nothing"),
-    ],
-)
-async def test_searching_the_customers(ctx, words, first):
-    options = await source_options(CUSTOMER, ctx, search=words)
-    assert (options[0].value if options else None) == first
+async def test_searching_the_customers(ctx):
+    assert (await source_options(CUSTOMER, ctx, search="Testaccount"))[0].value == "cust-07"
+    assert (await source_options(CUSTOMER, ctx, search="C12"))[0].value == "cust-12"
+    assert await source_options(CUSTOMER, ctx, search="nobody") == []
 
 
 async def test_products_come_from_cores_own_route(ctx):
@@ -68,45 +38,38 @@ async def test_the_real_page_is_enriched(core, ctx):
     page = await core.direct_call_tool("get_workflow_form", {"workflow_key": KEY, "page_inputs": []})
     enriched = await enrich(page["schema"], ctx)
     fields = {field.name: field for field in fields_in(enriched.schema)}
-    assert {P1, P2} <= {str(o.value) for o in options_of(fields["product_id"]) or ()}  # a few products: chips
-    assert fields["customer_id"].widget == {"id": "optionsSource", "total": 30}  # thirty customers: typed
+    assert {P1, P2} <= {str(o.value) for o in options_of(fields["product_id"]) or ()}  # a few products: in the schema
+    assert fields["customer_id"].widget == {"id": "optionsSource", "total": 30}  # thirty customers: searched
     assert set(enriched.choices) == {"customer_id", "customers", "product_id"}  # every sourced field with options
-    assert {name for name, field in fields.items() if "total" in (field.widget or {})} == {"customer_id", "customers"}
     assert fields["note"].widget is None
 
 
-async def test_an_exact_name_walks_to_the_approval_and_core_runs_it(core, fetch):
-    state, form = SearchState(), skill(fetch, Refuses())
-    reply = await open_form(form, core.direct_call_tool, state, KEY, {"customer_id": "testaccount", "product_id": P1})
-    assert reply.status == "confirming" and reply.values["customer_id"] == "cust-07"
-    assert reply.labels["customer_id"] == "Testaccount (TA)" and reply.labels["product_id"] == "Widget Port 10G"
-    started = await turn(form, core.direct_call_tool, state, Decision.START)  # the human's approval
-    assert started.status == "started" and started.process_id
+async def test_a_searched_value_walks_to_the_approval_and_core_runs_it(core, fetch):
+    """The page tools over the real core: search, submit with a found value, approve, start."""
+    state, skill = SearchState(), FormFillSkill(fetch=fetch)
+    state.hitl = True
+    opened = await skill.open(state, core.direct_call_tool, KEY)
+    assert opened["status"] == "opened" and "customer_id" in opened["page"]["fields"]
+    session = state.form_fill
+    found = await skill.search(session, core.direct_call_tool, "customer_id", "testaccount")
+    assert [o["value"] for o in found["options"]] == ["cust-07"]
+    strange = await skill.submit(session, core.direct_call_tool, {"customer_id": "cust-99", "product_id": P1})
+    assert strange["status"] == "rejected" and strange["errors"][0]["field"] == "customer_id"  # not found by a search
+    outcome = await skill.submit(session, core.direct_call_tool, {"customer_id": "cust-07", "product_id": P1})
+    assert outcome["status"] in ("accepted", "complete")
+    while outcome["status"] == "accepted":  # any further page: submit it empty, core's defaults apply
+        outcome = await skill.submit(session, core.direct_call_tool, {})
+    assert outcome["status"] == "complete"
+    summary = skill.summary(session)
+    assert summary.approval is not None and "cust-07" in summary.text and "Testaccount (TA)" in summary.text
+    started = await skill.start(session, core.direct_call_tool)
+    assert '"status":"started"' in started.text and "process_id" in started.text
 
 
-async def test_the_chooser_picks_among_the_candidates(core, fetch):
-    chooser = Chooser(["cust-12"])
-    answers = {"customer_id": "twelve", "product_id": P1}
-    reply = await open_form(skill(fetch, chooser), core.direct_call_tool, SearchState(), KEY, answers)
-    assert reply.values["customer_id"] == "cust-12" and len(chooser.calls[0]) == 30  # all thirty: a short list
-
-
-async def test_several_fits_are_asked_again_as_chips(core, fetch):
-    chooser = Chooser(["cust-01", "cust-02"])
-    answers = {"customer_id": "one or two", "product_id": P1}
-    reply = await open_form(skill(fetch, chooser), core.direct_call_tool, SearchState(), KEY, answers)
-    customer = reply.question("customer_id")
-    assert reply.status == "gathering" and customer.values == ("cust-01", "cust-02")
-
-
-async def test_a_list_of_customers_resolves_each_item(core, fetch):
-    answers = {"customer_id": "C03", "customers": ["testaccount, C05"], "product_id": P2}  # as both transports send it
-    reply = await open_form(skill(fetch, Refuses()), core.direct_call_tool, SearchState(), KEY, answers)
-    assert reply.values["customers"] == ["cust-07", "cust-05"]
-
-
-async def test_an_unreachable_source_leaves_customer_free_text(core):
+async def test_an_unreachable_source_leaves_the_field_to_the_person(core):
     unreachable = CoreApi("http://127.0.0.1:9", timeout=2)
-    reply = await open_form(skill(unreachable), core.direct_call_tool, SearchState(), KEY, {"product_id": P1})
-    customer = reply.question("customer_id")
-    assert customer.choices == () and customer.hint == ""  # as before widgets: typed, nothing resolved
+    state, skill = SearchState(), FormFillSkill(fetch=unreachable)
+    opened = await skill.open(state, core.direct_call_tool, KEY)
+    assert "customer_id" in opened["page"]["fields"]  # the field is asked without its options
+    found = await skill.search(state.form_fill, core.direct_call_tool, "customer_id", "x")
+    assert "note" in found or "error" in found

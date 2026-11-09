@@ -39,7 +39,7 @@ from orchestrator_agent.adapters.ag_ui import AGUIEventStream, AGUIWorker, _AGUI
 from orchestrator_agent.adapters.mcp import MCPApp, MCPWorker
 from orchestrator_agent.artifacts import ExportArtifact, QueryArtifact
 from orchestrator_agent.persistence import StoredThread
-from orchestrator_agent.state import Approval, AskField, Decision, FormFillSession, FormInput, Reply, SearchState
+from orchestrator_agent.state import Approval, Decision, FormFillSession, FormInput, Reply, SearchState
 
 from .conftest import (
     make_artifact_event,
@@ -415,15 +415,15 @@ class TestWFOAgentExecutorHITL:
         finally:
             patcher.stop()
 
-    ASK = Reply(
-        '{"workflow_key":"w","status":"gathering","page":1}',
-        ask=[AskField(name="redundancy", question="Redundancy?", choices=["Protected"], values=["protected"])],
+    APPROVAL = Reply(
+        '{"workflow_key":"w","status":"confirming"}',
+        approval=Approval(hint="Start?", tool_name="create_workflow", args={"workflow_key": "w", "json_data": [{}]}),
     )
 
     @staticmethod
     def _stopping(reply):
         def stopped(state):
-            state.form_fill = state.form_fill or FormFillSession(workflow_key="w", status="gathering")
+            state.form_fill = state.form_fill or FormFillSession(workflow_key="w", status="confirming")
             state.form_reply = reply
 
         return _agent_doing(stopped, text=reply.text)
@@ -437,64 +437,33 @@ class TestWFOAgentExecutorHITL:
 
     @pytest.mark.asyncio
     @patch("orchestrator.core.db.db")
-    async def test_a_stop_pauses_the_task_with_an_ask_user_request(self, _mock_db):
-        last, state = await self._run(self._stopping(self.ASK), self._context("create a lightpath"))
-        assert last.status.state == TaskState.TASK_STATE_INPUT_REQUIRED
-        assert last.status.message.parts[0].text == self.ASK.text
-        payload = json_format.MessageToDict(last.status.message.metadata)[self.URI]
-        assert payload["type"] == "ask_user_request" and payload["questions"] == [
-            {"question": "Redundancy?", "choices": ["Protected"], "multiple": False}
-        ]
-        assert list(last.status.message.extensions) == [self.URI]
-        # The session remembers what was asked (keyed by the request id), before the state is persisted.
-        assert state.form_fill.pending == {
-            "id": payload["id"],
-            "kind": "ask",
-            "questions": [
-                {
-                    "name": "redundancy",
-                    "question": "Redundancy?",
-                    "choices": ["Protected"],
-                    "values": ["protected"],
-                    "multiple": False,
-                    "required": True,
-                    "title": "",
-                    "problem": "",
-                    "hint": "",
-                    "searchable": False,
-                }
-            ],
-        }
-        assert state.form_fill.unseen is False  # it answers a message: the human gets to see it
-
-    @pytest.mark.asyncio
-    @patch("orchestrator.core.db.db")
     async def test_a_summary_pauses_the_task_with_the_start_to_approve(self, _mock_db):
         approval = Approval(hint="Start?", tool_name="create_workflow", args={"workflow_key": "w", "json_data": [{}]})
         reply = Reply('{"workflow_key":"w","status":"confirming"}', approval=approval)
         last, state = await self._run(self._stopping(reply), self._context("go on"))
         assert last.status.state == TaskState.TASK_STATE_INPUT_REQUIRED
+        assert last.status.message.parts[0].text == reply.text  # a calling agent reads the skill's JSON
         payload = json_format.MessageToDict(last.status.message.metadata)[self.URI]
         (tool,) = payload["tools"]
         assert payload["type"] == "tool_approval_request" and payload["hint"] == "Start?"
         assert tool["name"] == "create_workflow" and tool["args"] == {"workflow_key": "w", "json_data": [{}]}
-        assert state.form_fill.pending == {"id": tool["id"], "kind": "approval", "questions": []}
+        assert list(last.status.message.extensions) == [self.URI]
+        # The session remembers the stop (keyed by the request id), before the state is persisted.
+        assert state.form_fill.pending == {"id": tool["id"]}
+        assert state.form_fill.unseen is False  # it answers a message: the human gets to see it
 
     @pytest.mark.asyncio
     @patch("orchestrator.core.db.db")
-    async def test_an_ask_user_response_is_the_skills_input_and_the_next_stop_is_unseen(self, _mock_db):
-        questions = [{"name": "redundancy", "question": "Redundancy?"}, {"name": "ticket_id", "question": "Ticket?"}]
-        pending = {"id": "req-9", "kind": "ask", "questions": questions}
-        prior = SearchState(form_fill=FormFillSession(workflow_key="w", status="gathering", pending=pending))
-        answers = [{"answer": ["protected"]}, {"answer": []}]
-        metadata = {self.URI: {"type": "ask_user_response", "id": "req-9", "answers": answers}}
-        agent = self._stopping(self.ASK)
-        _last, state = await self._run(agent, self._context("Human input supplied", metadata=metadata), prior)
-        _args, kwargs = agent._last_call
+    async def test_a_rejections_reason_is_the_turns_message_and_the_next_stop_is_unseen(self, _mock_db):
+        prior = SearchState(form_fill=FormFillSession(workflow_key="w", status="confirming", pending={"id": "req-9"}))
+        approvals = [{"id": "req-9", "approved": False, "rejection_reason": "make it 1G"}]
+        metadata = {self.URI: {"type": "tool_approval_response", "approvals": approvals}}
+        agent = self._stopping(self.APPROVAL)
+        _last, state = await self._run(agent, self._context("", metadata=metadata), prior)
+        args, kwargs = agent._last_call
         run_state = kwargs["deps"].state
-        assert run_state.hitl and run_state.form_input == FormInput(
-            values={"redundancy": "protected"}
-        )  # empty: nothing
+        assert run_state.hitl and run_state.form_input == FormInput(decision=Decision.CANCEL, reason="make it 1G")
+        assert args[0] == "make it 1G"  # the model acts on what the human said
         # The stop that answers a response goes out on a resumed call, which a parent runtime does not show.
         assert state.form_fill.unseen is True and state.form_fill.pending["id"] != "req-9"
 
@@ -504,14 +473,20 @@ class TestWFOAgentExecutorHITL:
         "approval, expected",
         [
             ({"id": "req-5", "approved": True}, FormInput(decision=Decision.START)),
-            ({"id": "req-5", "approved": False, "rejection_reason": "not now"}, FormInput(decision=Decision.CANCEL)),
-            # A rejection's reason is never read: not even a JSON object in it is a correction.
-            ({"id": "req-5", "approved": False, "rejection_reason": '{"a": 1}'}, FormInput(decision=Decision.CANCEL)),
+            (
+                {"id": "req-5", "approved": False, "rejection_reason": "not now"},
+                FormInput(decision=Decision.CANCEL, reason="not now"),
+            ),
+            # A rejection's reason is words for the model, never values: a JSON object in it is read as words.
+            (
+                {"id": "req-5", "approved": False, "rejection_reason": '{"a": 1}'},
+                FormInput(decision=Decision.CANCEL, reason='{"a": 1}'),
+            ),
             ({"id": "other", "approved": True}, FormInput()),  # not about the pending stop: it is shown again
         ],
     )
     async def test_a_tool_approval_response_is_a_decision(self, _mock_db, approval, expected):
-        pending = {"id": "req-5", "kind": "approval"}
+        pending = {"id": "req-5"}
         prior = SearchState(form_fill=FormFillSession(workflow_key="w", status="confirming", pending=pending))
         metadata = {self.URI: {"type": "tool_approval_response", "approvals": [approval]}}
         agent = _agent_mock(lambda: mock_event_stream(make_text_result_event("ok")))
@@ -522,7 +497,7 @@ class TestWFOAgentExecutorHITL:
     @pytest.mark.asyncio
     @patch("orchestrator.core.db.db")
     async def test_a_malformed_response_is_ignored_but_keeps_the_human_with_the_form(self, _mock_db):
-        pending = {"id": "req-5", "kind": "approval"}
+        pending = {"id": "req-5"}
         prior = SearchState(form_fill=FormFillSession(workflow_key="w", status="confirming", pending=pending))
         metadata = {self.URI: {"type": "tool_approval_response", "approvals": "nope"}}
         agent = _agent_mock(lambda: mock_event_stream(make_text_result_event("ok")))
@@ -534,7 +509,7 @@ class TestWFOAgentExecutorHITL:
     @pytest.mark.asyncio
     @patch("orchestrator.core.db.db")
     async def test_a_message_without_a_response_carries_no_input(self, _mock_db):
-        pending = {"id": "req-5", "kind": "approval"}
+        pending = {"id": "req-5"}
         prior = SearchState(form_fill=FormFillSession(workflow_key="w", status="confirming", pending=pending))
         agent = _agent_mock(lambda: mock_event_stream(make_text_result_event("ok")))
         last, _state = await self._run(agent, self._context("yes, start it"), prior)
@@ -545,10 +520,10 @@ class TestWFOAgentExecutorHITL:
     @pytest.mark.asyncio
     @patch("orchestrator.core.db.db")
     async def test_without_the_extension_nothing_pauses_and_no_response_is_read(self, _mock_db):
-        pending = {"id": "req-5", "kind": "approval"}
+        pending = {"id": "req-5"}
         prior = SearchState(form_fill=FormFillSession(workflow_key="w", status="confirming", pending=pending))
         metadata = {self.URI: {"type": "tool_approval_response", "approvals": [{"id": "req-5", "approved": True}]}}
-        agent = self._stopping(self.ASK)
+        agent = self._stopping(self.APPROVAL)
         last, _state = await self._run(agent, self._context("x", metadata=metadata, extension=False), prior)
         _args, kwargs = agent._last_call
         assert kwargs["deps"].state.hitl is False and kwargs["deps"].state.form_input is None
@@ -644,10 +619,13 @@ class TestA2AEndpoint:
     @patch("orchestrator.core.db.db")
     async def test_an_a2a_0_3_client_is_served_on_the_same_endpoint_but_gets_no_pause(self, _mock_db, a2a_app):
         """A 0.3 caller (``message/send``, parts by ``kind``) is answered; a form stop is never a pause for it."""
-        ask = Reply('{"status":"gathering"}', ask=[AskField(name="speed", question="Speed?")])
+        ask = Reply(
+            '{"workflow_key":"w","status":"confirming"}',
+            approval=Approval(hint="Start?", tool_name="create_workflow", args={}),
+        )
 
         def stopped(state):
-            assert state.hitl is False  # no extension: the handoff tool opens no form for this caller
+            assert state.hitl is False  # no extension: a form can be prepared for this caller, not started
             state.form_reply = ask
 
         a2a_app.executor.agent = _agent_doing(stopped, text=ask.text)

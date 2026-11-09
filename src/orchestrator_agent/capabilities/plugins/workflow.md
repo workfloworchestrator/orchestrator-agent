@@ -1,6 +1,6 @@
 ---
 id: workflow
-description: Start a workflow (create, modify, terminate, task) by walking the caller through its input form.
+description: Start a workflow (create, modify, terminate, task) by filling its input form with the caller.
 a2a_tags: [workflow, form, create, modify, terminate]
 examples:
   - Create a new subscription for a customer
@@ -11,15 +11,14 @@ tools: [LIST_WORKFLOWS_TOOL, START_WORKFLOW_FORM_TOOL]
 # Workflows
 
 A request to create, modify or terminate something is a workflow start — not a search. Do not look the
-product, port or subscription up first: the workflow's form lists the products and every other option
-itself, and the form-fill skill asks the user for what it needs. Do exactly this:
+product, port or subscription up first: the workflow's form lists its options itself. Do exactly this:
 
 1. List the workflows (filter by target: create / modify / terminate; for a task, list the tasks) and pick
-   the one for that kind of thing.
-2. Start its form with the key exactly as listed, passing the subscription id when one is known.
+   the one for that kind of thing. Only if two *workflows* could genuinely be meant, ask which.
+2. Open its form with the key exactly as listed, passing the subscription id when one is known.
 
-A dedicated form-fill skill takes over from there: it shows the user the form's questions, then the start
-to approve, and starts the workflow. Its message replaces yours, so after handing off reply with one short
-line. Only if two *workflows* could genuinely be meant, ask the caller which one. Never ask for form values
-yourself and never fetch or fill form pages; you cannot start, resume or abort workflows. A form the user
-did not finish is gone: when they ask for it again, start it again.
+The form is then filled page by page, by you, in conversation with the person: the form's instructions and
+its page tools appear once it is open and say how. Use what the person already said before asking for
+anything. The start itself is never yours: when the form is complete the person is shown the values and
+approves the start, and only that start's own message says that something was started. You cannot start,
+resume or abort workflows yourself. A form the person left is gone: when they ask for it again, open it again.

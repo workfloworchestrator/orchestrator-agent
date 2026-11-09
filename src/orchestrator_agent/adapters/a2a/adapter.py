@@ -20,11 +20,11 @@ session) and collects artifact results + final text.
 The endpoint serves A2A 1.0 and, through the SDK's compatibility layer, A2A 0.3: a 0.3 caller gets
 everything but workflow forms, which need the HITL extension.
 
-The workflow form-fill skill runs inside the agent as a capability and is answered by a human in the
-loop: for a caller that activated kagent's HITL extension, a stop of the skill goes out as an
-``input-required`` pause on the task with the questions (or the start to approve) as its payload, and
-the human's response comes back as a message carrying the matching payload. No form is opened for any
-other caller.
+The workflow form-fill skill runs inside the agent as a capability: the model fills a form's pages in
+the conversation, and the start is approved by a human in the loop. For a caller that activated kagent's
+HITL extension, the start goes out as an ``input-required`` pause on the task with the approval as its
+payload, and the human's response comes back as a message carrying the matching payload. Any other
+caller can have a form prepared, not started.
 
 ``A2A_SKILLS`` is static A2A protocol metadata (the agent's advertised skills) and is
 unrelated to pydantic-ai capabilities — it just describes what the agent can do.
@@ -75,14 +75,14 @@ _LINEAGE_HEADERS = ("x-kagent-root-context-id", "x-kagent-parent-context-id")
 # Card-level tool description a consuming agent reads. The output-handling note covers only the
 # artifact-bearing replies (a result with a pre-rendered table/chart), not every tool call.
 AGENT_CARD_DESCRIPTION = (
-    "Answers questions about orchestration data and starts workflows by walking the user through their "
-    "input forms: ask for one (what, and for which subscription or product). A form is filled by a person "
-    "through human-in-the-loop pauses (kagent's HITL extension): the task pauses with the questions of a "
-    "form page, and at the end with the start to approve; nothing is started without that approval, and a "
-    "caller that does not activate the extension cannot start a workflow. When a paused call returns "
-    "before the form is finished, call again to show the next step. When a reply includes a pre-rendered "
-    "Markdown table or Mermaid chart, relay that block to the user verbatim, without reformatting or "
-    "summarising it."
+    "Answers questions about orchestration data and starts workflows by filling their input forms in "
+    "conversation: say what to start, for which subscription or product, and relay the user's answers to "
+    "what it asks. The start itself is approved by a person through a human-in-the-loop pause (kagent's "
+    "HITL extension): the task pauses with the start to approve; nothing is started without that approval, "
+    "and a caller that does not activate the extension can have a form prepared but cannot start a "
+    "workflow. When a paused call returns before the form is finished, call again to show the next step. "
+    "When a reply includes a pre-rendered Markdown table or Mermaid chart, relay that block to the user "
+    "verbatim, without reformatting or summarising it."
 )
 
 
@@ -98,8 +98,9 @@ class WFOAgentExecutor(AgentExecutor):
     The workflow form-fill skill runs inside the agent as a capability. The executor's part is the
     transport around it — the human-in-the-loop transport of the client that is calling (``adapters.hitl``;
     kagent's extension in ``kagent``, by default the only one): before the run, the conversation's open form and the
-    human's response carried by the message go on the run state; after the run, a stop of the skill is
-    delivered as an ``input-required`` pause on the task, and anything else as completed text.
+    human's response carried by the message go on the run state (a rejection's reason is the turn's message
+    when it carries no other); after the run, a stop of the skill is delivered as an ``input-required`` pause
+    on the task, and anything else as completed text.
     """
 
     def __init__(self, agent: "WFOAgent", transports: Sequence[A2AHitl] | None = None) -> None:
@@ -155,6 +156,8 @@ class WFOAgentExecutor(AgentExecutor):
             if isinstance(response, dict):  # the transport answers this message itself
                 await self._send(updater, NO_RESULTS, response)
                 return
+            if isinstance(response, FormInput) and response.reason and not user_input.strip():
+                user_input = response.reason  # what the human said when rejecting the start: the model acts on it
 
             state, final_output = await run_turn(
                 self.agent,

@@ -11,12 +11,12 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""A page schema with the widgets' options written in, the way core would have sent a static list.
+"""A page schema with its sourced fields' options written in, the way core would have sent a static list.
 
-A field a widget knows is rewritten before the page model is built: a short list becomes core's own choice
-shape (``enum`` + ``options``), so the stops, the labels and the approval need nothing new; a long list is
-marked and asked as text. Either way the field and its options are kept aside (``EnrichedPage.choices``), and
-what a person types for it is resolved to one of its options before core sees it (``widgets.resolve``).
+A field that says where its options come from is rewritten when the page is first seen: a short list becomes
+core's own choice shape (``enum`` + ``options``), so the model reads it in the ``submit_page`` schema and the
+approval labels it with nothing new; a long list is marked (``x-widget``: its ``total``, or ``later`` while it
+waits for another value, or ``unknown`` when the source could not be read) and is found with ``search_options``.
 """
 
 from __future__ import annotations
@@ -38,10 +38,9 @@ logger = structlog.get_logger(__name__)
 
 @dataclass(frozen=True)
 class LongList:
-    """A widget field with its options: its (items') property, every option.
+    """A sourced field with its options: its (items') property, every option.
 
-    Named for the long list a question cannot show; a short list shown as chips is kept the same way, so what
-    is typed for either is resolved to one of its options.
+    Named for the long list a schema cannot carry; a short list written into the schema is kept the same way.
     """
 
     field: dict[str, Any]
@@ -133,9 +132,9 @@ async def _property(name: str, prop: Any, fetch: _Fetches) -> _Property:
     target = shape_of(widget_target(resolved))
     try:
         return await _with_options(name, resolved, target, fetch)
-    except Exception as exc:  # a widget is an add-on: without it the field is asked as before
+    except Exception as exc:  # the source could not be read now: its options stay unknown, to be searched later
         logger.warning("Form-fill widget failed", field=name, error=str(exc))
-        return _Property(name, prop)
+        return _Property(name, {**resolved, WIDGET_MARK: {"id": OPTIONS_SOURCE, "unknown": True}})
 
 
 async def _with_options(name: str, resolved: dict[str, Any], target: dict[str, Any], fetch: _Fetches) -> _Property:
@@ -149,7 +148,7 @@ async def _with_options(name: str, resolved: dict[str, Any], target: dict[str, A
 
 
 def _shown(name: str, prop: dict[str, Any], target: dict[str, Any], choice: LongList) -> _Property:
-    """The property as asked: its options as chips when they fit a question, else marked as a long list to type."""
+    """The property as the page carries it: its options written in when they are few, else marked as a long list."""
     if choice.options and len(choice.options) <= MAX_INLINE:
         inlined = {**_with_target(prop, _choice(target, choice.options)), WIDGET_MARK: {"id": OPTIONS_SOURCE}}
         return _Property(name, inlined, choice)

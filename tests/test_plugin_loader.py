@@ -24,8 +24,8 @@ def test_specs_sorted_by_id():
 
 
 def test_workflow_plugin_only_lists_and_hands_off():
-    # Form filling is the deterministic skill's job; the plugin advertises it on the A2A card and gives
-    # the model just the read-only listing and the handoff tool — never the form or write tools.
+    # The plugin advertises workflows on the A2A card and gives the model the read-only listing and the
+    # handoff tool; the page tools come with an open form (the form-fill capability), the write tools never.
     from orchestrator_agent.capabilities.behavior import owned_tool_names
     from orchestrator_agent.tool_names import LIST_WORKFLOWS_TOOL, START_WORKFLOW_FORM_TOOL
 
@@ -33,7 +33,7 @@ def test_workflow_plugin_only_lists_and_hands_off():
     assert spec.artifact is None
     assert spec.advertise is True
     assert owned_tool_names(spec) == {LIST_WORKFLOWS_TOOL, START_WORKFLOW_FORM_TOOL}
-    assert "form-fill" in spec.instructions
+    assert "page tools" in spec.instructions and "approves the start" in spec.instructions
 
 
 def test_spec_round_trips_through_json():

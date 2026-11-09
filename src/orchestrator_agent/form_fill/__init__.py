@@ -11,51 +11,39 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""Workflow form-fill: a deterministic walk over core's pages, answered by a human through native pauses.
+"""Workflow form-fill: the model fills core's form page by page with the person; code keeps the machine.
 
-The pauses travel over A2A (kagent's human-in-the-loop extension) or chat completions (LibreChat's ask-user tool).
+The pages, the options and the start are code's (``skill``, ``pages``, ``session``); the model fills the
+current page through the page tools (``tools``) under the form's instructions (``instructions``). The one
+structured stop — the start to approve — travels over A2A (kagent's human-in-the-loop extension), chat
+completions (LibreChat's ask-user tool) or AG-UI (an interrupt).
 """
 
-from pydantic_ai.models import Model
-
 from orchestrator_agent.form_fill.capability import FormFillCapability
-from orchestrator_agent.form_fill.interpret import Interpreter, ModelInterpreter
-from orchestrator_agent.form_fill.skill import CallTool, FormFillSkill
+from orchestrator_agent.form_fill.pages import CallTool
+from orchestrator_agent.form_fill.skill import FormFillSkill
 from orchestrator_agent.form_fill.widgets import CoreApi, Fetch, api_base
 from orchestrator_agent.settings import agent_settings
-from orchestrator_agent.state import Approval, AskField, FormInput, FormReply, Reply
+from orchestrator_agent.state import Approval, FormInput, FormReply, Reply
 
 
-def build_form_fill_skill(
-    model: Model | str | None = None,
-    *,
-    fetch: Fetch | None = None,
-) -> FormFillSkill:
-    """The skill as configured, with ``model`` reading what a person typed where a value was expected.
+def build_form_fill_skill(*, fetch: Fetch | None = None) -> FormFillSkill:
+    """The skill as configured.
 
-    ``model`` interprets typed answers core rejected and chooses the option typed words mean for a long-list
-    widget field. A field's options are read from the ``optionsSource`` it carries and fetched from core's API,
-    the origin of its MCP endpoint unless configured otherwise, as the person asking.
+    A field's options are read from the ``optionsSource`` it carries and fetched from core's API, the origin
+    of its MCP endpoint unless configured otherwise, as the person asking.
     """
-    reader = ModelInterpreter(model) if model is not None else None
     base = api_base(agent_settings.WFO_CORE_MCP_URL, agent_settings.WFO_CORE_API_URL)
-    return FormFillSkill(
-        interpret=reader,
-        fetch=fetch or CoreApi(base, allowed_hosts=agent_settings.WFO_OPTIONS_HOSTS),
-        choose=reader,
-    )
+    return FormFillSkill(fetch=fetch or CoreApi(base, allowed_hosts=agent_settings.WFO_OPTIONS_HOSTS))
 
 
 __all__ = [
     "Approval",
-    "AskField",
     "CallTool",
     "FormFillCapability",
     "FormFillSkill",
     "FormInput",
     "FormReply",
-    "Interpreter",
-    "ModelInterpreter",
     "Reply",
     "build_form_fill_skill",
 ]

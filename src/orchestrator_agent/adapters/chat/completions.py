@@ -19,12 +19,12 @@ request: the latest user message is the turn's input, the conversation's memory 
 from the state persisted under the ``X-Conversation-Id`` header (LibreChat sends its conversation id
 there when the endpoint is configured to), and the answer is one assistant message.
 
-The workflow form-fill skill is answered by a person through the calling client's own way of asking
-them: a human-in-the-loop transport (``adapters.hitl.HumanInTheLoop``), picked per request as the one
-whose client is calling — LibreChat, through its ask-user tool (``librechat``). A stop of the skill goes out as what makes that client
-show it, and the response it sends back is the skill's input. A request no transport claims is a caller
-that cannot show a stop: no form is opened. A form turn runs no model, so nothing between the person's
-click and the skill is a model's reading.
+A workflow form is filled by the model in the conversation; its start is approved by the person through
+the calling client's own way of asking them: a human-in-the-loop transport (``adapters.hitl.HumanInTheLoop``),
+picked per request as the one whose client is calling — LibreChat, through its ask-user tool (``librechat``).
+The skill's stop goes out as what makes that client show it, and the response it sends back is the skill's
+input. A request no transport claims is a caller that cannot show a stop: a form can be prepared for it,
+not started. Nothing between the person's click and the skill is a model's reading.
 
 The reply is computed before the response starts, so a streamed response is the finished message in a few
 chunks; the client shows it at once. The request is read with ``request``'s models; what goes back
@@ -164,7 +164,8 @@ class ChatCompletionsAdapter:
                     return response
                 if response is None:
                     return _says(NOT_OPEN)
-                user_input, form_input = FORM_RESPONSE, response
+                # What the person typed under the approval is the turn's message: the model acts on it.
+                user_input, form_input = response.reason or FORM_RESPONSE, response
 
             state, output = await run_turn(
                 self.agent,
