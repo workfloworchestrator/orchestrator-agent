@@ -121,31 +121,25 @@ def _the_persons(message: ModelRequest) -> list[ModelRequestPart]:
     return list(message.parts)
 
 
+def _artifact_of(part: ToolReturnPart) -> QueryArtifact | ExportArtifact | DataArtifact | None:
+    """The artifact a tool result carried, if it carried one."""
+    try:
+        return _ARTIFACT.validate_python(part.metadata)
+    except ValidationError:
+        return None
+
+
 def _reference(part: ToolReturnPart) -> ToolReturnPart:
     """A tool result that carried an artifact, as its lightweight reference (what the stream sent)."""
-    try:
-        artifact = _ARTIFACT.validate_python(part.metadata)
-    except ValidationError:
-        return part
-    return dataclasses.replace(part, content=carried(artifact), metadata=None)
+    artifact = _artifact_of(part)
+    return part if artifact is None else dataclasses.replace(part, content=carried(artifact), metadata=None)
 
 
 def exports_of(state: SearchState) -> dict[str, str]:
-    """The exports the chat prepared: each query id, and core's path for its rows."""
-    exports: dict[str, str] = {}
-    for message in load_messages(state.message_history) or []:
-        if not isinstance(message, ModelRequest):
-            continue
-        for part in message.parts:
-            if not isinstance(part, ToolReturnPart) or part.metadata is None:
-                continue
-            try:
-                artifact = _ARTIFACT.validate_python(part.metadata)
-            except ValidationError:
-                continue
-            if isinstance(artifact, ExportArtifact):
-                exports[artifact.query_id] = artifact.download_url
-    return exports
+    """The exports the chat prepared: each query id, and core's path for its file."""
+    parts = (part for message in load_messages(state.message_history) or [] for part in message.parts)
+    artifacts = (_artifact_of(part) for part in parts if isinstance(part, ToolReturnPart))
+    return {artifact.query_id: artifact.download_url for artifact in artifacts if isinstance(artifact, ExportArtifact)}
 
 
 __all__ = ["UNTITLED", "Chat", "ChatSummary", "exports_of", "pending_stop", "title_of", "transcript"]

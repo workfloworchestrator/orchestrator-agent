@@ -60,10 +60,14 @@ class CoreApi:
             raise SourceError(f"{host} is neither core nor an allowed host for a field's options")
         return target
 
-    async def __call__(self, url: str) -> Any:
+    async def get(self, url: str) -> httpx.Response:
+        """Core's response for a URL, as it came: for what is forwarded rather than read. An error status raises."""
         response = await self._client.get(self.resolve(url))
         response.raise_for_status()
-        return response.json()
+        return response
+
+    async def __call__(self, url: str) -> Any:
+        return (await self.get(url)).json()
 
     async def aclose(self) -> None:
         """Close the client and its connections."""
