@@ -1,5 +1,3 @@
-# The docs in docs/ are published as a subproject of workfloworchestrator.github.io, which builds
-# them from this repository. A merge to main has to tell that repo to rebuild.
 name: Dispatch to workfloworchestrator.github.io
 on:
   push:

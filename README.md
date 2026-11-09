@@ -9,7 +9,15 @@ published as a sub-project of workfloworchestrator.org; preview them with `uv ru
 
 ## Quick Start
 
-Follow [Run the agent with your Orchestrator Core](docs/getting-started.md) to configure the database, Core MCP
+```bash
+cp .env.example .env
+# Edit .env with your DATABASE_URI and LLM settings
+
+uv sync
+uv run uvicorn orchestrator_agent.app:app --port 8080
+```
+
+Or follow [Run the agent with your Orchestrator Core](docs/getting-started.md) to configure the database, Core MCP
 connection and model before launching. Keep the agent on its default port 8080; when sharing one host, give Core
 another port. The source launch explicitly loads `.env` with `uv run --env-file .env`.
 
@@ -36,8 +44,6 @@ docker compose up --build
 ```
 
 ## Demos
-
-The demo scripts use the agent's default address, `http://localhost:8080`. They do not send an authentication token.
 
 ```bash
 # Install demo dependencies (included in the default dev group)
@@ -89,7 +95,7 @@ By default the agent uses the standard OpenAI API with the `OPENAI_API_KEY` envi
 
 ```bash
 # Local Ollama
-AGENT_MODEL=openai:llama3.1
+AGENT_MODEL=openai:llama3
 AGENT_API_BASE=http://localhost:11434/v1
 
 # LiteLLM proxy or other OpenAI-compatible endpoint

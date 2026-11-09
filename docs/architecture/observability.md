@@ -71,7 +71,7 @@ the trace already contains the question and the route the agent took. Writing do
 turns a one-off failure into a check that runs on every later change. See
 [How to add an evaluation case](../guides/add-eval-case.md).
 
-## What is not there yet
+## Not included
 
 - **Complete workflow auditing.** The built-in integration instruments Pydantic AI; it does not add spans around all
   direct Core calls made by the form-fill skill, conversation persistence or the HTTP request lifecycle.
