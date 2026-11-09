@@ -13,9 +13,10 @@
 
 """What every human-in-the-loop transport does, whichever client it speaks to.
 
-The form-fill skill knows no client: a stop of it is a ``Reply`` (a page's questions, or the start to
-approve) and what continues it is a ``FormInput``. A transport is the translation for one client — kagent
-through its A2A extension, LibreChat through its ask-user tool — and they all do the same three things:
+The form-fill skill knows no client: its one stop is a ``Reply`` with the start to approve, and what answers
+it is a ``FormInput`` (the decision, and what the person said when they did not approve). A transport is the
+translation for one client — kagent through its A2A extension, LibreChat through its ask-user tool, an AG-UI
+client through interrupts — and they all do the same three things:
 tell whether a request comes from their client in a state where it can show a person a stop, turn a stop
 into what makes the client show it, and read the person's response back.
 

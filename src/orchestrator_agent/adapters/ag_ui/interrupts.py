@@ -17,17 +17,12 @@ AG-UI (protocol 0.1.19 and later; the JS client from 1.0) lets a run end waiting
 carries an interrupt outcome with one ``Interrupt`` per thing to answer (an id, a reason, a message, the
 schema of the answer, and metadata), and the client answers by starting the next run with a ``resume``
 entry per interrupt (``ResumeEntry``: the interrupt's id, ``resolved`` with a payload, or ``cancelled``).
-That is a stop of the form-fill skill and the person's response to it, so this module is the transport
-for any AG-UI client that shows interrupts: a page's questions go out as one interrupt with reason
-``ask_user``, the start to approve as one with AG-UI's own reason for a gated call, ``tool_call``, and the
-resume entry that answers it comes back as the skill's input. No model reads either.
+A workflow form has one such stop, the start to approve: it goes out as an interrupt with AG-UI's own
+reason for a gated call, ``tool_call``, showing the call as it will be made, and the resume entry that
+answers it comes back as the skill's input — the decision, and what the person said when they did not
+approve, which the model then acts on. The pages before it are filled in conversation, with no interrupt.
 
-The questions travel in the interrupt's metadata as the skill asked them (each field's name, title, the
-choices shown, whether several may be picked, whether it is required, core's problem with the last answer,
-a hint), and the answer is per question: the positions of the choices picked, or the text typed. The
-values behind the choices stay on the server (the session's ``pending``, from which the response is
-mapped back), so a response can only pick what was shown. What the stop asked is remembered on the
-session as the skill asked it; this module keeps nothing of its own.
+What the stop asked is remembered on the session (``form_fill.pending``); this module keeps nothing of its own.
 """
 
 from __future__ import annotations
@@ -43,66 +38,25 @@ from ag_ui.core import Interrupt, ResumeEntry, RunAgentInput
 from pydantic import BaseModel, StrictBool, ValidationError
 
 from orchestrator_agent.adapters.words import shown
-from orchestrator_agent.form_fill.pending import (
-    PendingAsk,
-    answered_values,
-    pending_approval,
-    pending_ask,
-    pending_of,
-)
+from orchestrator_agent.form_fill.pending import PendingStop, pending_approval, pending_of
 from orchestrator_agent.form_fill.session import paused
 from orchestrator_agent.state import Approval, Decision, FormFillSession, FormInput, Reply
 
 logger = structlog.get_logger(__name__)
 
-ASK_REASON = "ask_user"  # an interrupt that carries the questions of a form page
 APPROVAL_REASON = "tool_call"  # an interrupt that carries the start to approve: AG-UI's reason for a gated call
 INTERRUPTS_VERSION = (0, 1, 19)  # the AG-UI release that added the interrupt lifecycle
 _VERSION = re.compile(r"^\s*v?(\d+(?:\.\d+)*)")
 
 
-class AskAnswers(BaseModel):
-    """The payload that resolves an ``ask_user`` interrupt: one answer per question, in the order asked.
-
-    An answer is the positions of the choices picked (several only for a question that takes several), or
-    the text typed; an empty answer leaves the field to its default.
-    """
-
-    answers: list[list[int | str]]
-
-
 class ApprovalAnswer(BaseModel):
-    """The payload that resolves a ``tool_call`` interrupt: the decision on the start, as AG-UI shapes an approval."""
+    """The payload that resolves a ``tool_call`` interrupt: the decision on the start, as AG-UI shapes an approval.
+
+    A rejection may say why, or what to change: the form reopens and the model acts on it.
+    """
 
     approved: StrictBool  # a real JSON boolean, as pydantic-ai reads an AG-UI approval; "yes" is no decision
     reason: str | None = None
-
-
-class AskedQuestion(BaseModel):
-    """A question as the interrupt shows it: an ``AskField`` without the values behind its choices.
-
-    An answer picks a choice by position, so the client never sees the form values.
-    """
-
-    name: str
-    question: str
-    choices: list[str] = []
-    multiple: bool = False
-    required: bool = True
-    title: str = ""
-    problem: str = ""
-    hint: str = ""
-    # The options are many: the client searches them (``GET /chats/{thread}/options/{field}?q=``) and picks one.
-    searchable: bool = False
-
-
-class AskStop(BaseModel):
-    """The metadata of an ``ask_user`` interrupt: the page's questions and the form they belong to."""
-
-    workflow_key: str
-    title: str
-    questions: list[AskedQuestion]
-    form: dict[str, Any] | None  # the skill's reply as data (``FormReply``), for a client that renders it
 
 
 class ToolCall(BaseModel):
@@ -117,7 +71,7 @@ class ApprovalStop(BaseModel):
 
     workflow_key: str
     tool: ToolCall
-    form: dict[str, Any] | None
+    form: dict[str, Any] | None  # the skill's reply as data (``FormReply``), for a client that renders it
 
 
 def supports_interrupts(version: str | None) -> bool:
@@ -126,7 +80,7 @@ def supports_interrupts(version: str | None) -> bool:
     return match is not None and tuple(int(part) for part in match.group(1).split(".")) >= INTERRUPTS_VERSION
 
 
-# --- outbound: a skill stop -> the interrupt it is shown as -------------------------------------------------
+# --- outbound: the skill's stop -> the interrupt it is shown as -------------------------------------------
 
 
 def _form(reply: Reply) -> dict[str, Any] | None:
@@ -138,30 +92,9 @@ def _form(reply: Reply) -> dict[str, Any] | None:
     return data if isinstance(data, dict) else None
 
 
-def _title(session: FormFillSession) -> str:
-    """What heads the questions: the title of the page being asked, or the workflow when the form gave it none."""
-    return (session.pages[-1].title if session.pages else None) or session.workflow_key
-
-
-def ask_interrupt(request_id: str, reply: Reply, session: FormFillSession) -> tuple[Interrupt, PendingAsk]:
-    """An ``ask_user`` interrupt for the skill's questions, plus what to remember for the answer."""
-    pending = pending_ask(request_id, reply.ask or [])
-    # The questions as asked, without the values behind the choices (``AskedQuestion`` has no such field).
-    questions = [AskedQuestion.model_validate(question) for question in pending.model_dump(mode="json")["questions"]]
-    stop = AskStop(workflow_key=session.workflow_key, title=_title(session), questions=questions, form=_form(reply))
-    interrupt = Interrupt(
-        id=request_id,
-        reason=ASK_REASON,
-        message=_title(session),
-        response_schema=AskAnswers.model_json_schema(),
-        metadata=stop.model_dump(mode="json"),
-    )
-    return interrupt, pending
-
-
 def approval_interrupt(
     request_id: str, reply: Reply, approval: Approval, session: FormFillSession
-) -> tuple[Interrupt, PendingAsk]:
+) -> tuple[Interrupt, PendingStop]:
     """A ``tool_call`` interrupt for the workflow start the skill wants confirmed, shown as it will be made."""
     interrupt = Interrupt(
         id=request_id,
@@ -179,18 +112,15 @@ def approval_interrupt(
 
 
 def pause(reply: Reply, session: FormFillSession | None) -> Interrupt | None:
-    """The reply's stop as the interrupt that shows it, remembered on the session; None when the reply ends the form.
+    """The reply's stop as the interrupt that shows it, remembered on the session; None when the reply is no stop.
 
     It records on the session, so it must run before the state is persisted. The client shows the interrupt
     as soon as the run ends, so the stop is never ``unseen``.
     """
-    if session is None or (reply.ask is None and reply.approval is None):
+    if session is None or reply.approval is None:
         return None
     request_id = uuid.uuid4().hex
-    if reply.approval is not None:
-        interrupt, pending = approval_interrupt(request_id, reply, reply.approval, session)
-    else:
-        interrupt, pending = ask_interrupt(request_id, reply, session)
+    interrupt, pending = approval_interrupt(request_id, reply, reply.approval, session)
     pending.shown = interrupt.model_dump(mode="json", by_alias=True, exclude_none=True)  # for a reopened chat
     paused(session, pending, unseen=False)
     return interrupt
@@ -203,9 +133,9 @@ def human_input(session: FormFillSession | None, resume: Sequence[ResumeEntry] |
     """The person's response to the pending stop among the run's resume entries, as the skill's input.
 
     None when the run carries no response, or no stop is pending: the message is the model's. A cancelled
-    entry is a cancel decision; a resolved approval a start or a cancel; resolved answers the values of
-    the fields asked. A response that is not about the pending stop, or cannot be read, still means the
-    person is with the form: an empty input shows the stop again.
+    entry is a cancel decision; a resolved approval a start, or a cancel with what the person said. A
+    response that is not about the pending stop, or cannot be read, still means the person is with the
+    form: an empty input shows the stop again.
     """
     pending = pending_of(session)
     if pending is None or not resume:
@@ -216,7 +146,7 @@ def human_input(session: FormFillSession | None, resume: Sequence[ResumeEntry] |
         return FormInput()
     if entry.status == "cancelled":
         return FormInput(decision=Decision.CANCEL)
-    return _decision(entry.payload) if pending.kind == "approval" else _answers(pending, entry.payload)
+    return _decision(entry.payload)
 
 
 def _decision(payload: Any) -> FormInput:
@@ -225,17 +155,9 @@ def _decision(payload: Any) -> FormInput:
     except ValidationError:
         logger.warning("The approval's resume payload cannot be read; showing the approval again")
         return FormInput()
-    return FormInput(decision=Decision.START if answer.approved else Decision.CANCEL)
-
-
-def _answers(pending: PendingAsk, payload: Any) -> FormInput:
-    try:
-        answers = AskAnswers.model_validate(payload)
-    except ValidationError:
-        logger.warning("The questions' resume payload cannot be read; showing them again", pending_id=pending.id)
-        return FormInput()
-    values = answered_values(pending, answers.answers)
-    return FormInput(values=values) if values is not None else FormInput()
+    if answer.approved:
+        return FormInput(decision=Decision.START)
+    return FormInput(decision=Decision.CANCEL, reason=(answer.reason or "").strip() or None)
 
 
 # --- the transport ---------------------------------------------------------------------------------------------
@@ -261,12 +183,11 @@ class AGUIInterrupts:
 
 __all__ = [
     "APPROVAL_REASON",
-    "ASK_REASON",
     "AGUIInterrupts",
     "ApprovalAnswer",
-    "AskAnswers",
+    "ApprovalStop",
+    "ToolCall",
     "approval_interrupt",
-    "ask_interrupt",
     "human_input",
     "pause",
     "supports_interrupts",

@@ -14,9 +14,9 @@
 """What a person reads of a form-fill reply, for the transports whose client shows it to one in a chat.
 
 The skill's own text is one JSON object (``FormReply``), written for a calling agent. A person in a chat
-(LibreChat, the AG-UI chat popup) gets the same data as a line of Markdown: which form is being filled, at
-the approval a table of the values as they will be sent (always, as that is what is approved) with the
-workflow's own summary under it, and the outcome once the form is over.
+(LibreChat, the AG-UI chat popup) gets the same data as a line of Markdown: at the approval a table of the
+values as they will be sent (always, as that is what is approved) with the workflow's own summary under it,
+and the outcome once the form is over.
 """
 
 from __future__ import annotations
@@ -42,8 +42,13 @@ def shown(reply: Reply) -> str:
     if form is None:
         return reply.text
     key = f"`{form.workflow_key}`"
-    if form.status == "gathering":
-        return f"**Workflow form {key}**" + (f" — {form.title}" if form.title else "")
+    if form.status == "gathering":  # the start was refused on a page: what core said, for the person to correct
+        where = f" (page {form.page}{f', {form.title}' if form.title else ''})" if form.page is not None else ""
+        said = "; ".join(f"{'.'.join(str(p) for p in e.loc) or 'page'}: {e.msg}" for e in form.rejected)
+        return f"**Workflow form {key}**{where}: the orchestrator rejected it. {said}".rstrip()
+    if form.status == "prepared":
+        lines = [f"**The {key} form is complete, but {form.reason}.**", *_values_table(form)]
+        return "\n".join(lines)
     if form.status == "confirming":
         tables = [line for table in form.summary for line in _summary_table(table)]
         summary = ["", SUMMARY_CAPTION, *tables] if tables else []

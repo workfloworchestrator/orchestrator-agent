@@ -28,8 +28,7 @@ from typing import TYPE_CHECKING, Any, Protocol
 if TYPE_CHECKING:
     from orchestrator_agent.form_fill.skill import CallTool
 
-MAX_INLINE = 10  # at most this many options are asked as chips (LibreChat takes twelve, "Keep default" included)
-MAX_FULL_READ = 200  # a long list this short is read in full by the interpreter, so abbreviations still resolve
+MAX_INLINE = 10  # at most this many options are written into the page; a longer list is searched
 MAX_CANDIDATES = 50  # a search returns at most this many options
 
 
@@ -92,7 +91,6 @@ def narrow_options(options: Sequence[Option], words: str, limit: int = MAX_CANDI
 
 __all__ = [
     "MAX_CANDIDATES",
-    "MAX_FULL_READ",
     "MAX_INLINE",
     "Fetch",
     "Option",

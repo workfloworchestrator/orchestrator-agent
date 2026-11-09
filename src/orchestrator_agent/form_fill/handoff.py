@@ -15,34 +15,27 @@
 
 Deciding *that* a message asks to start a workflow, and *which* one, is a judgment call; the model makes
 it by calling ``start_workflow_form`` with the key it picked from ``list_workflows``. The tool checks the
-key against core's catalogue — a key that is not there is a tool retry, so the model corrects itself — and
-only marks the session as opening; it never touches the form. On the model request that follows, the
-capability lets the skill walk the first pages (``FormFillSkill.open``) and its first stop replaces the
-model's text. From then on the form is the human's: their responses to its stops continue it.
-
-A form needs a caller that can show a human its stops (kagent's human-in-the-loop extension over A2A, or
-LibreChat's ask-user tool over chat completions). For any other caller the tool opens nothing and says
-so, for the model to relay.
+key against core's catalogue — a key that is not there is a tool retry, so the model corrects itself —
+and opens the form: core's first page, with a passed subscription submitted by code. The tool's result is
+the page to fill, and from then on the model fills the form with the page tools (``tools``) under the
+form's instructions (``instructions``). The start itself is never the model's: the skill raises the
+approval when core says the form is complete.
 """
 
 from __future__ import annotations
+
+from typing import Any
 
 from pydantic_ai import ModelRetry, RunContext
 from pydantic_ai.toolsets import FunctionToolset
 from pydantic_ai.ui import StateDeps
 
-from orchestrator_agent.form_fill.skill import CallTool, FormFillSkill
-from orchestrator_agent.state import SUBSCRIPTION_ID, FormFillSession, SearchState
+from orchestrator_agent.form_fill.pages import CallTool
+from orchestrator_agent.form_fill.skill import FormFillSkill
+from orchestrator_agent.state import SearchState
 from orchestrator_agent.tool_names import START_WORKFLOW_FORM_TOOL
 
 FormDeps = StateDeps[SearchState]
-
-# What the model is told when the caller cannot show a human the form's stops.
-NO_HITL = (
-    "No form was opened: workflow forms are filled by a person through human-in-the-loop prompts (kagent's "
-    "HITL extension, or LibreChat's ask-user tool), and this caller did not enable them. Tell the caller so; "
-    "do not ask for form values."
-)
 
 
 def build_handoff_toolset(skill: FormFillSkill, call_tool: CallTool) -> FunctionToolset[FormDeps]:
@@ -52,27 +45,19 @@ def build_handoff_toolset(skill: FormFillSkill, call_tool: CallTool) -> Function
     @toolset.tool(name=START_WORKFLOW_FORM_TOOL)
     async def start_workflow_form(
         ctx: RunContext[FormDeps], workflow_key: str, subscription_id: str | None = None
-    ) -> str:
-        """Start the input form of a workflow for the caller's request.
+    ) -> dict[str, Any]:
+        """Open the input form of a workflow, to fill it with the person.
 
         Pick ``workflow_key`` from ``list_workflows`` — exactly as listed — by target (create / modify /
-        terminate) and the kind of thing the caller names; every value the workflow needs is asked by the
-        form itself, never by you. For a workflow on an existing subscription pass its ``subscription_id``
-        (from the request or earlier in the conversation). The form-fill skill then takes over: it shows the
-        user the form's questions and the start to approve, and starts the workflow. Its message replaces
-        your answer, so after calling this reply with one short line and nothing else.
+        terminate) and the kind of thing the caller names. For a workflow on an existing subscription pass
+        its ``subscription_id`` (from the request or earlier in the conversation): it fills the form's
+        first page. The result is the first page to fill; from then on fill the form with the page tools
+        (``submit_page``, ``search_options``, ...) as the form's instructions say. A new form replaces an
+        open one.
         """
-        state = ctx.deps.state
-        if not state.hitl:
-            return NO_HITL
         if workflow_key not in await skill.workflows(call_tool):
             raise ModelRetry(f"Unknown workflow key {workflow_key!r}: pass a key exactly as list_workflows returns it.")
-        state.form_fill = FormFillSession(
-            workflow_key=workflow_key,
-            status="opening",
-            values={SUBSCRIPTION_ID: subscription_id} if subscription_id else {},
-        )
-        return f"Form for `{workflow_key}` opened; the form-fill skill shows it to the user from here."
+        return await skill.open(ctx.deps.state, call_tool, workflow_key, subscription_id)
 
     return toolset
 

@@ -14,9 +14,9 @@
 """The AG-UI client's contract, in the agent's OpenAPI document.
 
 A client of the AG-UI route reads more than the routes declare: the artifact reference a tool result
-carries in place of its payload (with the chart data an aggregate adds), the metadata of the two stops a
-workflow form is walked with, and the answers that resolve them all travel inside AG-UI messages, where no
-route names them. They are added to the document's components, so a client generates its types from
+carries in place of its payload (with the chart data an aggregate adds), the metadata of the stop a
+workflow form ends on (the start to approve) and the answer that resolves it all travel inside AG-UI
+messages, where no route names them. They are added to the document's components, so a client generates its types from
 ``/openapi.json`` alone: the chat popup (orchestrator-agent-chat) does, with ``npm run contract``, from a
 running agent (``npm run contract:pull``) or from the copy it checks in, which this module writes without one:
 
@@ -35,7 +35,7 @@ from fastapi.openapi.utils import get_openapi
 from pydantic import BaseModel
 from pydantic.json_schema import JsonSchemaMode, models_json_schema
 
-from orchestrator_agent.adapters.ag_ui.interrupts import ApprovalAnswer, ApprovalStop, AskAnswers, AskStop
+from orchestrator_agent.adapters.ag_ui.interrupts import ApprovalAnswer, ApprovalStop
 from orchestrator_agent.artifacts import DataArtifact, ExportArtifact, QueryArtifact, ToolArtifact
 
 # What the client reads, as the agent serialises it; what the client sends, as the agent validates it (its
@@ -44,9 +44,7 @@ CARRIED: tuple[tuple[type[BaseModel], JsonSchemaMode], ...] = (
     (QueryArtifact, "serialization"),
     (DataArtifact, "serialization"),
     (ExportArtifact, "serialization"),
-    (AskStop, "serialization"),
     (ApprovalStop, "serialization"),
-    (AskAnswers, "validation"),
     (ApprovalAnswer, "validation"),
 )
 

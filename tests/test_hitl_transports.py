@@ -24,13 +24,13 @@ from openai.types.chat import ChatCompletionMessage
 from orchestrator_agent.adapters.a2a import A2AHitl, WFOAgentExecutor
 from orchestrator_agent.adapters.chat import ChatCompletionsAdapter, ChatHitl, ChatRequest, LibreChatHitl
 from orchestrator_agent.adapters.chat.librechat import shown
-from orchestrator_agent.state import AskField, FormFillSession, FormInput, Reply, SearchState
+from orchestrator_agent.state import Approval, Decision, FormFillSession, FormInput, Reply, SearchState
 
 from .conftest import make_text_result_event, mock_event_stream
 
 ASK = Reply(
-    '{"workflow_key":"w","status":"gathering","title":"Page"}',
-    ask=[AskField(name="redundancy", question="Redundancy?", choices=["Protected"], values=["protected"])],
+    '{"workflow_key":"w","status":"confirming","values":{"a":1}}',
+    approval=Approval(hint="Start?", tool_name="create_workflow", args={"workflow_key": "w", "json_data": [{"a": 1}]}),
 )
 ASK_TOOL = [{"type": "function", "function": {"name": "ask_user_question"}}]
 
@@ -57,7 +57,7 @@ def _agent(setup: Any = None) -> MagicMock:
 
 
 def _stops(state: SearchState) -> None:
-    state.form_fill = state.form_fill or FormFillSession(workflow_key="w")
+    state.form_fill = state.form_fill or FormFillSession(workflow_key="w", status="confirming")
     state.form_reply = ASK
 
 
@@ -68,7 +68,7 @@ class _OtherChatClient:
         return True
 
     def read(self, session: FormFillSession | None, request: ChatRequest) -> FormInput | ChatCompletionMessage | None:
-        return FormInput(values={"from": "other"}) if request.answers_a_call else None
+        return FormInput(decision=Decision.CANCEL, reason="from the other client") if request.answers_a_call else None
 
     def pause(
         self, reply: Reply, session: FormFillSession | None, request: ChatRequest
@@ -104,7 +104,8 @@ class TestChatAdapterPicksTheTransport:
         agent = _agent()
         result = {"role": "tool", "tool_call_id": "any", "content": "whatever the other client sends"}
         await self._complete(agent, _chat_request(result), "other")
-        assert agent.state.form_input == FormInput(values={"from": "other"}) and agent.state.hitl is True
+        assert agent.state.form_input == FormInput(decision=Decision.CANCEL, reason="from the other client")
+        assert agent.state.hitl is True
 
 
 class _InterimA2A:
