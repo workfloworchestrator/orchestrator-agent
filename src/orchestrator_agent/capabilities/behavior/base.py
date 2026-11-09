@@ -136,15 +136,12 @@ def _attach_artifact(result: Any, artifact: ToolArtifact) -> Any:
 
 
 # Core's export reply carries the link and asks the model to pass it on; neither reaches the model.
-_LINK_FIELDS = frozenset({"download_path", "download_url", "message"})
+_LINK_FIELDS = frozenset({"download_path", "message"})
 
 
 def _without_the_link(result: Any) -> Any:
     """The export result as the model reads it: what core said, less the link and the words that offer it."""
-    payload = _result_payload(result)
-    if not isinstance(payload, dict):
-        return result
-    stripped = {key: value for key, value in payload.items() if key not in _LINK_FIELDS}
+    stripped = {key: value for key, value in _result_payload(result).items() if key not in _LINK_FIELDS}
     if isinstance(result, ToolReturn):
         result.return_value = stripped
         return result

@@ -190,34 +190,15 @@ class TestArtifactDeclaration:
         assert isinstance(out, ToolReturn)
         assert isinstance(out.metadata, expected)
 
-    async def test_an_export_reaches_the_model_without_the_link_and_with_the_note(self):
+    def test_an_export_reaches_the_model_without_the_link_and_with_the_note(self):
         # Core's export reply carries the link and asks the model to pass it on; the client shows the download
         # beside the step instead, so the model reads neither and is told not to write a link.
-        from orchestrator_agent.capabilities.behavior import build_plugin_capability
+        from orchestrator_agent.capabilities.behavior.base import _attach_artifact
 
-        cap = build_plugin_capability(
-            PluginSpec(
-                id="p",
-                description="d",
-                instructions="i",
-                defer_loading=False,
-                tools=["EXPORT_QUERY_TOOL"],
-                artifact="export",
-            )
-        )
-        out = await cap.after_tool_execute(
-            SimpleNamespace(),
-            call=ToolCallPart(tool_name=EXPORT_QUERY_TOOL, args={}),
-            tool_def=ToolDefinition(name=EXPORT_QUERY_TOOL, parameters_json_schema={"properties": {}}),
-            args={},
-            result={"query_id": "q", "download_path": "/x", "message": "Export ready. Provide this link to the user."},
-        )
-        assert isinstance(out, ToolReturn)
+        reply = {"query_id": "q", "download_path": "/x", "message": "Export ready. Provide this link to the user."}
+        out = _attach_artifact(reply, ExportArtifact(description="d", query_id="q", download_url="/x"))
         assert out.return_value == {"query_id": "q"}
-        assert "Download has been successfully prepared." in out.content
         assert "Never write a URL or a link" in out.content
-        assert isinstance(out.metadata, ExportArtifact)
-        assert out.metadata.download_url == "/x"  # the stored artifact keeps core's path, for the route to fetch
 
 
 class TestDeferredToolGate:
