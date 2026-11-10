@@ -25,7 +25,7 @@ another port. The source launch explicitly loads `.env` with `uv run --env-file 
 
 | Path | Protocol | Description |
 | --- | --- | --- |
-| `POST /agui/` | AG-UI | SSE streaming, stored conversation history and workflow forms through interrupts; `/agui` redirects here |
+| `POST /agui/` | AG-UI | SSE streaming, stored conversation history and workflow forms through interrupts; supports the [chat popup](#chat-popup-ag-ui); `/agui` redirects here |
 | `/chats/` | REST | AG-UI chat history, pending forms, option searches and export downloads; see [Endpoints and protocols](docs/reference/endpoints.md#chats-api) |
 | `POST /` | A2A | Agent-to-agent JSON-RPC, protocol v1.0 (`SendMessage`, `SendStreamingMessage`) |
 | `GET /.well-known/agent-card.json` | A2A | Agent card discovery |
@@ -63,6 +63,51 @@ uv run demos/mcp_client.py
 uv run demos/mcp_client.py search "active subscriptions"
 
 ```
+
+## Chat popup (AG-UI)
+
+The agent as a chat popup in the bottom-right corner of a page is the React component `WfoChat` in
+[orchestrator-agent-chat](https://github.com/workfloworchestrator/orchestrator-agent-chat): it talks to the
+agent's `/agui/` route with the AG-UI client, renders the agent's Markdown tables, draws its charts from the
+data the agent attaches to an aggregate result, shows the tools as they run, keeps the thread across reloads
+of the tab, and sends what the host page knows (the subscription on screen) as AG-UI context. Its props and
+theming are in that repository's README.
+
+`demos/web/` is a page with nothing on it but the popup, installed from that repository:
+
+```bash
+cd demos/web && npm install && AGENT_URL=http://127.0.0.1:8080 npm run dev     # http://localhost:5173
+```
+
+The page needs no CORS on the agent: its dev server forwards `/agui/` and `/chats` to it, so the browser sees
+one origin. With OAuth2 on, the popup's `token` prop is the bearer the agent forwards to core.
+
+**The contract.** The popup's types come from this agent's OpenAPI document, which also names what travels
+inside AG-UI messages (`adapters/ag_ui/contract.py`): the artifact reference a tool result carries with its
+chart data, the metadata of a form stop and the answers that resolve it. The popup checks in a copy of the
+document; when a route or one of those models changes here, refresh it there (`npm run contract:pull`
+against a running agent, or write it from this checkout with
+`uv run python -m orchestrator_agent.adapters.ag_ui.contract <path>`).
+
+**Workflow forms in the popup.** A form is filled the same deterministic way as through kagent and LibreChat
+(see [Workflow form-fill](#workflow-form-fill-a2a-human-in-the-loop)): the skill walks core's pages, and the
+popup shows each stop as a card — a page's questions with their choices as chips (or a text box), then the
+start to approve with the values the workflow gets — and sends the person's answer back. The transport is
+AG-UI's own interrupt lifecycle (`adapters/ag_ui/interrupts.py`): a stop ends the run with an interrupt
+outcome, the card is that interrupt, and the next run carries its resume entry. No model reads the answer.
+Typing a message while a card is open cancels the form first, then sends the message.
+
+**Chats live on the agent.** The popup sends one message per run; the agent replays the thread's earlier
+turns from its own store (core's `graph_snapshots`, where the other routes keep their memory too) and records
+the run's messages. A small API next to the route serves them back: `GET /chats/` lists the person's chats,
+newest first; `GET /chats/{thread_id}?last=50` gives one with its last messages as AG-UI messages and the form
+stop it waits on; `DELETE /chats/{thread_id}` forgets it; `GET /chats/{thread_id}/exports/{query_id}` serves an
+export the chat prepared as a CSV file, as the person asking. The popup opens on that list (a chat whose form
+waits is marked), and opening one loads its history and shows a pending form card again. A thread belongs to the subject of the bearer that
+created it: only that subject continues, reads or deletes it, and a thread written by another route (kagent,
+LibreChat) is never served here. The other routes are unchanged: they keep trusting the conversation id their
+client forwards. With OAuth2 off there is no subject, every thread is unowned and every caller sees them — a
+development setting.
 
 ## Configuration
 
@@ -150,7 +195,7 @@ This repo is a thin MCP client. The agent is a plain pydantic-ai `Agent` configu
 ```
 Request ──► AG-UI adapter ──► async with Agent: ──► run_stream_events()
          ──► A2A adapter  ──►   (full MCP toolset; gate hides deferred plugins' tools)
-         ──► chat adapter ──►   (the A2A agent, called by LibreChat as its model)
+         ──► chat adapter ──►   (one agent with the form-fill skill behind all three)
          ──► MCP adapter  ──►   └─► MCPToolset ──► orchestrator-core /mcp
 ```
 
@@ -164,7 +209,8 @@ On A2A, chat completions and AG-UI, `WriteToolGate` also hides Core's three work
 [form-fill skill](#workflow-form-fill-a2a-human-in-the-loop) controls starts. This gate is absent from the agent's MCP interface.
 
 Search tables and grouped charts are rendered in code. A2A and chat completions append them to the answer; AG-UI
-carries rendered blocks in artifact metadata, while MCP returns raw JSON. MCP sessions are opened per run with
+carries rendered blocks and optional `ChartData` in artifact metadata, so a frontend can draw its own charts,
+while MCP returns raw JSON. MCP sessions are opened per run with
 `async with agent:`. See [Endpoints and protocols](docs/reference/endpoints.md) for protocol-specific behavior.
 
 Export downloads are delivered through AG-UI's artifact metadata and authenticated chats API. The export plugin
@@ -307,13 +353,16 @@ another engine drops in behind the same protocol.
 `readOnly` markers, choice values and labels, defaults and descriptions. `form_fill/model.py` reads it into
 `FieldSpec` records for the questions and approval labels. The interpreter uses an optional-field variant of
 the schema through pydantic-ai's `StructuredDict`; it does not rebuild a Pydantic model. The session persists
-the walked schemas and answers. Core's tool results are validated with Core's response models, and its
-structured page verdicts supply the validation errors.
+the walked schemas and answers. Core's tool results are validated with Core's response models. The skill asks
+for `verdict="result"`, so rejected pages arrive as structured results carrying Core's validation errors.
 
 **Form-option sources.** Fields with `optionsSource` have their options fetched over HTTP before the page is
-read. Typed answers for those fields are resolved against the fetched options before submission to Core: an
+read. The source declares its URL, value/label mapping, search parameter and any dependencies on other page
+values. Up to ten options are shown as choices; longer lists are typed or searched. Typed answers for fields
+whose options were fetched are resolved before submission to Core: an
 exact match supplies the option value; otherwise a model chooses the matching candidates. Ambiguous or
-unmatched words are asked again. Relative sources use `WFO_CORE_API_URL`, or Core's MCP origin when unset;
+unmatched words are asked again. Dependent sources wait for their inputs, and a failed source leaves the field
+typed for Core to validate. Relative sources use `WFO_CORE_API_URL`, or Core's MCP origin when unset;
 absolute sources must use that base's host and port or an entry in `WFO_OPTIONS_HOSTS`. These calls use the
 same bearer-token selection as MCP.
 
@@ -415,5 +464,10 @@ resume entry. The agent replays stored history for the `threadId` and ignores cl
 its `/chats/` API check the authenticated subject against the thread owner and refuse threads from other
 protocols. With authentication off, threads are unowned and shared. A2A and chat completions still trust their
 clients to isolate conversation identifiers. See [Endpoints and protocols](docs/reference/endpoints.md#ag-ui).
+
+The interrupts use reason `ask_user` for a page's questions or `tool_call` for the `create_workflow` call to
+approve. A matching resume entry supplies selected choice positions or typed answers, or an `approved` JSON
+boolean for the start. A cancelled entry cancels the form. `adapters/ag_ui/interrupts.py` maps these inputs
+and streams the skill's reply in the person's words through `adapters/words.py`.
 
 The **A2A adapter** uses [a2a-sdk](https://github.com/a2aproject/a2a-python) server primitives (`AgentExecutor`, `DefaultRequestHandler`, and the route factories). The SDK handles JSON-RPC routing, SSE streaming, task lifecycle, and agent card serving. The adapter implements a single `WFOAgentExecutor.execute()` method that drives the pydantic-ai event stream and publishes A2A events via `TaskUpdater`. The `AgentCard.skills` list is projected from the advertised capability specs (`skills_from_specs`), keeping the advertised skills in sync with the configured capabilities.

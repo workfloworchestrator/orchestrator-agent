@@ -1,13 +1,14 @@
 [project]
 name = "orchestrator-agent"
-version = "0.1.0"
+version = "0.2.0"
 description = "Standalone WFO search agent for Kagent deployment"
 license = "Apache-2.0"
 requires-python = ">=3.11,<3.14"
 dependencies = [
-    "orchestrator-core>=5.4.0",
+    "orchestrator-core>=5.6.0a3",  # the form page as one JSON Schema (``status``, ``errors``): in the 5.6.0 alphas
+    "pydantic-forms>=2.10.0",  # core's form types the skill reads, and the option sources its fields declare
     "pydantic-ai-slim[mcp]>=2.0,<3",
-    "ag-ui-protocol==0.1.10",
+    "ag-ui-protocol>=1.0.0,<2",  # interrupts (``RunFinishedEvent.outcome``, ``RunAgentInput.resume``): the AG-UI human-in-the-loop
     "a2a-sdk[http-server]>=1.1.5,<2",
     "mcp>=1.28.1,<2",
     "uvicorn[standard]>=0.30.0",
@@ -97,6 +98,7 @@ known-first-party = ["orchestrator_agent"]
 norecursedirs = ".git build dist *.egg __pycache__ .cache .venv"
 testpaths = ["tests"]
 asyncio_mode = "auto"
+markers = ["integration: needs the orchestrator-core stack of tests/integration (WFO_INTEGRATION_CORE_URL)"]
 
 [tool.mypy]
 exclude = "(venv|.venv|demos)"
@@ -136,6 +138,6 @@ index-url = "https://pypi.org/simple"
 # orchestrator-core (prod) requires pydantic~=2.13.0 / pydantic-settings~=2.15.0: keep every
 # dependency on the prod-supported versions.
 override-dependencies = [
-    "pydantic>=2.13,<2.14",
+    "pydantic[email]>=2.13,<2.14",  # the extra pydantic-forms needs; an override drops extras it does not name
     "pydantic-settings>=2.15.0,<2.16",
 ]

@@ -50,6 +50,7 @@ from openai.types.chat.chat_completion_message_function_tool_call import Functio
 from pydantic import BaseModel, ValidationError
 
 from orchestrator_agent.adapters.chat.request import ChatRequest
+from orchestrator_agent.adapters.words import shown
 from orchestrator_agent.form_fill.pending import (
     PendingAsk,
     Pick,
@@ -58,15 +59,14 @@ from orchestrator_agent.form_fill.pending import (
     pending_ask,
     pending_of,
 )
+from orchestrator_agent.form_fill.session import paused
 from orchestrator_agent.state import (
     Approval,
     AskField,
     Decision,
     FormFillSession,
     FormInput,
-    FormReply,
     Reply,
-    SummaryTable,
 )
 
 logger = structlog.get_logger(__name__)
@@ -90,8 +90,6 @@ APPROVE_LABEL = "Approve"
 REJECT_LABEL = "Reject"
 APPROVAL_HEADER = "Approval"
 APPROVAL_NOTE = "Nothing is started until you approve. A typed answer is not read as a decision."
-SUMMARY_CAPTION = "The workflow's own summary:"
-UNTITLED = "unknown"  # pydantic-forms' title of a form page that was given none
 
 
 def call_id(pending: PendingAsk, card: int) -> str:
@@ -112,8 +110,7 @@ def pause(reply: Reply, session: FormFillSession | None) -> PendingAsk | None:
         return None
     request_id = uuid.uuid4().hex
     pending = pending_approval(request_id) if reply.approval is not None else pending_ask(request_id, reply.ask or [])
-    session.pending = pending.model_dump(mode="json")
-    session.unseen = False
+    paused(session, pending, unseen=False)
     return pending
 
 
@@ -147,22 +144,20 @@ def _cards(pending: PendingAsk) -> int:
 
 def _header(session: FormFillSession) -> str:
     """What heads a card: the title of the page being asked, or the workflow when the form gave it none."""
-    title = session.pages[-1].get("title") if session.pages else None
-    return title if isinstance(title, str) and title and title != UNTITLED else session.workflow_key
+    return (session.pages[-1].title if session.pages else None) or session.workflow_key
 
 
 def _question(request_id: str, index: int, field: AskField, header: str) -> dict[str, Any]:
     """One field as a question of the tool."""
-    note = "required" if field.required else "optional"
-    # A card is plain text: the field's title, name and whether it is required, without the markdown and the
-    # "leave empty" of the skill's own wording (here an optional field is left as it is by picking an option).
-    text = f"{field.title} ({field.name}, {note})" if field.title else _plain(field.question)
+    # A card is plain text: the field's label as the frontend shows it, "*" when it is required (an optional
+    # field is left as it is by picking an option).
+    text = f"{field.title}{' *' if field.required else ''}" if field.title else _plain(field.question)
     question: dict[str, Any] = {
         "id": f"q{index}",
         "header": _cut(header, MAX_HEADER),
         "question": _cut(text, MAX_QUESTION),
     }
-    described = [field.problem] if field.problem else []
+    described = [said for said in (field.problem, field.hint) if said]
     options = [{"label": _label(label), "value": token} for token, label in _option_values(request_id, index, field)]
     if field.choices and not options:
         described.append(f"Type one of its {len(field.choices)} options: " + "; ".join(field.choices))
@@ -338,70 +333,6 @@ def _decision(pending: PendingAsk, answer: str) -> FormInput:
     if answer in (_token(pending.id, "reject"), SKIPPED):
         return FormInput(decision=Decision.CANCEL)
     return FormInput()
-
-
-# --- what the person reads -------------------------------------------------------------------------------
-
-
-def shown(reply: Reply) -> str:
-    """A reply as the person reads it: the text above the card of a stop, or the outcome when the form is over.
-
-    The skill's own text is one JSON object, written for a calling agent; a person in a chat gets the same
-    data as a line of markdown, and at the approval as a table of the values as they will be sent — always,
-    as that is what is approved — with the workflow's own summary under it when its form has one.
-    """
-    form = _form(reply)
-    if form is None:
-        return reply.text
-    key = f"`{form.workflow_key}`"
-    if form.status == "gathering":
-        titled = form.title and form.title != UNTITLED
-        return f"**Workflow form {key}**" + (f" — {form.title}" if titled else "")
-    if form.status == "confirming":
-        tables = [line for table in form.summary for line in _summary_table(table)]
-        summary = ["", SUMMARY_CAPTION, *tables] if tables else []
-        return "\n".join([f"**Start workflow {key} with these values?**", *_values_table(form), *summary])
-    if form.status == "started":
-        outcome = f"Process id: `{form.process_id}`" if form.process_id else (form.reason or "")
-        return f"Workflow {key} started. {outcome}".rstrip()
-    if form.status == "cancelled":
-        return f"The {key} form was cancelled; nothing was started."
-    return f"The {key} form failed: {form.reason}"
-
-
-def _summary_table(table: SummaryTable) -> list[str]:
-    """One table of the workflow's own summary: a row per label, a column per item, headed when the form heads them."""
-    columns = table.get("columns") or [[]]
-    headers = [*table.get("headers", []), *[""] * len(columns)][: len(columns)]
-    lines = ["", "| | " + " | ".join(_cell(header) for header in headers) + " |", "|---|" + "---|" * len(columns)]
-    for row, label in enumerate(table.get("labels", [])):
-        cells = [_cell(column[row]) if row < len(column) else "" for column in columns]
-        lines.append(f"| {_cell(label)} | " + " | ".join(cells) + " |")
-    return lines
-
-
-def _values_table(form: FormReply) -> list[str]:
-    """The values as they will be submitted (an id as the label the form has for it), and the defaults that apply."""
-    lines: list[str] = []
-    if form.values:
-        lines += ["", "| Field | Value |", "|---|---|"]
-        lines += [f"| {name} | {_cell(form.labels.get(name, value))} |" for name, value in form.values.items()]
-    if form.defaults:
-        defaults = ", ".join(f"{name} = {_cell(value)}" for name, value in form.defaults.items())
-        lines += ["", f"Defaults that apply: {defaults}"]
-    return lines
-
-
-def _form(reply: Reply) -> FormReply | None:
-    try:
-        return FormReply.model_validate_json(reply.text)
-    except ValidationError:
-        return None
-
-
-def _cell(value: Any) -> str:
-    text = value if isinstance(value, str) else json.dumps(value, default=str)
-    return text.replace("|", "\\|").replace("\n", " ")
 
 
 # --- the transport: all of the above, for a chat-completions request -------------------------------------

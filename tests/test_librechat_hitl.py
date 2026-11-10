@@ -6,6 +6,7 @@ import json
 from typing import Any
 
 from openai.types.chat import ChatCompletionMessage
+from orchestrator.core.schemas.mcp_tools import WorkflowFormPage
 
 from orchestrator_agent.adapters.chat.librechat import (
     APPROVE_LABEL,
@@ -39,7 +40,7 @@ PAGE = [
         title="Product",
     ),
     AskField(name="ticket_id", question="Ticket (`ticket_id`, optional)", required=False, title="Ticket"),
-    AskField(name="policer", question="Policer (`policer`, required)", choices=["True", "False"], values=[True, False]),
+    AskField(name="policer", question="`Policer` *", choices=["True", "False"], values=[True, False]),
     AskField(
         name="ports",
         question="Ports (`ports`, required)",
@@ -63,7 +64,8 @@ def _paused(
     ask: list[AskField] | None = None, reply: Reply | None = None, title: str = "Port details"
 ) -> tuple[FormFillSession, PendingAsk]:
     """A session paused at a stop, as the skill leaves it: the page being asked is the last one walked."""
-    session = FormFillSession(workflow_key="create_port", status="gathering", unseen=True, pages=[{"title": title}])
+    page = WorkflowFormPage(page=0, complete=False, status="next", title=title)
+    session = FormFillSession(workflow_key="create_port", status="gathering", unseen=True, pages=[page])
     pending = pause(reply or Reply(GATHERING, ask=PAGE if ask is None else ask), session)
     assert pending is not None
     return session, pending
@@ -109,7 +111,7 @@ class TestCards:
         assert session.unseen is False  # a card is shown as soon as it is sent
         # What is remembered is what the skill asked, nothing of LibreChat's: it survives the session's JSON
         # round trip, and the same cards come out of it again.
-        assert session.pending == pending.model_dump(mode="json")
+        assert session.pending == pending.model_dump(mode="json", exclude_none=True)
         restored = pending_of(FormFillSession.model_validate(session.model_dump(mode="json")))
         assert restored is not None and [q.name for q in restored.questions] == [f.name for f in PAGE]
         assert [ask_card(restored, session, card) for card in range(2)] == cards
@@ -117,15 +119,15 @@ class TestCards:
     def test_a_question_is_plain_text_with_the_page_as_its_header(self):
         session, _ = _paused()
         product = _question(session, 0)
-        assert product["question"] == "Product (product, required)"
+        assert product["question"] == "Product *"
         assert product["header"] == "Port details"
         assert "description" not in product
         # Without a title the skill's own wording is used, less its markdown.
-        assert _question(session, 2)["question"] == "Policer (policer, required)"
+        assert _question(session, 2)["question"] == "Policer *"
         # Core's message on a rejected field is the description.
         assert _question(session, 3)["description"] == "List should have at least 2 items"
         # A page the form gave no title is headed by its workflow.
-        untitled, _ = _paused(title="unknown")
+        untitled, _ = _paused(title=None)
         assert _question(untitled, 0)["header"] == "create_port"
 
     def test_options_carry_values_only_this_stop_knows(self):
@@ -140,7 +142,7 @@ class TestCards:
     def test_an_optional_field_can_be_left_as_it_is(self):
         session, _ = _paused()
         ticket = _question(session, 1)
-        assert ticket["question"] == "Ticket (ticket_id, optional)"
+        assert ticket["question"] == "Ticket"
         assert [option["label"] for option in ticket["options"]] == [KEEP_LABEL]
         assert KEEP_LABEL in ticket["description"]
         assert "options" not in _question(session, 4)  # a required free field is just typed
@@ -310,7 +312,7 @@ class TestApproval:
 class TestShown:
     def test_a_page_stop_is_a_line_above_its_card(self):
         assert shown(Reply(GATHERING, ask=PAGE)) == "**Workflow form `create_port`** — Port details"
-        untitled = Reply('{"workflow_key":"create_port","status":"gathering","title":"unknown"}', ask=PAGE[:1])
+        untitled = Reply('{"workflow_key":"create_port","status":"gathering"}', ask=PAGE[:1])
         assert shown(untitled) == "**Workflow form `create_port`**"
 
     def test_the_approval_shows_what_will_be_submitted(self):
@@ -321,8 +323,18 @@ class TestShown:
             "|---|---|",
             "| product | SN8 10G |",  # an id is shown as the label the form has for it
             "| vlan | 20 |",
-            "",
-            "Defaults that apply: policer = true",
+            "| policer | true *(default)* |",  # what the form fills in by itself, in the same table
+        ]
+
+    def test_an_empty_default_reads_as_none(self):
+        reply = Reply(
+            '{"workflow_key":"create_port","status":"confirming","values":{"vlan":20},'
+            '"defaults":{"native_vlan":null,"contacts":[],"ticket_id":""}}'
+        )
+        assert shown(reply).splitlines()[-3:] == [
+            "| native_vlan | none *(default)* |",
+            "| contacts | none *(default)* |",
+            "| ticket_id | none *(default)* |",
         ]
 
     def test_the_approval_adds_the_workflows_own_summary_when_its_form_has_one(self):

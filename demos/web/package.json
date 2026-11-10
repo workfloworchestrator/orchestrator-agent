@@ -1,0 +1,17 @@
+{
+  "name": "wfo-chat-demo",
+  "private": true,
+  "description": "A page with nothing on it but the WFO agent's chat popup, against the agent's AG-UI route",
+  "type": "module",
+  "scripts": {
+    "dev": "vite"
+  },
+  "dependencies": {
+    "@workfloworchestrator/wfo-chat": "git+https://github.com/workfloworchestrator/orchestrator-agent-chat.git#main",
+    "react": "^19.3.1",
+    "react-dom": "^19.3.1"
+  },
+  "devDependencies": {
+    "vite": "^8.3.4"
+  }
+}

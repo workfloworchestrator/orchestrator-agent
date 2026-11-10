@@ -28,7 +28,7 @@ from orchestrator_agent.capabilities.hooks import (
     trim_history,
 )
 from orchestrator_agent.capabilities.spec import PluginSpec
-from orchestrator_agent.rendering.charts import aggregate_to_mermaid
+from orchestrator_agent.rendering.charts import aggregate_to_chart, aggregate_to_mermaid
 from orchestrator_agent.rendering.tables import search_to_markdown
 from orchestrator_agent.tool_names import (
     AGGREGATE_TOOL,
@@ -189,6 +189,16 @@ class TestArtifactDeclaration:
         )
         assert isinstance(out, ToolReturn)
         assert isinstance(out.metadata, expected)
+
+    def test_an_export_reaches_the_model_without_the_link_and_with_the_note(self):
+        # Core's export reply carries the link and asks the model to pass it on; the client shows the download
+        # beside the step instead, so the model reads neither and is told not to write a link.
+        from orchestrator_agent.capabilities.behavior.base import _attach_artifact
+
+        reply = {"query_id": "q", "download_path": "/x", "message": "Export ready. Provide this link to the user."}
+        out = _attach_artifact(reply, ExportArtifact(description="d", query_id="q", download_url="/x"))
+        assert out.return_value == {"query_id": "q"}
+        assert "Never write a URL or a link" in out.content
 
 
 class TestDeferredToolGate:
@@ -377,6 +387,18 @@ class TestAggregateChart:
         assert artifact.rendered_block.type == "mermaid"
         assert artifact.query_id == "q-agg"  # still a QueryArtifact (export keeps working)
         assert "xychart-beta" in artifact.rendered_block.content
+        # The same chart as data, for a client that draws it itself (the popup).
+        assert artifact.chart is not None
+        assert artifact.chart.kind == "bar"
+        assert artifact.chart.title == "count by status"
+        assert [(p.label, p.value) for p in artifact.chart.points] == [("active", 7), ("inactive", 2)]
+
+    def test_chart_data_keeps_the_visualization_hint_and_the_metric(self):
+        line = aggregate_to_chart({**self.GROUPED, "visualization": "line"})
+        assert line is not None and line.kind == "line" and line.metric == "count"
+        pie = aggregate_to_chart({**self.GROUPED, "visualization": "pie"})
+        assert pie is not None and pie.kind == "pie"
+        assert aggregate_to_chart({"results": []}) is None
 
     def test_artifact_for_scalar_aggregate_stays_query_artifact(self):
         payload = {

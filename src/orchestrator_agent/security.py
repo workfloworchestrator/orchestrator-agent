@@ -18,6 +18,7 @@ concrete ``OIDCAuth`` subclass that resolves user info via the standard OIDC
 userinfo endpoint.
 """
 
+from collections.abc import Mapping
 from http import HTTPStatus
 
 import structlog
@@ -136,6 +137,7 @@ class AuthMiddleware:
             user = await self.auth_manager.authentication.authenticate(request, token)
             if user:
                 await self.auth_manager.authorization.authorize(request, user)
+                scope.setdefault("state", {})["user"] = user  # ``request.state.user`` downstream (``subject_of``)
             else:
                 raise HTTPException(status_code=401, detail="Unauthorized")
         except HTTPException as exc:
@@ -144,3 +146,18 @@ class AuthMiddleware:
             return
 
         await self.app(scope, receive, send)
+
+
+def subject_of(request: Request) -> str | None:
+    """The subject of the person the middleware authenticated, or None when OAuth2 is off.
+
+    Where a route binds a conversation to a person (AG-UI), this is the owner it binds to. With OAuth2 on, a token
+    without a subject is refused rather than read as having no owner.
+    """
+    user = getattr(request.state, "user", None)
+    subject = user.get("sub") if isinstance(user, Mapping) else None
+    if subject:
+        return str(subject)
+    if oauth2lib_settings.OAUTH2_ACTIVE:
+        raise HTTPException(status_code=401, detail="Token has no subject")
+    return None
