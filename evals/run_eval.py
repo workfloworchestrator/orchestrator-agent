@@ -8,12 +8,14 @@ read the tool calls from the OpenTelemetry spans pydantic-ai emits, so this
 measures agent behavior only: which tools, in what order, with which
 arguments.
 
-    uv run python run_eval.py [--cases name1,name2] [--fail-under 0.8]
+    uv run python run_eval.py [--cases name1,name2] [--repeat 5] [--concurrency 8] [--fail-under 0.8]
 """
 
 import argparse
 import sys
+from collections import defaultdict
 from pathlib import Path
+from statistics import fmean
 
 from settings import eval_settings
 
@@ -58,39 +60,62 @@ async def run_wfo_agent(question: str) -> str:
     return result.output
 
 
+def case_means(report: EvaluationReport) -> dict[str, dict[str, float]]:
+    """Per case, the average of every score and the pass rate of every assertion over the case's runs.
+
+    A ``--repeat`` report holds one entry per run of a case, which pydantic-evals
+    groups back by case; without repeats every case is its own single run.
+    """
+    groups = report.case_groups()
+    runs_by_case = {case.name: [case] for case in report.cases} if groups is None else {g.name: g.runs for g in groups}
+    means: dict[str, dict[str, float]] = {}
+    for case_name, runs in runs_by_case.items():
+        values: defaultdict[str, list[float]] = defaultdict(list)
+        for run in runs:
+            for name, result in (run.scores | run.assertions).items():
+                values[name].append(float(result.value))
+        means[case_name] = {name: fmean(of_runs) for name, of_runs in values.items()}
+    return means
+
+
 def compare_to_baseline(report: EvaluationReport, baseline: EvaluationReport, tolerance: float) -> list[str]:
     """Per-case regressions of this run against a stored baseline report.
 
-    Compares every score and assertion of every case present in both reports:
-    a score counts as regressed when it drops more than ``tolerance`` below the
-    baseline (LLM runs are non-deterministic; the tolerance absorbs run-to-run
-    noise), an assertion when it flips from passing to failing. Improvements
-    and cases only present on one side never fail the comparison.
+    Compares every score average and assertion pass rate of every case present
+    in both reports: either counts as regressed when it drops more than
+    ``tolerance`` below the baseline (LLM runs are non-deterministic; the
+    tolerance absorbs run-to-run noise). With one run per case a pass rate is 1
+    or 0, so an assertion that flips from passing to failing is a regression.
+    Improvements and cases only present on one side never fail the comparison.
     """
-    baseline_cases = {case.name: case for case in baseline.cases}
+    baseline_means = case_means(baseline)
     regressions: list[str] = []
-    for case in report.cases:
-        base = baseline_cases.get(case.name)
+    for case_name, means in case_means(report).items():
+        base = baseline_means.get(case_name)
         if base is None:
-            print(f"baseline: case {case.name!r} not in baseline, skipping")
+            print(f"baseline: case {case_name!r} not in baseline, skipping")
             continue
-        for name, result in case.scores.items():
-            base_result = base.scores.get(name)
-            if base_result is None:
-                continue
-            delta = float(result.value) - float(base_result.value)
-            if delta < -tolerance:
-                regressions.append(f"{case.name} :: {name} {float(base_result.value):.2f} -> {float(result.value):.2f}")
-        for name, result in case.assertions.items():
-            base_result = base.assertions.get(name)
-            if base_result is not None and base_result.value and not result.value:
-                regressions.append(f"{case.name} :: {name} passed -> failed ({result.reason})")
+        for name, value in means.items():
+            if name in base and value - base[name] < -tolerance:
+                regressions.append(f"{case_name} :: {name} {base[name]:.2f} -> {value:.2f}")
     return regressions
 
 
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--cases", help="comma-separated case names to run (default: all)")
+    parser.add_argument(
+        "--repeat",
+        type=int,
+        default=1,
+        help="run every case this many times; scores and assertions then count as per-case averages",
+    )
+    parser.add_argument(
+        "--concurrency",
+        type=int,
+        default=4,
+        help="how many runs go at once; the agent shares one MCP session and core's tools keep no session state",
+    )
     parser.add_argument(
         "--fail-under",
         type=float,
@@ -126,7 +151,10 @@ def main() -> None:
             evaluators=dataset.evaluators,
         )
 
-    report = dataset.evaluate_sync(run_wfo_agent, name="wfo-search", max_concurrency=1)
+    _get_agent()  # built once here, not by whichever concurrent run gets there first
+    report = dataset.evaluate_sync(
+        run_wfo_agent, name="wfo-search", max_concurrency=args.concurrency, repeat=args.repeat
+    )
     report.print(include_input=True, include_output=False, include_durations=True)
 
     if args.save_report:

@@ -21,12 +21,15 @@ services:
   orchestrator:
     # Keep in sync with a released orchestrator-core that carries the search
     # MCP toolset the agent's tool contract requires (>= 5.1.0).
-    image: ${CORE_IMAGE:-ghcr.io/workfloworchestrator/orchestrator-core:5.1.0}
+    image: ${CORE_IMAGE:-ghcr.io/workfloworchestrator/orchestrator-core:5.6.0}
     environment:
       DATABASE_URI: postgresql+psycopg://nwa:nwa@postgres/orchestrator-core
       MCP_ENABLED: "True"
       OAUTH2_ACTIVE: "False"
       TESTING: "False"
+      # For now core's branch with the one-call subscription lookup, installed over the image's release at
+      # start. Once a release carries it: remove this and bump the image to that release.
+      CORE_GIT_REF: resolve-entity-subscription-summary
     volumes:
       - ./docker/core/wsgi.py:/home/orchestrator/wsgi.py:ro
       - ./docker/core/main.py:/home/orchestrator/main.py:ro

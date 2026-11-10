@@ -26,6 +26,8 @@ cp .env.example .env   # fill in AGENT_API_KEY (gitignored); pin AGENT_MODEL —
                        # are only comparable on the same model. Real env vars win over .env.
 uv run python run_eval.py                    # full golden set
 uv run python run_eval.py --cases fuzzy-search-nodes   # subset (smoke)
+uv run python run_eval.py --repeat 5         # every case five times, averaged per case
+uv run python run_eval.py --concurrency 8    # runs at once (default 4)
 uv run python run_eval.py --fail-under 0.7   # CI gate: exit non-zero below the floor
 ```
 
@@ -78,21 +80,25 @@ blessed run, serialized with pydantic-evals' own `EvaluationReportAdapter`.
 Every benchmark run can compare itself against it per case:
 
 ```bash
-uv run python run_eval.py --baseline baseline_report.json   # fail on per-case regression
-uv run python run_eval.py --save-report baseline_report.json  # bless a new baseline
+uv run python run_eval.py --repeat 5 --baseline baseline_report.json   # fail on per-case regression
+uv run python run_eval.py --repeat 5 --save-report baseline_report.json  # bless a new baseline
 ```
 
-A score that drops more than `--tolerance` (default 0.2) below the baseline,
-or an assertion that flips from passing to failing, fails the run and names
-the case. Improvements never fail. Re-bless the baseline deliberately — in the
-same MR as the change that moves the numbers, on the pinned model — so a
-baseline change is always a reviewed diff.
+`--repeat N` runs every case N times (pydantic-evals' own `repeat`): the model
+does not take the same route every time, so one run of a case is a single
+sample. The comparison is between per-case averages: a score average or an
+assertion pass rate that drops more than `--tolerance` (default 0.2) below the
+baseline's fails the run and names the case. Improvements never fail. Compare
+with the repeat count the baseline was blessed with. Re-bless the baseline
+deliberately — in the same MR as the change that moves the numbers, on the
+pinned model — so a baseline change is always a reviewed diff.
 
 ## CI
 
 `.github/workflows/eval.yml` runs the benchmark on demand
 (`workflow_dispatch`), nightly, and on PRs labeled `eval`: compose up the
 backing services, run the golden set in-process from the branch's working
-tree, gate on the committed baseline plus the `--fail-under` floor. Requires
+tree, five times per case, gate on the committed baseline plus the
+`--fail-under` floor. Requires
 the `EVAL_AGENT_API_KEY` repository secret (and optionally an
 `EVAL_AGENT_MODEL` variable, default `openai:gpt-4o`).

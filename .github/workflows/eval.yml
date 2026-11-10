@@ -38,7 +38,7 @@ jobs:
         working-directory: evals
         run: |
           uv sync
-          uv run python run_eval.py --baseline baseline_report.json --fail-under 0.7
+          uv run python run_eval.py --repeat 5 --baseline baseline_report.json --fail-under 0.7
 
       - name: Service logs on failure
         if: failure()

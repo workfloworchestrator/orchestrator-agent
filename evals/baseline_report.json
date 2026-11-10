@@ -11,14 +11,14 @@
         "curation_note": "Plain descriptive request; one fuzzy/semantic search, no filters needed."
       },
       "expected_output": null,
-      "output": "I found four subscriptions related to network nodes, covering various statuses including active, terminated, and provisioning.",
+      "output": "I found 4 subscriptions related to network nodes, with statuses including active, terminated, and provisioning.",
       "metrics": {
         "requests": 2,
-        "input_tokens": 10423,
-        "output_tokens": 43,
+        "input_tokens": 10517,
+        "output_tokens": 47,
         "cache_read.input_tokens": 9856,
         "cache_read_tokens": 9856,
-        "cost": 0.0141675
+        "cost": 0.0144425
       },
       "attributes": {},
       "scores": {
@@ -68,8 +68,8 @@
           "evaluator_version": null
         }
       },
-      "task_duration": 3.735172248998424,
-      "total_duration": 3.736689329147339,
+      "task_duration": 4.987661573999503,
+      "total_duration": 4.9896626472473145,
       "source_case_name": null,
       "trace_id": null,
       "span_id": null,
@@ -85,21 +85,21 @@
         "curation_note": "A concrete dimension (status) must become a structured filter, and filter paths must come from discover_filter_paths, never guessed. in_order tolerates an extra get_valid_operators check at a small precision cost."
       },
       "expected_output": null,
-      "output": "There are 3 active subscriptions found.",
+      "output": "There are 3 active subscriptions.",
       "metrics": {
-        "requests": 4,
-        "input_tokens": 20965,
-        "output_tokens": 122,
-        "cache_read.input_tokens": 20096,
-        "cache_read_tokens": 20096,
-        "cost": 0.028512500000000003
+        "requests": 3,
+        "input_tokens": 15626,
+        "output_tokens": 94,
+        "cache_read.input_tokens": 15104,
+        "cache_read_tokens": 15104,
+        "cost": 0.021124999999999998
       },
       "attributes": {},
       "scores": {
         "TrajectoryMatch": {
           "name": "TrajectoryMatch",
-          "value": 1.0,
-          "reason": "LCS=2, precision=2/2=1.000, recall=2/2=1.000, F1=1.000 (expected: ['discover_filter_paths', 'search'], actual: ['discover_filter_paths', 'search'])",
+          "value": 0.5,
+          "reason": "LCS=1, precision=1/2=0.500, recall=1/2=0.500, F1=0.500 (expected: ['discover_filter_paths', 'search'], actual: ['discover_filter_paths', 'aggregate'])",
           "source": {
             "name": "TrajectoryMatch",
             "arguments": [
@@ -142,8 +142,8 @@
           "evaluator_version": null
         }
       },
-      "task_duration": 5.628573113004677,
-      "total_duration": 5.629376173019409,
+      "task_duration": 7.705800544004887,
+      "total_duration": 7.7078375816345215,
       "source_case_name": null,
       "trace_id": null,
       "span_id": null,
@@ -162,11 +162,11 @@
       "output": "There are a total of 5 subscriptions.",
       "metrics": {
         "requests": 2,
-        "input_tokens": 10189,
-        "output_tokens": 30,
-        "cache_read.input_tokens": 9856,
-        "cache_read_tokens": 9856,
-        "cost": 0.0134525
+        "input_tokens": 10274,
+        "output_tokens": 26,
+        "cache_read.input_tokens": 9984,
+        "cache_read_tokens": 9984,
+        "cost": 0.013465
       },
       "attributes": {},
       "scores": {
@@ -216,8 +216,8 @@
           "evaluator_version": null
         }
       },
-      "task_duration": 2.833069239015458,
-      "total_duration": 2.833739995956421,
+      "task_duration": 4.449158553994494,
+      "total_duration": 4.450254440307617,
       "source_case_name": null,
       "trace_id": null,
       "span_id": null,
@@ -234,14 +234,14 @@
         "curation_note": "Grouped count; group_by paths need discovery just like filters."
       },
       "expected_output": null,
-      "output": "There are subscriptions with statuses distributed across \"active,\" \"provisioning,\" and \"terminated,\" with a majority being \"active.\"",
+      "output": "The subscriptions are distributed across statuses with the majority being \"active\".",
       "metrics": {
-        "requests": 3,
-        "input_tokens": 15498,
-        "output_tokens": 79,
-        "cache_read.input_tokens": 14976,
-        "cache_read_tokens": 14976,
-        "cost": 0.020815
+        "requests": 4,
+        "input_tokens": 20991,
+        "output_tokens": 93,
+        "cache_read.input_tokens": 20352,
+        "cache_read_tokens": 20352,
+        "cost": 0.0279675
       },
       "attributes": {},
       "scores": {
@@ -281,7 +281,7 @@
         "MaxToolCalls": {
           "name": "MaxToolCalls",
           "value": true,
-          "reason": "2 tool call(s), budget=8",
+          "reason": "3 tool call(s), budget=8",
           "source": {
             "name": "MaxToolCalls",
             "arguments": [
@@ -291,8 +291,8 @@
           "evaluator_version": null
         }
       },
-      "task_duration": 5.365395725995768,
-      "total_duration": 5.367035627365112,
+      "task_duration": 10.985691551002674,
+      "total_duration": 10.987103700637817,
       "source_case_name": null,
       "trace_id": null,
       "span_id": null,
@@ -308,14 +308,14 @@
         "curation_note": "An id-prefix reference goes straight to resolve_entity, not search."
       },
       "expected_output": null,
-      "output": "There are multiple subscriptions starting with the prefix \"aa1b2c3d.\" Please specify which one you want details for:\n\n1. **node asd001** (active)\n2. **node ams002** (active)\n3. **core link 10G asd001 <-> ams002**\n4. **node rtd003** (terminated)\n5. **node utr004** (provisioning)\n\nLet me know which one you'd like to see details for, or provide a more specific identifier.",
+      "output": "Multiple subscriptions match the prefix \"aa1b2c3d\". Please specify which one you would like to see details for:\n\n1. Node ASD001 (active)\n2. Node AMS002 (active)\n3. Core Link 10G ASD001 <-> AMS002\n4. Node RTD003 (terminated)\n5. Node UTR004 (provisioning)\n\nLet me know which one you would like to view.",
       "metrics": {
         "requests": 2,
-        "input_tokens": 10381,
-        "output_tokens": 137,
+        "input_tokens": 10477,
+        "output_tokens": 117,
         "cache_read.input_tokens": 10112,
         "cache_read_tokens": 10112,
-        "cost": 0.014682500000000001
+        "cost": 0.0147225
       },
       "attributes": {},
       "scores": {
@@ -366,8 +366,8 @@
           "evaluator_version": null
         }
       },
-      "task_duration": 4.295860415993957,
-      "total_duration": 4.297313928604126,
+      "task_duration": 7.44392248600343,
+      "total_duration": 7.444976091384888,
       "source_case_name": null,
       "trace_id": null,
       "span_id": null,
@@ -383,21 +383,21 @@
         "curation_note": "\"Give me\" is a details fetch, not an export; with a full UUID in hand the direct details fetch is the ideal route, and the UUID must pass through verbatim."
       },
       "expected_output": null,
-      "output": "The subscription details for ID `aa1b2c3d-0000-4000-8000-000000000003` are as follows:\n\n- **Description**: Core link 10G asd001 <-> ams002\n- **Status**: Active\n- **In Sync**: Yes\n- **Product**: Core link 10G\n  - **Product Type**: CoreLink\n  - **Product Tag**: CORE_LINK\n  - **Description**: 10G core link between nodes\n- **Customer ID**: e6c5c2ae-1b3a-4f5f-9c1e-000000000001\n- **Start Date**: October 10, 2023\n- **End Date**: None (ongoing)",
+      "output": "The subscription \"core link 10G asd001 <-> ams002\" is currently active. It involves a 10G core link between nodes as the product type \"CoreLink\". The subscription is in sync, associated with customer ID e6c5c2ae-1b3a-4f5f-9c1e-000000000001.",
       "metrics": {
-        "requests": 2,
-        "input_tokens": 10347,
-        "output_tokens": 207,
-        "cache_read.input_tokens": 10112,
-        "cache_read_tokens": 10112,
-        "cost": 0.015297499999999999
+        "requests": 3,
+        "input_tokens": 15801,
+        "output_tokens": 157,
+        "cache_read.input_tokens": 15488,
+        "cache_read_tokens": 15488,
+        "cost": 0.021712500000000003
       },
       "attributes": {},
       "scores": {
         "TrajectoryMatch": {
           "name": "TrajectoryMatch",
-          "value": 1.0,
-          "reason": "actual trajectory matches expected: ['get_subscription_details']",
+          "value": 0.0,
+          "reason": "actual trajectory ['resolve_entity', 'get_subscription_details'] does not equal expected ['get_subscription_details']",
           "source": {
             "name": "TrajectoryMatch",
             "arguments": {
@@ -430,7 +430,7 @@
         "MaxToolCalls": {
           "name": "MaxToolCalls",
           "value": true,
-          "reason": "1 tool call(s), budget=8",
+          "reason": "2 tool call(s), budget=8",
           "source": {
             "name": "MaxToolCalls",
             "arguments": [
@@ -440,8 +440,8 @@
           "evaluator_version": null
         }
       },
-      "task_duration": 4.60682055100915,
-      "total_duration": 4.608274698257446,
+      "task_duration": 8.884332642002846,
+      "total_duration": 8.886266946792603,
       "source_case_name": null,
       "trace_id": null,
       "span_id": null,
@@ -458,14 +458,14 @@
         "curation_note": "The entity type must switch to WORKFLOW; the term is the query text."
       },
       "expected_output": null,
-      "output": "There are no workflows containing the term \"validate.\" If you have a more specific name or criteria, please let me know so I can assist further!",
+      "output": "No workflows containing the term \"validate\" were found. If you have any other criteria or keywords, please let me know!",
       "metrics": {
         "requests": 2,
-        "input_tokens": 10182,
-        "output_tokens": 51,
+        "input_tokens": 10276,
+        "output_tokens": 46,
         "cache_read.input_tokens": 9984,
         "cache_read_tokens": 9984,
-        "cost": 0.013485
+        "cost": 0.01367
       },
       "attributes": {},
       "scores": {
@@ -516,8 +516,8 @@
           "evaluator_version": null
         }
       },
-      "task_duration": 2.7668141089961864,
-      "total_duration": 2.767564296722412,
+      "task_duration": 3.683778054000868,
+      "total_duration": 3.685011863708496,
       "source_case_name": null,
       "trace_id": null,
       "span_id": null,
@@ -533,14 +533,14 @@
         "curation_note": "Explicit \"export as CSV\" sanctions export_query, after the search that produces the query to export."
       },
       "expected_output": null,
-      "output": "The export for the \"core link\" subscriptions is ready. You can download the CSV file using the following [link](sandbox:/api/search/queries/7a19d867-a497-4737-a3e8-cc920d505eea/export).",
+      "output": "Download has been successfully prepared.",
       "metrics": {
         "requests": 3,
-        "input_tokens": 15632,
-        "output_tokens": 112,
+        "input_tokens": 15773,
+        "output_tokens": 65,
         "cache_read.input_tokens": 15104,
         "cache_read_tokens": 15104,
-        "cost": 0.021320000000000002
+        "cost": 0.021202500000000003
       },
       "attributes": {},
       "scores": {
@@ -591,8 +591,85 @@
           "evaluator_version": null
         }
       },
-      "task_duration": 4.992389721999643,
-      "total_duration": 4.993574142456055,
+      "task_duration": 4.917226057994412,
+      "total_duration": 4.918327808380127,
+      "source_case_name": null,
+      "trace_id": null,
+      "span_id": null,
+      "evaluator_failures": []
+    },
+    {
+      "name": "export-named-alone",
+      "inputs": "export active subscriptions",
+      "metadata": {
+        "failure_modes": [
+          "export",
+          "structured-filters"
+        ],
+        "curation_note": "Only the export is named and no query exists yet, so the search that produces the query comes first, in the same turn, with the status as a structured filter. Stopping after the search leaves the person without the file they asked for."
+      },
+      "expected_output": null,
+      "output": "Download has been successfully prepared.",
+      "metrics": {
+        "requests": 6,
+        "input_tokens": 32401,
+        "output_tokens": 249,
+        "cache_read.input_tokens": 30848,
+        "cache_read_tokens": 30848,
+        "cost": 0.0449325
+      },
+      "attributes": {},
+      "scores": {
+        "TrajectoryMatch": {
+          "name": "TrajectoryMatch",
+          "value": 0.0,
+          "reason": "actual trajectory ['discover_filter_paths', 'aggregate', 'search', 'export_query'] does not equal expected ['discover_filter_paths', 'search', 'export_query']",
+          "source": {
+            "name": "TrajectoryMatch",
+            "arguments": {
+              "expected_trajectory": [
+                "discover_filter_paths",
+                "search",
+                "export_query"
+              ],
+              "order": "exact"
+            }
+          },
+          "evaluator_version": null
+        }
+      },
+      "labels": {},
+      "assertions": {
+        "ArgumentCorrectness": {
+          "name": "ArgumentCorrectness",
+          "value": true,
+          "reason": null,
+          "source": {
+            "name": "ArgumentCorrectness",
+            "arguments": {
+              "tool_name": "search",
+              "expected_arguments": {
+                "entity_type": "SUBSCRIPTION"
+              }
+            }
+          },
+          "evaluator_version": null
+        },
+        "MaxToolCalls": {
+          "name": "MaxToolCalls",
+          "value": true,
+          "reason": "5 tool call(s), budget=8",
+          "source": {
+            "name": "MaxToolCalls",
+            "arguments": [
+              8
+            ]
+          },
+          "evaluator_version": null
+        }
+      },
+      "task_duration": 13.612896680999256,
+      "total_duration": 13.614933252334595,
       "source_case_name": null,
       "trace_id": null,
       "span_id": null,
@@ -608,14 +685,14 @@
         "curation_note": "Out of scope for the orchestrator; the correct behavior is to answer/decline without calling any tool (empty expected trajectory scores 1.0 only when the agent also calls nothing)."
       },
       "expected_output": null,
-      "output": "I'm unable to provide the current weather information. You might want to check a reliable weather website or app for the latest forecast in Amsterdam.",
+      "output": "I'm here to help with orchestration data related to workflows and subscriptions. For weather updates, I recommend checking a weather service or app for the latest information on Amsterdam's weather.",
       "metrics": {
         "requests": 1,
-        "input_tokens": 5051,
-        "output_tokens": 28,
+        "input_tokens": 5099,
+        "output_tokens": 36,
         "cache_read.input_tokens": 4864,
         "cache_read_tokens": 4864,
-        "cost": 0.0068275
+        "cost": 0.0070275
       },
       "attributes": {},
       "scores": {
@@ -648,8 +725,8 @@
           "evaluator_version": null
         }
       },
-      "task_duration": 1.241003681003349,
-      "total_duration": 1.2415692806243896,
+      "task_duration": 2.439491666998947,
+      "total_duration": 2.4409019947052,
       "source_case_name": null,
       "trace_id": null,
       "span_id": null,
@@ -666,14 +743,14 @@
         "curation_note": "\"Show me\" is viewing, explicitly not an export; a trajectory ending in export_query loses precision here."
       },
       "expected_output": null,
-      "output": "There are three active subscriptions currently.",
+      "output": "There are 3 active subscriptions currently available.",
       "metrics": {
-        "requests": 4,
-        "input_tokens": 20994,
-        "output_tokens": 121,
-        "cache_read.input_tokens": 20224,
-        "cache_read_tokens": 20224,
-        "cost": 0.028415
+        "requests": 3,
+        "input_tokens": 15785,
+        "output_tokens": 83,
+        "cache_read.input_tokens": 15104,
+        "cache_read_tokens": 15104,
+        "cost": 0.0214125
       },
       "attributes": {},
       "scores": {
@@ -708,8 +785,8 @@
           "evaluator_version": null
         }
       },
-      "task_duration": 6.924886869004695,
-      "total_duration": 6.926040172576904,
+      "task_duration": 5.8510246789956,
+      "total_duration": 5.852350234985352,
       "source_case_name": null,
       "trace_id": null,
       "span_id": null,
@@ -721,5 +798,6 @@
   "report_evaluator_failures": [],
   "experiment_metadata": null,
   "trace_id": null,
-  "span_id": null
+  "span_id": null,
+  "dataset_name": "wfo_search_dataset"
 }
