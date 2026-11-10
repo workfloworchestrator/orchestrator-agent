@@ -26,6 +26,9 @@ At startup the agent lists the tools of the live server and stops with an error 
 is missing. A connection failure logs a warning and skips the check. Authentication errors, HTTP errors and
 malformed responses fail startup.
 
+The check covers the fixed Core contract in `tool_names.ALL_TOOL_NAMES`. It excludes local tools such as
+`start_workflow_form`; adding a constant for a custom tool does not add it to this verification list automatically.
+
 ### Find the exposed tools
 
 Every tool is a REST route of Orchestrator Core with the tag `agent-exposed`. The API docs of your orchestrator show
@@ -46,8 +49,8 @@ can call them. What the Orchestrator Agent does with them depends on the interfa
 
 | Interface | Write tools |
 | --- | --- |
-| A2A and `/v1` | Hidden from the model by the write tool gate. Both serve the same agent, and workflows start only through the approved path described in [Workflow forms](#workflow-forms). |
-| AG-UI and agent `/mcp` | Not hidden. These endpoints run without the form-fill skill and without the write tool gate, so the model can call every tool that Core exposes. |
+| A2A, `/v1` and AG-UI | Hidden from the model by the write tool gate. These interfaces share the form-enabled agent; built-in workflow starts use the approved path described in [Workflow forms](#workflow-forms). |
+| Agent `/mcp` | Not hidden. It runs a separate agent without the form-fill skill or write tool gate, so its model can call Core's write tools directly. |
 
 The gate hides a fixed list of tool names. It does not look at the annotations of a tool, and it does not inspect what
 an endpoint does. A custom route tagged `agent-exposed` is therefore visible to the model, whether or not it is marked
@@ -55,8 +58,9 @@ read-only. Conversation persistence and stored search results also write to Post
 
 !!! danger "Write tools without approval"
     Where the write tools are not hidden, the model can change your inventory without the approval of a person. This
-    holds for AG-UI and the agent `/mcp`, and for your own agent or MCP client when you connect it to Core. We advise
-    against it: start workflows through A2A or LibreChat, or let the client ask for confirmation before each call. The tools carry hints for this: `abort_workflow_process` is marked destructive,
+    holds for the agent `/mcp`, and for your own agent or MCP client when you connect it to Core. Use A2A,
+    LibreChat or an interrupt-capable AG-UI client for the built-in approval flow, or have the calling client obtain
+    confirmation. The tools carry hints for this: `abort_workflow_process` is marked destructive,
     and none of the three is marked read-only.
 
 ## Plugins and guards
@@ -75,15 +79,19 @@ A few guards hold for all tools, so they are not part of a plugin. They are capa
 of Markdown:
 
 - The **filter path guard** requires that a call with filters or a grouping is preceded by the discovery of the valid
-  filter paths. Paths are specific to a database and must not be guessed.
-- The **write tool gate**, on A2A and `/v1` (the agent with the form-fill skill), hides the workflow write tools of Core from the model, so workflows start only
+  filter paths. It checks for a discovery call in the available message history before a non-empty `filters` or
+  `group_by` argument; it does not compare the chosen paths with the discovery result or verify its entity type.
+- The **write tool gate**, on A2A, `/v1` and AG-UI (the agent with the form-fill skill), hides Core's three named
+  workflow mutations from the model, so built-in workflow starts go
   through the form-fill skill. See [Read tools and write tools](#read-tools-and-write-tools).
 - **History trimming** keeps a sliding window of the conversation.
 
 Tables and charts are **rendered blocks**: the agent builds a Markdown table or a Mermaid chart from the result in
 code. The A2A and chat adapters append these blocks to the answer, so the rendered rows and numbers are not retyped
 by the model. AG-UI exposes the blocks as artifact metadata for the frontend to render. MCP returns the raw result
-JSON alongside the model's answer. See [Endpoints and protocols](endpoints.md).
+JSON alongside the model's answer. Export download metadata is delivered through AG-UI; the other interfaces
+do not deliver Core's standard export URL after the plugin strips it from the model-visible payload. See
+[Export delivery](endpoints.md#export-delivery).
 
 ## Workflow forms
 
@@ -93,24 +101,33 @@ The model selects a workflow through the workflow plugin. A form-fill skill then
    over with the key of the workflow.
 2. **Walk the form.** The skill fetches the form page by page from Orchestrator Core, using the answers so far. Pages
    are dynamic, so the walk starts again from the first page every turn.
-3. **Ask.** At the first page that Orchestrator Core does not accept, the person gets one question per field, with
-   the options as choices. Consent fields are only ever accepted by an explicit answer of the person.
+3. **Ask.** The skill asks about missing answers or fields Core rejected. It can also stop before submission for
+   consent, optional fields or unresolved option choices. Questions carry the available choices and Core's errors
+   where present. Consent fields require an explicit answer from the person.
 4. **Confirm.** When the form is complete, the person approves the exact call that will be made. Approve starts the
    workflow and reject cancels it.
-5. **Start.** The skill makes the call with exactly the validated pages. Within a serialized conversation turn it
-   makes one start attempt for the matching approval. Core validation errors reopen the form; other failures close
-   it because the outcome may be unknown. This is not a distributed exactly-once execution guarantee.
+5. **Start.** The approved branch makes one start attempt with exactly the validated pages. Core validation errors
+   reopen the form; other failures close it because the outcome may be unknown. This is not an exactly-once
+   execution guarantee across concurrent requests or workers; see [Conversation persistence](#conversation-persistence).
 
 No chat text is read as an answer: a person who types *yes* has not approved anything. The questions and the approval
-travel as native pauses of the protocol, which is the human-in-the-loop extension of kagent over A2A, and the ask-user
-tool of LibreChat. The agent never judges a value. Orchestrator Core validates every page, and the agent only
-interprets what a person typed in words into a value, which Orchestrator Core validates again.
+travel through kagent's human-in-the-loop extension over A2A, LibreChat's ask-user tool, or AG-UI interrupts.
+For ordinary fields, Core rejects invalid text before the agent interprets it into a value for Core to validate
+again. Fields with `optionsSource` instead fetch their choices over HTTP and resolve typed words against those
+choices before submission. Ambiguous or unmatched words are re-asked. Core validates every submitted page.
+
+Core supplies each page as a self-contained JSON Schema with structured validation verdicts. The agent reads it
+into `FieldSpec` records for questions and labels. Its interpreter uses an optional-field variant of that schema
+through pydantic-ai's `StructuredDict`, rather than generating a Pydantic model per page. Form-option requests use
+the same outbound token selection as MCP; their permitted destinations are configured by
+[`WFO_CORE_API_URL` and `WFO_OPTIONS_HOSTS`](configuration.md#connection).
 
 Approval is a structured response matching the pending request. The agent trusts its calling client to obtain
 that response from a person; the protocol response itself does not prove human interaction.
 
-The MCP and AG-UI endpoints run without this skill, so they have neither the workflow plugin nor the write tool gate.
-The model behind them can call the write tools of Core directly.
+The MCP endpoint runs without this skill, workflow plugin or write tool gate. A client that cannot show native
+pauses on A2A, `/v1` or AG-UI gets no form, but those interfaces still hide the three workflow mutations.
+The skill's internal reply text is JSON; LibreChat and AG-UI render it as Markdown alongside their structured stops.
 
 ## Conversation persistence
 
@@ -118,20 +135,29 @@ The agent connects directly to the WFO PostgreSQL database using `DATABASE_URI`.
 and state snapshots in `graph_snapshots`, using the models supplied by Orchestrator Core. A snapshot includes
 message history, query state and any open workflow form. Later turns load the latest snapshot for the conversation.
 
-A2A and OpenAI chat completions replay stored message history. AG-UI loads and snapshots state, but passes the
-messages supplied by the frontend to its adapter instead of replaying stored history. The MCP endpoint records
+A2A, OpenAI chat completions and AG-UI replay stored message history. AG-UI takes the new turn's messages from
+the frontend, replaces client-supplied state with stored state, and saves the resulting history. The MCP endpoint records
 individual runs but does not load or snapshot conversation state.
 
 | Interface | Conversation identifier |
 | --- | --- |
 | OpenAI chat completions | `X-Conversation-Id`; without it, each request gets a new identifier |
 | A2A | `x-kagent-root-context-id`, then `x-kagent-parent-context-id`, then the A2A context id |
-| AG-UI | `threadId` for saved state; messages are supplied by the client |
+| AG-UI | `threadId` for stored state and history; send only the new turn's messages |
 | MCP | Independent calls; no conversation continuation |
 
-Snapshots are looked up by conversation identifier, without a user-owner check. These identifiers are not access
-controls. A2A and chat adapters serialize turns with in-memory locks within their process; the database persistence
-does not provide cross-process locking for concurrent workers or replicas.
+A2A and chat completions look up snapshots by conversation identifier without a user-owner check. Their clients
+must isolate those identifiers between users. AG-UI binds new threads to the authenticated userinfo `sub` and checks
+the owner and originating protocol when continuing a thread. Its chats API applies the same ownership boundary.
+With authentication off, AG-UI threads are unowned and shared; these checks do not add isolation to A2A or chat.
+
+A2A and chat adapters serialize turns with in-memory locks within their process. AG-UI has no corresponding turn
+lock: clients should serialize requests for each thread. Database persistence does not provide cross-process
+locking or workflow-start deduplication for concurrent workers or replicas.
+
+The [chats API](endpoints.md#chats-api) lists, reads and deletes AG-UI threads, searches pending form options and
+proxies exports prepared in that chat. Chat deletion removes the thread's snapshots and run records, so the
+database role needs `DELETE` on `graph_snapshots` and `agent_runs` as well as the permissions used for persistence.
 
 See [Configuration](configuration.md) for the database connection setting and
 [Endpoints and protocols](endpoints.md) for conversation identifiers and client requirements.

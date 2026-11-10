@@ -55,7 +55,8 @@ count them. A subscription identifier should pass through unchanged. An off-topi
 tools. Code-based evaluators make such expectations explicit and their failures inspectable.
 
 The benchmark combines exact tool sequences, partial-credit sequence matches, selected argument checks and a call
-budget. For example, a product-count case can expect `aggregate` with `entity_type: PRODUCT`. That is stronger than
+budget. Trajectory and argument checks omit failed tool-call attempts by default, while the budget counts them.
+For example, a product-count case can expect `aggregate` with `entity_type: PRODUCT`. That is stronger than
 checking whether the answer contains the word “products”, but weaker than verifying the count against the database.
 The [evaluator reference](../reference/evals.md#evaluators) defines the checks precisely.
 

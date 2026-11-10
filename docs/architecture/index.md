@@ -10,7 +10,7 @@ The agent brings these parts together and returns an answer to the person or sys
 flowchart LR
     C[Chat applications, web frontends<br/>and other agents] --> A[Orchestrator Agent]
     A <-->|Interpret requests<br/>and compose answers| L[Language model]
-    A <-->|Tools over MCP| O[Orchestrator Core]
+    A <-->|Tools over MCP<br/>Form options and exports over HTTP| O[Orchestrator Core]
     O --> S[Search and workflows]
     A <-->|Conversation memory| D[(WFO database)]
 ```
@@ -65,7 +65,7 @@ there. See [Tracing and observability](observability.md).
 
 ### How a question becomes a search
 
-The agent treats an identifier in a question as a search key. It looks for the field that matches and filters on it
+Core's tool descriptions guide the model to treat an identifier in a question as a search key, discover the matching field and filter on it
 with `like`, a case-insensitive wildcard match for a known substring. That filter does not itself tolerate typos;
 fuzzy retrieval ranks approximate text matches. If no field clearly matches, the tools can rank results instead. With
 embeddings enabled in Orchestrator Core, it also picks a retriever per question: hybrid for identifiers and names,
@@ -81,7 +81,8 @@ The agent also needs a direct connection to the WFO PostgreSQL database. It stor
 including an open workflow form, so a later message can continue the same conversation. For example, answering the
 next form question requires remembering the workflow and the answers already supplied.
 
-These connections serve different purposes: MCP provides access to WFO operations, while the database stores the
+These connections serve different purposes: MCP provides access to WFO operations, HTTP supplies form options and
+export files, and the database stores the
 agent's conversation memory. The database connection does not give the model a SQL interface to your inventory.
 The storage details are in [Conversation persistence](../reference/runtime.md#conversation-persistence).
 
@@ -101,15 +102,16 @@ hooks that run around a model request or a tool call. The agent uses three kinds
   deferred tool gate, history trimming and, wherever the form-fill skill runs, the write tool gate. See
   [Plugins and guards](../reference/runtime.md#plugins-and-guards).
 - **The form-fill skill.** This Python capability intercepts messages before they reach the model and guides the
-  person through a workflow form, one question at a time. See [Workflow forms](../reference/runtime.md#workflow-forms).
+  person through a workflow form, one page at a time. See [Workflow forms](../reference/runtime.md#workflow-forms).
 
 A plugin is either always on or deferred, controlled by `defer_loading` in its frontmatter. The model sees an
 always-on plugin's instructions and tools from the start. A deferred plugin stays hidden until the model calls the
 `load_capability` tool to load it. All built-in plugins are always on.
 
-Not every interface gets every capability. A2A and `/v1` share an agent that includes the form-fill skill, so they get
-the workflow plugin, the skill and the write tool gate. AG-UI and the agent's `/mcp` endpoint get the remaining plugins
-and guards. The A2A agent card also advertises each plugin as a skill, unless its frontmatter sets `advertise: false`.
+Not every interface gets every capability. A2A, `/v1` and AG-UI share an agent that includes the form-fill skill, so
+they get the workflow plugin, the skill and the write tool gate. The agent's `/mcp` endpoint gets a separate agent
+with the remaining plugins and guards. The A2A agent card also advertises each plugin as a skill, unless its
+frontmatter sets `advertise: false`.
 
 Don't confuse these with the `capabilities` field of the A2A agent card. That field lists protocol features such as
 streaming and is unrelated.
@@ -141,7 +143,8 @@ usually better than giving that agent the MCP server of Core as a toolset, becau
 raw tools. It misses what the Orchestrator Agent adds on top:
 
 - the [plugins](../reference/plugins.md), which tell the model how to search, aggregate, look up, export and start
-  workflows, and build tables, charts and download links from the results in code;
+  workflows, and map results to tables, charts and export metadata. Download delivery currently requires
+  [AG-UI](../reference/endpoints.md#export-delivery);
 - the guards, such as the filter path guard that stops the model from guessing filter paths, and history trimming;
 - the [form-fill skill](../reference/runtime.md#workflow-forms), which walks a workflow form with the person and
   starts the workflow only after approval. Without it, the model can call the write tools of Core directly, see
@@ -164,8 +167,8 @@ operations that create, change or delete services or start, resume or abort work
 consequences. A model can misunderstand a request or choose the wrong workflow, so it should propose changes for
 a person to approve before they are carried out.
 
-The model can select a workflow. Where the form-fill skill runs, on A2A and on the OpenAI-compatible `/v1` endpoint
-that LibreChat uses, Core's workflow write tools are hidden from the model and AG-UI frontend tools are not exposed.
+The model can select a workflow. Where the form-fill skill runs, on A2A, the OpenAI-compatible `/v1` endpoint
+that LibreChat uses, and AG-UI, Core's three workflow write tools are hidden from the model.
 A separate form-handling path
 collects the person's answers, has Core validate them and asks for explicit approval before starting the workflow.
 This is the agent's human-in-the-loop (HITL) boundary. Core continues to own the validation and execution; the agent
@@ -175,17 +178,18 @@ This restriction applies to the model's control over services and workflows. The
 conversation history and query results, and the form handler can start a workflow after receiving approval.
 The calling client is responsible for collecting that approval from a person and forwarding it faithfully.
 
-AG-UI and the agent's own MCP endpoint run without the form-fill skill, so this boundary does not apply there: the
-model behind them can call Core's write tools directly, without approval. Use these endpoints for questions, and start
-workflows through A2A or LibreChat. See [Read tools and write tools](../reference/runtime.md#read-tools-and-write-tools).
+The agent's own MCP endpoint runs without the form-fill skill, so this boundary does not apply there: its model
+can call Core's write tools directly, without a built-in approval step. See
+[Read tools and write tools](../reference/runtime.md#read-tools-and-write-tools).
 
-This requires a client that can present questions and approval: LibreChat or an A2A planner with support for human
-input. The MCP and AG-UI interfaces do not currently offer workflow forms. See
+This requires a client that can present questions and approval: LibreChat, an A2A planner with support for human
+input, or an AG-UI frontend that supports interrupts. The MCP interface does not offer workflow forms. See
 [Start workflows from chat](https://workfloworchestrator.org/learn/orchestrator-agent/use-cases/workflows-from-chat/) for setup and
 [Runtime behaviour](../reference/runtime.md#workflow-forms) for the form-handling details.
 
 The boundary covers only Core's three workflow write tools, which the gate hides by name. A custom tool you add to
-Core, or another agent the planner calls, gets no approval step from this agent, so build approval into each
+Core, a frontend tool supplied over AG-UI, or another agent the planner calls gets no approval step from this
+form-fill skill, so build approval into each
 integration or keep those tools read-only. See
 [Connect another system through a planner](https://workfloworchestrator.org/learn/orchestrator-agent/integrations/connect-service/) and
 [Run a companion agent with docker-agent](https://workfloworchestrator.org/learn/orchestrator-agent/integrations/create-agent/).

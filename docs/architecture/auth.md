@@ -55,8 +55,10 @@ message. If OPA decision logging is enabled without masking that input, its logs
 
 ## Outbound: who the agent acts as
 
-The agent calls the MCP server of Orchestrator Core for all its tools: searching, reading subscriptions and starting
-workflows. Orchestrator Core runs its own authentication and OPA checks on those calls. So the question that matters
+The agent calls the MCP server of Orchestrator Core for searching, reading subscriptions and starting workflows.
+It also makes HTTP requests to fetch form-field options and, on AG-UI, download exports. These use the same
+token selection as the MCP client. Orchestrator Core runs its own authentication and authorization checks on
+the requests it receives. So the question that matters
 most for safety is not "may this user call the agent?" but "whose token does the agent send to Orchestrator Core?".
 There are two answers.
 
@@ -76,12 +78,18 @@ Which of the two applies depends on the protocol:
 | OpenAI chat completions (`/v1`) | `Authorization` header | the user |
 | AG-UI | `Authorization` header | the user |
 | A2A | `auth_token` in the message metadata | the user, if the token is there; otherwise the service account |
-| The agent's MCP (`/mcp`) | not forwarded | always the service account |
+| The agent's MCP (`/mcp`) | not forwarded | the service account when enabled |
 
 Two rows stand out. On A2A, the HTTP header only gets the caller past the agent's own check. The token that reaches
 Orchestrator Core travels inside the A2A message, so a planner that sends only the header makes the agent act as its
-service account. On the agent's MCP endpoint the user's token is not passed on at all: the caller is checked
-inbound, but Orchestrator Core always sees the service account.
+service account when that fallback is enabled. On the agent's MCP endpoint the user's token is not passed on at
+all: the caller is checked inbound, but Core sees the service account, or an unauthenticated request when outbound
+authentication is disabled.
+
+Form-option URLs can point outside Core. Relative URLs use `WFO_CORE_API_URL`, or Core's MCP origin when it is
+unset. Absolute URLs must use that base's host and port or an entry in `WFO_OPTIONS_HOSTS`. An allowed destination
+receives the selected bearer token, so this list also determines where credentials may be sent. See
+[Configuration](../reference/configuration.md#connection).
 
 <a id="why-the-users-token-is-better-than-a-service-account"></a>
 
@@ -110,7 +118,9 @@ These are questions for a layer in front of all of them, not for each agent on i
 proxy that lets LibreChat talk to agents over A2A, but accepts any API key. That is fine on a laptop and a liability
 anywhere else. See [Gateways](https://workfloworchestrator.org/learn/orchestrator-agent/production/#gateways) for the wider deployment controls.
 
-Conversation storage is a separate boundary. The agent loads snapshots by a caller-supplied conversation identifier,
-without checking the stored conversation's owner. Authentication of a request therefore does not establish that the
-caller owns the conversation it names. Trusted clients must isolate identifiers between users; see
+Conversation storage is a separate boundary. A2A and chat completions load snapshots by a caller-supplied conversation
+identifier without checking the stored conversation's owner. Their trusted clients must isolate identifiers between
+users. AG-UI binds a new thread to the authenticated subject and checks that subject and the thread's protocol before
+continuing it; its chats API applies the same ownership checks. With authentication off, AG-UI threads have no owner
+and are shared between callers. These AG-UI checks do not add ownership checks to the other protocols; see
 [Conversation persistence](../reference/runtime.md#conversation-persistence).

@@ -24,10 +24,12 @@ command used after editing cases.
 | --- | --- |
 | `TrajectoryMatch(order='exact')` | The tool-call sequence, exactly. Used where one route is right, including negative examples with an empty expected trajectory |
 | `TrajectoryMatch(order='in_order')` | F1 over the longest common subsequence, so a rule-consistent detour earns partial credit |
-| `ArgumentCorrectness(match_mode='subset')` | The arguments of one call that the prompt influences, such as the entity type and identifiers passed through verbatim |
-| `MaxToolCalls(8)` | Dataset-wide call budget |
+| `ArgumentCorrectness(match_mode='subset')` | Expected top-level arguments of one call; expected nested values must match in full. The default occurrence is the first successful call |
+| `MaxToolCalls(8)` | Dataset-wide budget of locally executed tool-call attempts, including failed attempts by default |
 
 Tool calls are read from the OpenTelemetry spans that pydantic-ai emits.
+`TrajectoryMatch` and `ArgumentCorrectness` exclude failed tool-call attempts by default; `MaxToolCalls` includes
+them. A retry can therefore consume the call budget without appearing in the matched trajectory.
 
 ## Commands
 

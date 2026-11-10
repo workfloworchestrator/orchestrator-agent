@@ -23,7 +23,8 @@ That structure is what makes traces useful for an agent:
 - **Wrong answers.** A wrong tool, filter or identifier can produce a plausible but incorrect answer. A trace helps
   locate the step that caused it. Without that evidence, a change to a prompt, a plugin or
   [the domain context](../guides/domain-context.md) is a guess.
-- **Cost.** Token counts per run and per model show which questions are expensive and what another model would save.
+- **Cost.** Available token usage helps estimate a run's cost. Compare observed runs when changing models: a different
+  model can take a different route and use a different number of calls or tokens.
 - **Latency.** A run that loops through the same tool, or reads large results, shows up as a long trace, and the
   timings show whether the time went to the model or to a tool.
 - **What the model did.** A trace records instrumented tool use. Workflow forms also call Core directly from Python,
@@ -33,8 +34,9 @@ That structure is what makes traces useful for an agent:
 
 ## Traces contain your data
 
-The same detail that makes a trace useful makes it sensitive. A trace holds the user's question, the prompts and
-everything the tools returned, which can include customer and network data. A tracing backend therefore deserves the
+The same detail that makes a trace useful makes it sensitive. Instrumented traces can hold the user's question,
+prompts and model-visible tool results, including customer and network data. Direct form and HTTP operations are
+not all instrumented. A tracing backend therefore deserves the
 same scrutiny as the model provider: where does the data go, who can read it and how long is it kept. A hosted
 backend is quick to start with; a self-hosted one keeps the data inside your infrastructure, at the cost of running
 it. [The database stores the conversations](index.md#the-database-stores-the-conversations) raises the same question

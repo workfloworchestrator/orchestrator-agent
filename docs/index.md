@@ -51,9 +51,9 @@ workflow logic. See [How the agent fits on top of Orchestrator Core](architectur
 ## Key features
 
 - **Search and analyse WFO data**: find records, count and group results, look up an entity by id and export results
-  as CSV. Tables and charts are built in code from tool results. See the [plugins reference](reference/plugins.md).
+  as CSV through AG-UI. Tables and charts are built in code from tool results. See the [plugins reference](reference/plugins.md).
 - **Start workflows with approval**: collect and validate form inputs, then ask the person to approve the start
-  through LibreChat or an A2A client with human-in-the-loop support. See
+  through LibreChat, an A2A client with human-in-the-loop support, or an AG-UI frontend with interrupts. See
   [Start workflows from chat](https://workfloworchestrator.org/learn/orchestrator-agent/use-cases/workflows-from-chat/).
 - **Connect your clients**: use the agent from [LibreChat](guides/librechat.md),
   [MCP clients](guides/mcp-clients.md) or [other agents over A2A](guides/a2a-planner.md).
@@ -78,9 +78,10 @@ and can also be run from source. One service exposes the agent over several prot
 | `POST /agui/` | AG-UI | Streaming answers and result artifacts into your own frontend |
 | `/mcp` | MCP | MCP clients such as Claude Code or an agent framework |
 
-Search, aggregation, entity lookup and export are available through all four interfaces. Workflow forms require
-LibreChat configured with its ask-user tool, or an A2A client that supports the human-in-the-loop extension. MCP and
-AG-UI do not offer these forms. See [Endpoints and protocols](reference/endpoints.md) for client support and
+Search, aggregation, entity lookup and export preparation are available through all four interfaces; built-in
+[export downloads](reference/endpoints.md#export-delivery) currently require AG-UI. Workflow forms require
+LibreChat configured with its ask-user tool, an A2A client with the human-in-the-loop extension, or an AG-UI frontend
+that supports interrupts. MCP does not offer these forms. See [Endpoints and protocols](reference/endpoints.md) for client support and
 [Read tools and write tools](reference/runtime.md#read-tools-and-write-tools) for the write-tool policy on each
 interface.
 

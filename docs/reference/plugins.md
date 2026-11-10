@@ -4,16 +4,19 @@ Each plugin is loaded as one [capability](../architecture/index.md#capabilities)
 `capabilities/plugins/`. The body is the prompt. The plugins describe *what* to do and the tool descriptions served by
 Orchestrator Core describe *how* to use each tool. See [How the agent fits on top of Orchestrator Core](../architecture/index.md) for the design.
 
-All built-in plugins are always on. The workflow plugin is present only where the form-fill skill runs: A2A and `/v1`.
+All built-in plugins are always on. The workflow plugin is present where the form-fill skill runs: A2A, `/v1` and AG-UI.
 Every plugin is also advertised as a skill in the A2A agent card, unless it sets `advertise: false`.
 
-| Plugin | Tools from Orchestrator Core | Output |
+| Plugin | Tools it uses | Output |
 | --- | --- | --- |
 | [search](#search) | `search` | Table of results |
 | [aggregate](#aggregate) | `aggregate` | Chart, or a number |
 | [entity](#entity) | `resolve_entity` | Details of one entity |
-| [export](#export) | `export_query` | Download link |
+| [export](#export) | `export_query` | Prepared export; downloadable through the AG-UI chats API |
 | [workflow](#workflow) | `list_workflows`, `start_workflow_form` | A form to fill in, then a started process |
+
+`start_workflow_form` is a local handoff tool supplied by the form-fill capability. The other tools in this table
+come from Orchestrator Core. The skill itself calls Core's form and workflow-start tools after the handoff.
 
 The agent also uses `discover_filter_paths` and `get_valid_operators` before it filters or groups. These belong to no
 plugin and are always available.
@@ -42,8 +45,15 @@ Example: *Show details for subscription abc123.*
 
 ## export
 
-Prepares a download of the results of an earlier query, by default the most recent one, and returns a download URL.
-The agent only exports when the user explicitly asks for it, with words such as export, download or CSV.
+Prepares a download of the results of an earlier query, by default the most recent one. The plugin instructions
+limit this to an explicit request, with words such as export, download or CSV; this is prompt guidance, not a
+separate authorization check.
+
+The download URL is retained in `ExportArtifact` metadata and delivered to AG-UI clients through the
+[chats export endpoint](endpoints.md#chats-api). The plugin removes Core's standard `download_path` and `message`
+fields from the model-visible result and tells the model to confirm that the download was prepared without
+writing a link. Chat completions do not return that artifact metadata, and A2A/MCP send the model-visible payload,
+so those interfaces currently do not deliver the standard export URL. Use AG-UI for the built-in download flow.
 
 Example: *Export the last search results as CSV.*
 
@@ -69,7 +79,8 @@ Example: *Start the terminate workflow for subscription abc123.*
 | `tools` | `[]` | Symbolic constants from `tool_names.py`, such as `SEARCH_TOOL`, resolved to Core tool names for result mapping and deferred loading |
 | `artifact` | Omitted | Maps tool results to `query`, `data` or `export` output; omitted means instructions only |
 
-Unknown frontmatter keys and unknown tool constants are rejected during loading. The Markdown body supplies the
+Unknown frontmatter keys are rejected when specs are loaded; unknown tool constants fail when their ownership is
+resolved during capability construction. The Markdown body supplies the
 instructions; it is not a template. Files whose names start with `_` are not loaded.
 
 ## Customise a plugin

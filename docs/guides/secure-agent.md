@@ -14,8 +14,6 @@ Set the details of your identity provider:
 OAUTH2_ACTIVE=true
 OIDC_BASE_URL=https://idp.example.com
 OIDC_CONF_URL=https://idp.example.com/.well-known/openid-configuration
-OAUTH2_RESOURCE_SERVER_ID=<client id>
-OAUTH2_RESOURCE_SERVER_SECRET=<client secret>
 ```
 
 ### 2. Authorize requests
@@ -46,6 +44,8 @@ OAUTH2_RESOURCE_SERVER_SECRET=<client secret>
 
     ```shell
     OAUTH2_OUTBOUND_ACTIVE=true
+    OAUTH2_RESOURCE_SERVER_ID="<client id>"
+    OAUTH2_RESOURCE_SERVER_SECRET="<client secret>"
     OAUTH2_TOKEN_URL=https://idp.example.com/oauth2/token
     ```
 
@@ -75,10 +75,15 @@ For client details, see [Connect LibreChat](librechat.md), [Use the agent with M
 1. Bind the published ports to a specific address.
 2. Put the agent behind a reverse proxy that terminates TLS.
 3. Keep the `DATABASE_URI` credentials in a secret store.
-4. Give the database role the limited access needed to read and insert agent run records and state snapshots.
-   A wholly read-only role cannot run the agent. Core's MCP identity and this database role serve different purposes.
-5. Restrict direct access to the agent to trusted clients. Have each client generate and isolate its conversation
-   identifiers; the agent does not check user ownership when loading a conversation by id.
+4. Give the database role the access needed to read and insert agent run records and state snapshots. The AG-UI
+   chat-deletion endpoint also needs `DELETE` on `graph_snapshots` and `agent_runs`. A wholly read-only role cannot
+   run the agent. Core's MCP identity and this database role serve different purposes.
+5. Restrict direct access to the agent to trusted clients. Have A2A and chat-completions clients generate and isolate
+   their conversation identifiers; those adapters do not check user ownership. AG-UI and its chats API check the
+   authenticated subject against the stored owner. With authentication off, its threads are unowned and shared.
+6. Configure `WFO_CORE_API_URL` only when form options need a different base URL from Core's MCP origin. Add a host
+   to `WFO_OPTIONS_HOSTS` only if it may receive the user's or service account's bearer token. See
+   [Configuration](../reference/configuration.md#connection).
 
 Restart the source process with `uv run --env-file .env uvicorn orchestrator_agent.app:app --host 127.0.0.1 --port 8080`,
 or recreate your container so it receives the updated environment. For limits and other deployment controls, see
@@ -88,8 +93,8 @@ or recreate your container so it receives the updated environment. For limits an
 
 - Call a protected endpoint without a token, such as `GET /v1/models`. It should answer 401. `GET /health` and the
   A2A agent card stay open for monitoring and discovery.
-- Call it with a valid token. A 403 with a decision id means OPA denied the request; a 503 means OPA could not be
-  reached or `OPA_URL` is not set.
+- Call it with a valid token. A 403 with a decision id means OPA denied the request. A 503 can mean OPA could not be
+  reached, `OPA_URL` is unset, or OIDC discovery returned a non-200 response; check the service logs to distinguish them.
 - Use a user-token request to query Core and confirm its recorded identity. Through a configured LibreChat or A2A
   client, complete and approve a workflow form and confirm the start was attributed to that user.
 - For an MCP request, confirm Core sees the intended service account.
