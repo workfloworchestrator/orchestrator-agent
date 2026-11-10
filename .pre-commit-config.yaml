@@ -17,6 +17,12 @@ repos:
       - id: check-docstring-first
       - id: check-json
       - id: check-yaml
+        exclude: ^mkdocs\.yml$
+      - id: check-yaml
+        name: check MkDocs YAML syntax
+        files: ^mkdocs\.yml$
+        # MkDocs uses Python-name tags; parse syntax without constructing objects.
+        args: [--unsafe]
       - id: debug-statements
       - id: detect-private-key
   - repo: local
