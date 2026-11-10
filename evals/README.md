@@ -22,14 +22,20 @@ Then, from this folder (dependencies managed with [uv](https://docs.astral.sh/uv
 
 ```bash
 uv sync
-cp .env.example .env   # fill in AGENT_API_KEY (gitignored); pin AGENT_MODEL — scores
-                       # are only comparable on the same model. Real env vars win over .env.
-uv run python run_eval.py                    # full golden set
+cp .env.example .env   # fill in the provider keys (gitignored). Real env vars win over .env.
+uv run python run_eval.py                    # full golden set, once per model whose key is set
+uv run python run_eval.py --models openai:gpt-4o-mini   # one model
 uv run python run_eval.py --cases fuzzy-search-nodes   # subset (smoke)
 uv run python run_eval.py --repeat 5         # every case five times, averaged per case
 uv run python run_eval.py --concurrency 8    # runs at once (default 4)
 uv run python run_eval.py --fail-under 0.7   # CI gate: exit non-zero below the floor
 ```
+
+`../eval-models.json` maps each model to the environment variable holding its
+provider's API key; a model runs when that variable is set and is reported as
+skipped otherwise. Scores are only comparable across runs on the same model.
+The output is one table: the models as columns, a row per case, each cell the
+route match and the argument-correctness pass rate averaged over the runs.
 
 ## The dataset
 
@@ -75,9 +81,11 @@ Kept out until needed, as custom evaluators when they come:
 
 ## Baseline
 
-**`baseline_report.json` is the committed baseline**: a full report of a
-blessed run, serialized with pydantic-evals' own `EvaluationReportAdapter`.
-Every benchmark run can compare itself against it per case:
+**The committed baselines are one report per model**, a full report of a
+blessed run serialized with pydantic-evals' own `EvaluationReportAdapter`, with
+the model in the file name: `baseline_report.openai-gpt-4o-mini.json`. Every
+benchmark run compares each model against its own baseline per case, and says
+so when a model has none yet:
 
 ```bash
 uv run python run_eval.py --repeat 5 --baseline baseline_report.json   # fail on per-case regression
@@ -98,7 +106,6 @@ pinned model — so a baseline change is always a reviewed diff.
 `.github/workflows/eval.yml` runs the benchmark on demand
 (`workflow_dispatch`), nightly, and on PRs labeled `eval`: compose up the
 backing services, run the golden set in-process from the branch's working
-tree, five times per case, gate on the committed baseline plus the
-`--fail-under` floor. Requires
-the `EVAL_AGENT_API_KEY` repository secret (and optionally an
-`EVAL_AGENT_MODEL` variable, default `openai:gpt-4o`).
+tree, five times per case and per model, gate on the committed baselines plus
+the `--fail-under` floor. A model runs when its provider's key is set: the
+`EVAL_OPENAI_API_KEY` and `EVAL_ANTHROPIC_API_KEY` repository secrets.

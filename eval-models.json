@@ -1,0 +1,5 @@
+{
+  "openai:gpt-4o-mini": "OPENAI_API_KEY",
+  "anthropic:claude-haiku-5-5": "ANTHROPIC_API_KEY",
+  "anthropic:claude-opus-5-5": "ANTHROPIC_API_KEY"
+}

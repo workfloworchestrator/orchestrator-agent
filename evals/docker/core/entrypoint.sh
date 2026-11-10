@@ -32,8 +32,8 @@ python main.py db upgrade heads
 echo "= seed demo data"
 python seed.py
 
-echo "= index subscriptions"
-python main.py index subscriptions
+echo "= index all entity types"
+python main.py index all
 
 echo "= start orchestrator-core"
 exec uvicorn --host 0.0.0.0 --port 8080 wsgi:app

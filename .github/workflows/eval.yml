@@ -19,8 +19,9 @@ jobs:
       github.event_name != 'pull_request' ||
       contains(github.event.pull_request.labels.*.name, 'eval')
     env:
-      AGENT_MODEL: ${{ vars.EVAL_AGENT_MODEL || 'openai:gpt-4o' }}
-      AGENT_API_KEY: ${{ secrets.EVAL_AGENT_API_KEY }}
+      # A model in eval-models.json runs when its provider's key is set.
+      OPENAI_API_KEY: ${{ secrets.EVAL_OPENAI_API_KEY }}
+      ANTHROPIC_API_KEY: ${{ secrets.EVAL_ANTHROPIC_API_KEY }}
 
     steps:
       - uses: actions/checkout@v6

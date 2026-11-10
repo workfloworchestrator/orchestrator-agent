@@ -24,19 +24,15 @@ class EvalSettings(BaseSettings):
     # The bundled core runs authless; outbound OAuth2 would demand a token URL.
     oauth2_active: bool = False
 
-    # Pin the model: scores are only comparable across runs on the same model.
-    agent_model: str = "openai:gpt-4o"
-    agent_api_key: str | None = None
-
     dataset_file: Path = EVALS_DIR / "wfo_search_dataset.yaml"
+    # ``provider:model`` -> the environment variable holding that provider's API key. Every model whose
+    # key is set runs; scores are only comparable across runs on the same model.
+    models_file: Path = EVALS_DIR.parent / "eval-models.json"
 
     def apply_to_environment(self) -> None:
         """Publish the resolved values for the agent's ``AgentSettings`` to read."""
         os.environ["WFO_CORE_MCP_URL"] = self.wfo_core_mcp_url
         os.environ["OAUTH2_ACTIVE"] = str(self.oauth2_active)
-        os.environ["AGENT_MODEL"] = self.agent_model
-        if self.agent_api_key:
-            os.environ["AGENT_API_KEY"] = self.agent_api_key
 
 
 eval_settings = EvalSettings()
