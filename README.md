@@ -4,6 +4,9 @@
 
 Standalone WFO search agent for deployment. Exposes the orchestration search agent via AG-UI, A2A, and MCP protocols, and as an OpenAI-compatible chat model for LibreChat.
 
+Documentation: <https://workfloworchestrator.org/orchestrator-agent/>. The sources are in [`docs/`](docs/) and are
+published as a sub-project of workfloworchestrator.org; preview them with `uv run --group docs mkdocs serve`.
+
 ## Quick Start
 
 ```bash
@@ -11,23 +14,31 @@ cp .env.example .env
 # Edit .env with your DATABASE_URI and LLM settings
 
 uv sync
-uv run uvicorn orchestrator_agent.app:app --port 8080
+uv run --env-file .env uvicorn orchestrator_agent.app:app --port 8080
 ```
+
+Or follow [Run the agent with your Orchestrator Core](docs/getting-started.md) to configure the database, Core MCP
+connection and model before launching. Keep the agent on its default port 8080; when sharing one host, give Core
+another port. The source launch explicitly loads `.env` with `uv run --env-file .env`.
 
 ## Endpoints
 
 | Path | Protocol | Description |
 | --- | --- | --- |
-| `POST /agui/` | AG-UI | The agent behind a frontend (the chat popup, [orchestrator-agent-chat](https://github.com/workfloworchestrator/orchestrator-agent-chat); a bare page for it in `demos/web`); workflow forms through AG-UI interrupts |
-| `GET /chats/`, `GET /chats/{thread_id}`, `DELETE /chats/{thread_id}`, `GET /chats/{thread_id}/options/{field}`, `GET /chats/{thread_id}/exports/{query_id}` | REST | The person's AG-UI chats: list them, read one (its last messages, its pending form stop), forget one, search the options of a form question the stop asks, download an export the chat prepared as a CSV file |
+| `POST /agui/` | AG-UI | SSE streaming, stored conversation history and workflow forms through interrupts; supports the [chat popup](#chat-popup-ag-ui); `/agui` redirects here |
+| `/chats/` | REST | AG-UI chat history, pending forms, option searches and export downloads; see [Endpoints and protocols](docs/reference/endpoints.md#chats-api) |
 | `POST /` | A2A | Agent-to-agent JSON-RPC, protocol v1.0 (`SendMessage`, `SendStreamingMessage`) |
 | `GET /.well-known/agent-card.json` | A2A | Agent card discovery |
 | `POST /v1/chat/completions` | OpenAI chat completions | The agent as a chat model for LibreChat; workflow forms through its ask-user tool |
 | `GET /v1/models` | OpenAI | Lists the one model id (`wfo`) |
 | `/mcp` | MCP | Model Context Protocol tools |
-| `GET /health` | REST | Health check |
+| `GET /health/` | REST | Database health check; `/health` redirects here |
 
 ## Docker
+
+The repository's Compose file builds the agent image, loads `.env` and uses host networking. Its command listens on
+8080. Set `BASE_URL` to the address of that listener, and point `WFO_CORE_MCP_URL` at Core on a different port or host
+before starting it. Services on separate hosts or container addresses can each use 8080.
 
 ```bash
 docker compose up --build
@@ -104,22 +115,27 @@ development setting.
 | --- | --- | --- |
 | `DATABASE_URI` | *(required)* | PostgreSQL connection URI for the WFO database |
 | `WFO_CORE_MCP_URL` | `http://localhost:8080/mcp` | URL of orchestrator-core's MCP server (serves the domain tools the agent calls) |
+| `WFO_CORE_API_URL` | *(derived)* | Base URL for relative form-option URLs and Core export downloads; when unset, uses the origin of `WFO_CORE_MCP_URL` |
+| `WFO_OPTIONS_HOSTS` | `[]` | JSON list of additional hosts allowed for form-option HTTP requests, including a port when present. These destinations receive the run's bearer token or fallback service token |
 | `BASE_URL` | `http://localhost:8080` | Public URL of this agent service |
 | `AGENT_MODEL` | `openai:gpt-4o` | LLM model in `provider:model` format |
 | `AGENT_API_BASE` | *(none)* | Custom base URL for the LLM provider (OpenAI-compatible) or Azure endpoint |
 | `AGENT_API_KEY` | *(none)* | API key for the LLM provider |
 | `AGENT_API_VERSION` | *(none)* | API version for Azure OpenAI (e.g. `2024-12-01-preview`) |
 | `AGENT_DOMAIN_CONTEXT` | *(empty)* | Optional free-text domain knowledge appended to the agent system prompt (e.g. identifier conventions and their filter fields). Empty disables the section |
-| `WFO_CORE_API_URL` | *(derived)* | Base URL a form field's relative options source (`optionsSource.url`) is fetched from. Unset: the origin of `WFO_CORE_MCP_URL` |
-| `WFO_OPTIONS_HOSTS` | `[]` | Hosts besides core's that a form field's absolute options source may be fetched from, with the person's token |
 | `OAUTH2_ACTIVE` | `true` | Enable OIDC authentication on incoming requests (via `oauth2_lib`) |
+| `OAUTH2_AUTHORIZATION_ACTIVE` | `true` | Enable request authorization through OPA when incoming authentication is on |
+| `OPA_URL` | *(none)* | OPA decision URL; required when authentication and authorization are on |
 | `OAUTH2_OUTBOUND_ACTIVE` | *(unset)* | Enable OAuth2 client-credentials auth on outgoing requests to orchestrator-core. When unset, follows `OAUTH2_ACTIVE`; set to `true`/`false` to control outbound auth independently of incoming auth |
-| `OIDC_BASE_URL` | *(none)* | Base URL of the OIDC provider (required when `OAUTH2_ACTIVE=true`) |
+| `OIDC_BASE_URL` | *(none)* | Provider base URL accepted by `oauth2_lib`; the agent uses `OIDC_CONF_URL` for discovery |
 | `OIDC_CONF_URL` | *(none)* | OIDC discovery document URL (required when `OAUTH2_ACTIVE=true`) |
-| `OAUTH2_RESOURCE_SERVER_ID` | *(none)* | OAuth2 client ID / resource server ID (required when `OAUTH2_ACTIVE=true`) |
-| `OAUTH2_RESOURCE_SERVER_SECRET` | *(none)* | OAuth2 client secret / resource server secret (required when `OAUTH2_ACTIVE=true`) |
+| `OAUTH2_RESOURCE_SERVER_ID` | *(none)* | OAuth2 client id for the outbound service-account grant |
+| `OAUTH2_RESOURCE_SERVER_SECRET` | *(none)* | OAuth2 client secret for the outbound service-account grant |
 | `OAUTH2_TOKEN_URL` | *(none)* | OAuth2 token endpoint for outgoing client-credentials requests |
 | `LANGFUSE_ENABLED` | `false` | Enable Langfuse OpenTelemetry tracing. Requires the `langfuse` extra and the `LANGFUSE_PUBLIC_KEY` / `LANGFUSE_SECRET_KEY` / `LANGFUSE_HOST` environment variables |
+
+The application reads the process environment, not `.env` automatically. See [Configuration](docs/reference/configuration.md)
+for the complete settings and [authentication setup](docs/guides/secure-agent.md) for identity forwarding and service accounts.
 
 ### Custom LLM endpoint
 
@@ -144,9 +160,15 @@ AGENT_API_VERSION=2024-12-01-preview
 
 The `azure:` prefix on `AGENT_MODEL` (or setting `AGENT_API_VERSION`) selects the Azure provider automatically. When none of `AGENT_API_BASE`, `AGENT_API_KEY`, or `AGENT_API_VERSION` is set, `AGENT_MODEL` is passed directly to pydantic-ai as a model string (existing behavior).
 
+Put these settings in the environment loaded by your launch. Remove unused overrides entirely before selecting a
+native provider; an empty assignment is still set. The custom path always constructs an OpenAI chat model unless
+Azure is selected. Other providers can require additional SDK dependencies; see [Change the language model](docs/guides/own-llm.md).
+
 ### Identifier-aware search
 
-When a user references an entity by a concrete identifier — a customer name, a subscription id, or a code/number such as `IS4443`, `4433`, or `id 1234` — the search skill is guided to extract that token and use it as a high-signal search key: it discovers the matching field and filters with `like` (substring/typo-tolerant), and only falls back to plain ranking when no field clearly matches.
+Core's search-tool descriptions guide identifier lookups toward the corresponding field and a `like` filter when
+appropriate. `like` is a case-insensitive wildcard match, for example `%IS4443%`; it does not itself tolerate typos.
+Fuzzy retrieval provides approximate text ranking. See [Search behavior](docs/explanation/index.md#how-a-question-becomes-a-search).
 
 The agent also picks a **retriever** per query:
 
@@ -154,7 +176,9 @@ The agent also picks a **retriever** per query:
 - **SEMANTIC** — for descriptive or sentence-like queries.
 - **FUZZY** — for exact tokens, and whenever embeddings are unavailable.
 
-SEMANTIC and HYBRID require embeddings (configured in orchestrator-core via `EMBEDDING_API_ENABLED`). When embeddings are disabled, the agent automatically uses FUZZY and the prompt stops offering the embedding-based options — so the feature degrades safely with no configuration change.
+SEMANTIC and HYBRID require embeddings configured in Core via `EMBEDDING_API_ENABLED`. Core's tool descriptions
+describe the retrievers available in that deployment. See [Core search](https://workfloworchestrator.org/orchestrator-core/reference-docs/ai-search/#running-without-embeddings)
+for fallback behavior and explicit retriever requests.
 
 Use `AGENT_DOMAIN_CONTEXT` to teach the agent deployment-specific conventions that it cannot infer, for example:
 
@@ -175,7 +199,23 @@ Request ──► AG-UI adapter ──► async with Agent: ──► run_stream
          ──► MCP adapter  ──►   └─► MCPToolset ──► orchestrator-core /mcp
 ```
 
-Capabilities are always-on (`defer_loading=False`). The domain capabilities — **search**, **aggregate**, **entity** (details/lookup), **export**, **workflow** (start a workflow via its input form) — are **plugins**: authored Markdown files loaded at startup (see [Plugins](#plugins) below). Each plugin becomes one pydantic-ai capability that bundles its instructions and, when it declares `artifact:`, the matching behaviour — mapping *its* tools' JSON results into `QueryArtifact` / `DataArtifact` / `ExportArtifact` metadata for the AG-UI/A2A transport (`capabilities/behavior/`). Three hooks remain cross-cutting (single invariants across all tools, not plugin-owned): `FilterPathGuard` enforces that any `filters`/`group_by` call is preceded by `discover_filter_paths` (paths are DB-specific and must not be guessed), `WriteToolGate` hides core's write tools from the model (starting a workflow is the deterministic form-fill skill's job — see [Workflow form-fill](#workflow-form-fill-a2a-deterministic-jev-decided)), and `ProcessHistory` does sliding-window history trimming. Grouped aggregations and search results are rendered deterministically in code (a Mermaid chart / Markdown table carried as a `RenderedBlock`) and injected into the answer, so they appear even on text-only clients; an aggregate also carries its chart as data (`ChartData`) for a client that draws its own, the popup. MCP tools require an open session, so every run happens inside `async with agent:`.
+All built-in plugins are always on (`defer_loading=False`). **Search**, **aggregate**, **entity** and **export** are
+Markdown plugins loaded at startup; **workflow** is added where the form-fill skill runs, on A2A, chat completions and AG-UI.
+Each plugin contributes instructions and, when it declares `artifact:`, maps its tools' results to typed metadata
+in `capabilities/behavior/`. See [Plugins](#plugins).
+
+The cross-cutting guards cover deferred-tool visibility, discovery before filtering/grouping and history trimming.
+On A2A, chat completions and AG-UI, `WriteToolGate` also hides Core's three workflow mutations so the
+[form-fill skill](#workflow-form-fill-a2a-human-in-the-loop) controls starts. This gate is absent from the agent's MCP interface.
+
+Search tables and grouped charts are rendered in code. A2A and chat completions append them to the answer; AG-UI
+carries rendered blocks and optional `ChartData` in artifact metadata, so a frontend can draw its own charts,
+while MCP returns raw JSON. MCP sessions are opened per run with
+`async with agent:`. See [Endpoints and protocols](docs/reference/endpoints.md) for protocol-specific behavior.
+
+Export downloads are delivered through AG-UI's artifact metadata and authenticated chats API. The export plugin
+removes Core's standard link fields from model-visible results; chat completions, A2A and MCP currently do not
+deliver that download URL. See [Export delivery](docs/reference/endpoints.md#export-delivery).
 
 ### Plugins
 
@@ -209,9 +249,9 @@ on orchestrator-core, not here.
 - A plugin **owns the tools it lists** in `tools:` (constants from `tool_names.py`, resolved to live
   names by `owned_tool_names`). Ownership is *not* about prompt references — it drives artifact
   mapping (a tool's results → the declared `artifact:`) and `DeferredToolGate` (those tools hide with
-  the plugin when deferred). A typo'd constant fails loud at startup. The constants are verified
-  against the live MCP server at startup (`verify_tool_contract`), so the code and the server can't
-  drift apart silently.
+  the plugin when deferred). A typo'd constant fails during capability construction. Startup's
+  `verify_tool_contract` checks the Core names listed in `ALL_TOOL_NAMES` against the live server; local
+  tools and new constants outside that list are not covered by the check.
 
 The agent-level **system prompt** is **not a plugin** — so it lives at
 `capabilities/system_prompt.md`, beside `plugins/` rather than inside it; the operator's
@@ -251,11 +291,10 @@ exists for when the capability set grows large enough that on-demand loading is 
 
 Starting a workflow is **not done by the model**, and never on the strength of chat text. It is a
 deterministic skill (`form_fill/`) that runs inside the agent as a pydantic-ai capability and is answered
-by a person through native pauses — kagent's human-in-the-loop extension over A2A, LibreChat's ask-user
-tool, or AG-UI interrupts (the chat popup). Every stop of the skill is a pause that carries the questions
-of a form page, or the start to approve; only the person's structured response to it continues the form.
-A caller that cannot show a pause gets no form (the handoff tool says so and the model relays it). The
-skill:
+by a person through native pauses — kagent's human-in-the-loop extension over A2A, LibreChat's ask-user tool,
+or AG-UI interrupts. Every stop carries the questions of a form page, or the start to approve;
+only the person's structured response to it continues the form. A caller that cannot show a pause
+gets no form (the handoff tool says so and the model relays it). The skill:
 
 1. **Routes** — deciding *that* a request starts a workflow and *which* one is a judgment call, so the
    model makes it: it reads `list_workflows` and hands off with the `start_workflow_form(workflow_key)`
@@ -268,9 +307,9 @@ skill:
    choice with a single option (a single-product workflow's product page) is taken, each walk anew.
    Pages are dynamic (later pages depend on earlier answers), so the walk re-runs from page 0 every
    turn: a changed answer just changes what core generates next.
-3. **Stops** at the first page core does not accept. Each page is submitted as it is known, and core's
-   verdict decides what is asked: one question per field core rejected (with its message) or nobody
-   answered yet — the field's title, whether it is required, and its options as chips shown by their
+3. **Stops** for unanswered fields, consent, unresolved option choices or a page core rejected.
+   Core's rejected fields carry its messages; other stops can happen before a page is submitted.
+   Questions show the field's title, whether it is required, and its options as chips shown by their
    labels (a boolean is two chips; a list field takes several). A picked chip travels as the value
    behind it; an unanswered question sends nothing, so the form's default applies. A page of optional
    fields nobody has touched is asked once. Consent (pydantic-forms' `Accept`) is only ever the person's
@@ -283,14 +322,15 @@ skill:
    (core's summary form) has its tables on the reply as `summary`. LibreChat's approval always shows the
    values as they will be sent — that is what is approved — and adds those tables under them: what the
    workflow's author wants confirmed, before and after for a modify.
-5. **Starts** — `create_workflow` from code with exactly the last walk's validated pages. A start is
-   sent once per approval: only core's own validation errors on the pages reopen the form (the rejected
+5. **Starts** — `create_workflow` from code with exactly the last walk's validated pages. The approved branch
+   makes one attempt; concurrent requests are not deduplicated across workers. Only core's own validation errors on the pages reopen the form (the rejected
    fields are asked again); any other failure leaves it unknown whether the process started, so the
    form closes.
 
-The text of every reply is one JSON object (`FormReply`: `status` gathering / confirming / started /
+Internally, the skill's reply text is one JSON object (`FormReply`: `status` gathering / confirming / started /
 cancelled / failed, core's `rejected` errors as they came, the `values` so far with their `labels`, the
-`defaults` that apply, the `process_id`, or the `reason`) — core's data, nothing phrased here.
+`defaults` that apply, the `process_id`, or the `reason`). A2A passes this to the calling agent. LibreChat and
+AG-UI render it as Markdown for the person through `adapters/words.py`, alongside their structured form stops.
 
 **No chat text is read.** Not by this code and not by a model: a message that carries no response to
 the pending stop means the stop went unanswered (the person rejected it, or moved on), so the form is
@@ -300,49 +340,44 @@ answers a response is not shown until the parent calls again; such a stop is mar
 parent's next message (kagent's parent is told to call again with `continue`) shows it instead of ending
 the form. Corrections after the fact are not offered: reject, and start the form again.
 
-Values are never judged by the agent: they go to core as given and core's form validation is the only
-validation. What a person *types* for a field (a number in words, an option described, a structured
+Core validates every submitted page. What a person *types* for an ordinary field (a number in words, an option described, a structured
 field such as a contact) is words, not a value: core rejects it, and it is then interpreted once, a page
-at a time, into the fields' values — one run of the agent's model whose output schema is the page's own
-schema with every field optional (`form_fill/interpret.py`) — and core decides again. Words that fit more than
+at a time, into the fields' values — one run of the agent's model whose output schema is the page schema
+with every field optional (`form_fill/interpret.py`) — and core decides again. Words that fit more than
 one option of a field are not a value: the model is asked for every option the words fit, and the field
 is filled only when that is exactly one — otherwise the person is asked again. The person sees the result
 before anything starts, at the approval. The interpreter is one protocol attribute of the skill, so
 another engine drops in behind the same protocol.
 
-**A page as core describes it.** Core's form tool (`get_workflow_form`, orchestrator-core ≥ 5.5) describes
-each page as one JSON Schema (`schema`): every reference inlined, so a choice or a nested model is read in
-place; `readOnly` on a field that is only shown; a choice's values in `enum` with their labels in `options`;
-the limits a list is validated against; consent as `format: "accept"`; each field's label and help text as
-the frontend shows them in `title` and `description`, which word the questions a person gets. Asked for a verdict
-(`verdict="result"`), a rejected page comes back as a result with core's errors. `form_fill/model.py` reads
-the schema into one `FieldSpec` per field, and every stop works from those: the questions and chips a
-person gets, the labels at the approval, the defaults that apply. The interpreter's output type is the page
-schema itself (pydantic-ai's `StructuredDict`), every field optional: no model is rebuilt from it, and
-core's validation is the only validation of what it reads. Core's tool results are validated with core's
-own response models and its tool arguments are built from core's request models (the agent depends on
-orchestrator-core), so nothing here reads a tool error's text.
+**One JSON Schema per page.** Core returns a self-contained page schema, with references inlined,
+`readOnly` markers, choice values and labels, defaults and descriptions. `form_fill/model.py` reads it into
+`FieldSpec` records for the questions and approval labels. The interpreter uses an optional-field variant of
+the schema through pydantic-ai's `StructuredDict`; it does not rebuild a Pydantic model. The session persists
+the walked schemas and answers. Core's tool results are validated with Core's response models. The skill asks
+for `verdict="result"`, so rejected pages arrive as structured results carrying Core's validation errors.
 
-In the agent the skill runs in (A2A, chat completions and AG-UI share one agent) the model never sees
-core's write tools (`WriteToolGate` hides `create_workflow` / `resume_workflow_process` /
-`abort_workflow_process`), so writes only ever go through this skill; the MCP agent runs without the
-skill, so it gets neither the gate nor the `workflow` plugin and behaves as before. Routing in front of the model and prefilling pages from the
+**Form-option sources.** Fields with `optionsSource` have their options fetched over HTTP before the page is
+read. The source declares its URL, value/label mapping, search parameter and any dependencies on other page
+values. Up to ten options are shown as choices; longer lists are typed or searched. Typed answers for fields
+whose options were fetched are resolved before submission to Core: an
+exact match supplies the option value; otherwise a model chooses the matching candidates. Ambiguous or
+unmatched words are asked again. Dependent sources wait for their inputs, and a failed source leaves the field
+typed for Core to validate. Relative sources use `WFO_CORE_API_URL`, or Core's MCP origin when unset;
+absolute sources must use that base's host and port or an entry in `WFO_OPTIONS_HOSTS`. These calls use the
+same bearer-token selection as MCP.
+
+The write-tool gate hides Core's three known workflow mutations where the form-fill skill runs: A2A,
+chat completions and AG-UI. The MCP agent has neither that gate nor the workflow plugin, so its model can call
+Core's write tools directly. The gate matches tool names, not `readOnlyHint` annotations, and custom tools are not
+given an approval step automatically. AG-UI frontend tools are also passed to its underlying adapter. See
+[Read tools and write tools](docs/reference/runtime.md#read-tools-and-write-tools).
+
+On A2A, chat completions and AG-UI, built-in workflow starts go through the separate form skill after a matching approval
+response.
+The calling client must obtain that approval from a person. Conversation and query persistence
+still write to the database. Routing in front of the model and prefilling pages from the
 conversation with a typed decision engine (Jev) live on a separate branch; a handed-off key core does not
 know is a tool retry, so the model corrects itself.
-
-**Form field widgets.** Some form fields carry no options in core's schema: the customers, locations or ports a
-person picks from are fetched when the form is shown. Since pydantic-forms 2.10 such a field says where
-(`optionsSource`: the URL, how the response is read, and for each `{name}` in the URL a pointer into the page's
-values). The agent has one widget for all of them, its counterpart of a pydantic-forms component matcher. Before a
-page is read, each sourced field gets its options fetched from core's API, as the person asking, and written into
-the page schema the way core writes a static choice (`enum` + `options`), so everything downstream works unchanged:
-up to ten are asked as options to pick; a longer list is typed, and what is typed is resolved to one of its options
-— an exact name directly, otherwise the agent's model reads the words over the candidates; a source that declares
-`search` is searched on the server — before core sees it. Words that fit several options are asked again as those
-options; words that fit none are asked again. Typed text is never sent to core for such a field. A field whose
-source depends on another value (the free ports of a node) has no options until that value is answered, and is
-offered once it has. A source that fails leaves its field typed, as without it. A relative URL is fetched from
-core's origin (`WFO_CORE_API_URL` to override); an absolute one only from a host in `WFO_OPTIONS_HOSTS`.
 
 **A2A protocol version.** The A2A endpoint speaks protocol v1.0 (a2a-sdk 1.x, protobuf types:
 `SendMessage`, `SendStreamingMessage`; the agent card is at `/.well-known/agent-card.json`; a v1 client
@@ -386,9 +421,9 @@ the skill: LibreChat has none of its own on this path, and a form turn skips thi
 A2A. What the tool does not take is handled in the adapter:
 
 - four questions a call: a page with more fields is shown as several cards, one after the other;
-- twelve options a question: a field with more is asked as free text, its options listed; what is typed
-  is the option it names when it is exactly one of them but for case, and otherwise goes to core as
-  typed (and, rejected, to the interpreter);
+- twelve options a question, with one slot reserved for "Keep default" on optional fields: a field with more
+  is asked as free text, its options listed. Ordinary fields go to Core and, if rejected, to the interpreter;
+  sourced-option fields resolve the words against their fetched options before submission;
 - every question must be answered: an optional field gets a "Keep default" option;
 - the card always takes typed text: an option's value is a token only that stop knows, so typing
   "Approve" approves nothing and the approval is shown again;
@@ -423,16 +458,16 @@ modelSpecs:
 A pending card survives a browser reload; it survives a LibreChat restart only when LibreChat runs with
 Redis (`USE_REDIS=true`).
 
-**AG-UI interrupts (the chat popup).** AG-UI 0.1.19 and later (the JS client from 1.0) lets a run end
-waiting for a person: `RUN_FINISHED` carries an interrupt outcome, and the client answers by starting the next
-run with a resume entry per interrupt. A client whose `protocolVersion` has them is one that can show a stop
-(`adapters/ag_ui/interrupts.py`); a stop of the skill ends the run with one interrupt — reason `ask_user` with
-the page's questions as asked in its metadata (field, title, choices, whether several may be picked, whether
-required, core's problem with the last answer), or reason `tool_call` with the `create_workflow` call as it
-will be made — and the resume entry's payload is the person's response: per question the positions of the
-choices picked or the text typed, or for the start `approved` true or false; a cancelled entry cancels the
-form. The values behind the choices never leave the server: a response can only pick what was shown. The
-skill's reply is streamed in the person's words (`adapters/words.py`, shared with LibreChat). The run's state
-is the server's, keyed on the thread; what the client sends as AG-UI state is not read.
+**AG-UI forms and chats.** A client whose `protocolVersion` supports interrupts can show the same skill's
+questions and approval. A stop ends the run with an interrupt outcome; the next run answers it with a matching
+resume entry. The agent replays stored history for the `threadId` and ignores client-supplied state. AG-UI and
+its `/chats/` API check the authenticated subject against the thread owner and refuse threads from other
+protocols. With authentication off, threads are unowned and shared. A2A and chat completions still trust their
+clients to isolate conversation identifiers. See [Endpoints and protocols](docs/reference/endpoints.md#ag-ui).
 
-The **A2A adapter** uses [a2a-sdk](https://github.com/google/a2a-sdk) server primitives (`AgentExecutor`, `DefaultRequestHandler`, and the route factories). The SDK handles JSON-RPC routing, SSE streaming, task lifecycle, and agent card serving. The adapter implements a single `WFOAgentExecutor.execute()` method that drives the pydantic-ai event stream and publishes A2A events via `TaskUpdater`. The `AgentCard.skills` list is projected from the advertised capability specs (`skills_from_specs`), keeping the advertised skills in sync with the configured capabilities.
+The interrupts use reason `ask_user` for a page's questions or `tool_call` for the `create_workflow` call to
+approve. A matching resume entry supplies selected choice positions or typed answers, or an `approved` JSON
+boolean for the start. A cancelled entry cancels the form. `adapters/ag_ui/interrupts.py` maps these inputs
+and streams the skill's reply in the person's words through `adapters/words.py`.
+
+The **A2A adapter** uses [a2a-sdk](https://github.com/a2aproject/a2a-python) server primitives (`AgentExecutor`, `DefaultRequestHandler`, and the route factories). The SDK handles JSON-RPC routing, SSE streaming, task lifecycle, and agent card serving. The adapter implements a single `WFOAgentExecutor.execute()` method that drives the pydantic-ai event stream and publishes A2A events via `TaskUpdater`. The `AgentCard.skills` list is projected from the advertised capability specs (`skills_from_specs`), keeping the advertised skills in sync with the configured capabilities.

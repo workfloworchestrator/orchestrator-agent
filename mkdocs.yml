@@ -1,0 +1,76 @@
+# workfloworchestrator.github.io uses site_name in the URL, don't change it
+site_name: Orchestrator Agent
+site_description: An AI agent for Workflow Orchestrator to search your data in plain language and start workflows with approval.
+repo_url: "https://github.com/workfloworchestrator/orchestrator-agent"
+repo_name: "workfloworchestrator/orchestrator-agent"
+exclude_docs: |
+  /superpowers/
+  /plugin-driven-capabilities.md
+nav:
+  - Overview: index.md
+  - How to run the agent with your Orchestrator Core: getting-started.md
+  - Guides:
+      - How to connect LibreChat: guides/librechat.md
+      - How to use the agent with MCP: guides/mcp-clients.md
+      - How to connect another agent over A2A: guides/a2a-planner.md
+      - How to change the language model: guides/own-llm.md
+      - How to add domain context: guides/domain-context.md
+      - How to customise a plugin: guides/customise-plugin.md
+      - How to configure authentication and authorization: guides/secure-agent.md
+      - How to trace the agent: guides/tracing.md
+      - How to benchmark prompt and model changes: guides/evals.md
+      - How to add an evaluation case: guides/add-eval-case.md
+  - How it works:
+      - How the agent fits on top of Orchestrator Core: explanation/index.md
+      - Authentication and authorization: explanation/auth.md
+      - Tracing and observability: explanation/observability.md
+      - Understanding agent evaluations: explanation/evaluation.md
+  - Reference:
+      - Endpoints and protocols: reference/endpoints.md
+      - Configuration: reference/configuration.md
+      - Plugins: reference/plugins.md
+      - Runtime behaviour: reference/runtime.md
+      - Evaluation benchmark: reference/evals.md
+theme:
+  name: material
+  palette:
+    - scheme: default
+      primary: teal
+      accent: amber
+      toggle:
+        icon: material/lightbulb-on
+        name: Switch to dark mode
+    - scheme: slate
+      primary: teal
+      accent: amber
+      toggle:
+        icon: material/lightbulb-outline
+        name: Switch to light mode
+  features:
+    - search.suggest
+    - search.highlight
+    - navigation.sections
+plugins:
+  - search
+  - redirects:
+      redirect_maps:
+        # 2026-11-10: explanation pages renamed from architecture
+        "architecture/index.md": "explanation/index.md"
+        "architecture/auth.md": "explanation/auth.md"
+        "architecture/observability.md": "explanation/observability.md"
+        "architecture/evaluation.md": "explanation/evaluation.md"
+  # Renders Jinja like the hub does, so the {% raw %} around LibreChat placeholders behaves the same in both builds.
+  - external-markdown
+markdown_extensions:
+  - admonition
+  - attr_list
+  - md_in_html
+  - tables
+  - pymdownx.details
+  - pymdownx.emoji:
+      emoji_index: !!python/name:material.extensions.emoji.twemoji
+      emoji_generator: !!python/name:material.extensions.emoji.to_svg
+  - pymdownx.superfences
+  - pymdownx.tabbed:
+      alternate_style: true
+copyright: "&copy; 2026 Workflow Orchestrator Programme"
