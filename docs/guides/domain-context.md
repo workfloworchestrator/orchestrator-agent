@@ -2,7 +2,7 @@
 
 This guide shows you how to tell the agent about your organisation's identifiers and terms, so that a question like
 *Show circuit IS4443* becomes a filter on the right field. To learn why the agent needs this, see
-[How a question becomes a search](../architecture/index.md#how-a-question-becomes-a-search).
+[How a question becomes a search](../explanation/index.md#how-a-question-becomes-a-search).
 
 ## Steps
 

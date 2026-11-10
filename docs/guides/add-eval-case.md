@@ -47,7 +47,7 @@ For a product-count request, use:
 
 Adapt the request and evaluators to your task. Keep the existing dataset-wide `MaxToolCalls` evaluator. If you need to
 verify the final answer automatically, add an evaluator for that requirement as well; see
-[Tool use, answers and completed tasks](../architecture/evaluation.md#tool-use-answers-and-completed-tasks).
+[Tool use, answers and completed tasks](../explanation/evaluation.md#tool-use-answers-and-completed-tasks).
 
 ## 3. Validate and run the case
 
@@ -88,4 +88,4 @@ you intend to use as the reference.
 
 - [How to benchmark prompt and model changes](evals.md)
 - [Evals reference](../reference/evals.md)
-- [Understanding agent evaluations](../architecture/evaluation.md)
+- [Understanding agent evaluations](../explanation/evaluation.md)

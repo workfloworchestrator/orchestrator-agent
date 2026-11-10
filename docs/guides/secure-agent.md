@@ -2,7 +2,7 @@
 
 Configure who may call the agent and which identity it uses when calling Orchestrator Core. Have a running agent
 and the client details from your identity provider ready. Edit the agent's `.env` for a source launch, or the
-environment supplied to your container. See [Authentication and authorization](../architecture/auth.md) for the design.
+environment supplied to your container. See [Authentication and authorization](../explanation/auth.md) for the design.
 
 ## Steps
 
@@ -102,4 +102,4 @@ or recreate your container so it receives the updated environment. For limits an
 ## Reference
 
 - [Configuration: authentication](../reference/configuration.md#authentication)
-- [Authentication and authorization](../architecture/auth.md)
+- [Authentication and authorization](../explanation/auth.md)

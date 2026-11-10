@@ -83,4 +83,4 @@ regression. Use the existing [eval CI workflow](../reference/evals.md#ci) to che
 
 - [How to add an evaluation case](add-eval-case.md)
 - [Evals reference](../reference/evals.md)
-- [Understanding agent evaluations](../architecture/evaluation.md)
+- [Understanding agent evaluations](../explanation/evaluation.md)

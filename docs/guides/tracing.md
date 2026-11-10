@@ -2,7 +2,7 @@
 
 This guide shows you how to send Pydantic AI's model and tool-call spans to [Langfuse](https://langfuse.com/) or
 another OpenTelemetry backend. To learn what traces show and how they relate to evals, see
-[Tracing and observability](../architecture/observability.md).
+[Tracing and observability](../explanation/observability.md).
 
 !!! warning "Traces contain your data"
     A trace holds the user's question, the prompts and everything the tools returned. If that data must stay in your
@@ -95,6 +95,6 @@ another OpenTelemetry backend. To learn what traces show and how they relate to 
 ## Reference
 
 - [Configuration: observability](../reference/configuration.md#observability)
-- [Tracing and observability](../architecture/observability.md)
+- [Tracing and observability](../explanation/observability.md)
 - [Langfuse documentation](https://langfuse.com/docs)
 - [Langfuse's Pydantic AI integration](https://langfuse.com/integrations/frameworks/pydantic-ai)

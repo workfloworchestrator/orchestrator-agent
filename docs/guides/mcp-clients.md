@@ -14,7 +14,7 @@ guide.
     is not forwarded. Start workflows from
     [chat](https://workfloworchestrator.org/learn/orchestrator-agent/use-cases/workflows-from-chat/) instead. See
     [Read tools and write tools](../reference/runtime.md#read-tools-and-write-tools) and
-    [Authentication and authorization](../architecture/auth.md#outbound-who-the-agent-acts-as).
+    [Authentication and authorization](../explanation/auth.md#outbound-who-the-agent-acts-as).
 
 ## Steps
 

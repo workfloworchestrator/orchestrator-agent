@@ -26,7 +26,7 @@ instead, follow the [tutorial on the example orchestrator](https://workfloworche
 
     With embeddings enabled, searches can also match meaning. For example, a question about customer connectivity
     can find subscriptions whose descriptions use different words. See
-    [How a question becomes a search](architecture/index.md#how-a-question-becomes-a-search).
+    [How a question becomes a search](explanation/index.md#how-a-question-becomes-a-search).
 
 Use the **Source** or **Docker** tab in each of the three steps below, then follow [Verify it works](#verify-it-works).
 Both options use port 8080 for the agent. The examples connect to an unauthenticated Core on host port 8081; replace the database

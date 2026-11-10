@@ -1,7 +1,7 @@
 # How to change the language model
 
 This guide shows you how to run the agent on a model of your choice: hosted, self-hosted or behind a proxy. To weigh
-hosted against self-hosted, see [The language model interprets the request](../architecture/index.md#where-your-data-goes).
+hosted against self-hosted, see [The language model interprets the request](../explanation/index.md#where-your-data-goes).
 
 ## Steps
 

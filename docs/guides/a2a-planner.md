@@ -46,7 +46,7 @@ second agent, see [How to run a companion agent with docker-agent](https://workf
 5. If the Orchestrator Agent authenticates requests, have the calling agent send the user's token twice: in the
    `Authorization` header to pass the agent's check, and as `auth_token` in the message metadata so that Orchestrator
    Core sees the user. Without the metadata, calls to Orchestrator Core run as the agent's service account. See
-   [Authentication and authorization](../architecture/auth.md#outbound-who-the-agent-acts-as).
+   [Authentication and authorization](../explanation/auth.md#outbound-who-the-agent-acts-as).
 6. If users should start workflows through the calling agent, make it request and handle the
    [kagent human-in-the-loop extension](../reference/runtime.md#workflow-forms). Verify that your runtime and version
    relay both the questions and approval responses; the docker-agent toolset above alone does not establish this. Without

@@ -1,7 +1,7 @@
 # Runtime behaviour
 
 This reference describes the agent's implementation and checks. For the roles of the connected systems, see
-[How the agent fits on top of Orchestrator Core](../architecture/index.md).
+[How the agent fits on top of Orchestrator Core](../explanation/index.md).
 
 ## Components
 
@@ -67,7 +67,7 @@ read-only. Conversation persistence and stored search results also write to Post
 
 A [plugin](plugins.md) is a Markdown file with a prompt and a few lines of frontmatter. It declares the
 tools it owns and, optionally, how their results are shown. The built-in plugins are search, aggregate, entity,
-export and workflow. Each one becomes a [capability](../architecture/index.md#capabilities) of the agent and a skill
+export and workflow. Each one becomes a [capability](../explanation/index.md#capabilities) of the agent and a skill
 in the A2A agent card.
 
 Ownership of a tool drives two things. The results of the tool are mapped to the declared output type: a query result

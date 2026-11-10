@@ -1,8 +1,8 @@
 # Plugins
 
-Each plugin is loaded as one [capability](../architecture/index.md#capabilities) of the agent: a Markdown file with YAML frontmatter, shipped in the agent under
+Each plugin is loaded as one [capability](../explanation/index.md#capabilities) of the agent: a Markdown file with YAML frontmatter, shipped in the agent under
 `capabilities/plugins/`. The body is the prompt. The plugins describe *what* to do and the tool descriptions served by
-Orchestrator Core describe *how* to use each tool. See [How the agent fits on top of Orchestrator Core](../architecture/index.md) for the design.
+Orchestrator Core describe *how* to use each tool. See [How the agent fits on top of Orchestrator Core](../explanation/index.md) for the design.
 
 All built-in plugins are always on. The workflow plugin is present where the form-fill skill runs: A2A, `/v1` and AG-UI.
 Every plugin is also advertised as a skill in the A2A agent card, unless it sets `advertise: false`.
@@ -75,7 +75,7 @@ Example: *Start the terminate workflow for subscription abc123.*
 | `advertise` | `true` | Advertise an A2A skill and, where eligible, an MCP entry-point tool |
 | `a2a_tags` | `[]` | A2A tags; the advertised skill falls back to the plugin id when empty |
 | `examples` | `[]` | Example prompts for the A2A skill and MCP tool description |
-| `defer_loading` | Required | `false` for always on, `true` to hide instructions and owned tools until the model loads the [capability](../architecture/index.md#capabilities) |
+| `defer_loading` | Required | `false` for always on, `true` to hide instructions and owned tools until the model loads the [capability](../explanation/index.md#capabilities) |
 | `tools` | `[]` | Symbolic constants from `tool_names.py`, such as `SEARCH_TOOL`, resolved to Core tool names for result mapping and deferred loading |
 | `artifact` | Omitted | Maps tool results to `query`, `data` or `export` output; omitted means instructions only |
 

@@ -123,7 +123,7 @@ Azure is selected. Other providers can require additional SDK dependencies; see 
 
 Core's search-tool descriptions guide identifier lookups toward the corresponding field and a `like` filter when
 appropriate. `like` is a case-insensitive wildcard match, for example `%IS4443%`; it does not itself tolerate typos.
-Fuzzy retrieval provides approximate text ranking. See [Search behavior](docs/architecture/index.md#how-a-question-becomes-a-search).
+Fuzzy retrieval provides approximate text ranking. See [Search behavior](docs/explanation/index.md#how-a-question-becomes-a-search).
 
 The agent also picks a **retriever** per query:
 

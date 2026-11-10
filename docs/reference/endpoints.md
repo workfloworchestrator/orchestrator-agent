@@ -172,7 +172,7 @@ operational error. It does not test the model, Core MCP, the identity provider o
 With `OAUTH2_ACTIVE=true` (the default) incoming requests are authenticated with OIDC. With
 `OAUTH2_ACTIVE=false` the agent accepts unauthenticated requests. Calls from the agent to Orchestrator Core
 are controlled separately by `OAUTH2_OUTBOUND_ACTIVE`. See [Configuration](configuration.md#authentication) for the
-settings and [Authentication and authorization](../architecture/auth.md) for how the checks fit together.
+settings and [Authentication and authorization](../explanation/auth.md) for how the checks fit together.
 
 ### Public paths
 

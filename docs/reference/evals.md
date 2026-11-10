@@ -3,7 +3,7 @@
 The `evals/` folder of the agent repository holds a golden-set benchmark built on
 [pydantic-evals](https://ai.pydantic.dev/evals/). The agent runs in-process against a live Orchestrator Core MCP
 server, so the benchmark measures agent behaviour only: which tools are called, in which order and with which
-arguments. See [Understanding agent evaluations](../architecture/evaluation.md) for the reasoning and
+arguments. See [Understanding agent evaluations](../explanation/evaluation.md) for the reasoning and
 [How to benchmark prompt and model changes](../guides/evals.md) for comparisons, or
 [How to add an evaluation case](../guides/add-eval-case.md) to extend the dataset.
 

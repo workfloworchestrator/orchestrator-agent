@@ -69,4 +69,4 @@ For tracing setup, see [How to trace the agent](tracing.md).
 ## Reference
 
 - [Plugins](../reference/plugins.md)
-- [Capabilities](../architecture/index.md#capabilities)
+- [Capabilities](../explanation/index.md#capabilities)

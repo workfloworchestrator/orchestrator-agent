@@ -20,11 +20,11 @@ nav:
       - How to trace the agent: guides/tracing.md
       - How to benchmark prompt and model changes: guides/evals.md
       - How to add an evaluation case: guides/add-eval-case.md
-  - Architecture:
-      - How the agent fits on top of Orchestrator Core: architecture/index.md
-      - Authentication and authorization: architecture/auth.md
-      - Tracing and observability: architecture/observability.md
-      - Understanding agent evaluations: architecture/evaluation.md
+  - How it works:
+      - How the agent fits on top of Orchestrator Core: explanation/index.md
+      - Authentication and authorization: explanation/auth.md
+      - Tracing and observability: explanation/observability.md
+      - Understanding agent evaluations: explanation/evaluation.md
   - Reference:
       - Endpoints and protocols: reference/endpoints.md
       - Configuration: reference/configuration.md
@@ -52,6 +52,13 @@ theme:
     - navigation.sections
 plugins:
   - search
+  - redirects:
+      redirect_maps:
+        # 2026-11-10: explanation pages renamed from architecture
+        "architecture/index.md": "explanation/index.md"
+        "architecture/auth.md": "explanation/auth.md"
+        "architecture/observability.md": "explanation/observability.md"
+        "architecture/evaluation.md": "explanation/evaluation.md"
   # Renders Jinja like the hub does, so the {% raw %} around LibreChat placeholders behaves the same in both builds.
   - external-markdown
 markdown_extensions:

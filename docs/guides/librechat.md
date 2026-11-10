@@ -143,7 +143,7 @@ setup below and [configure access controls](secure-agent.md).
 
     3. Make sure the access token is one the agent accepts: issued by the identity provider in the agent's
         `OIDC_CONF_URL`, for an audience the agent and Orchestrator Core trust. See
-        [Authentication and authorization](../architecture/auth.md).
+        [Authentication and authorization](../explanation/auth.md).
     4. Uncomment the `Authorization` header in `librechat.yaml`.
 
 ### 4. Start LibreChat

@@ -46,7 +46,7 @@ rendering, workflow forms and client interfaces. You choose the model.
 
 Orchestrator Core provides the tools through MCP and owns the search index, input validation and workflow execution.
 The agent stores conversation state in the WFO database; it does not maintain a separate search index or its own
-workflow logic. See [How the agent fits on top of Orchestrator Core](architecture/index.md).
+workflow logic. See [How the agent fits on top of Orchestrator Core](explanation/index.md).
 
 ## Key features
 
@@ -113,6 +113,6 @@ deployment picture, see [Running the agent in your own stack](https://workflowor
 - 💬 **Questions?** Join us on [Discord](https://discord.gg/fQkQn5ajFR)
 - 🐛 **Found a bug?** [Open an issue](https://github.com/workfloworchestrator/orchestrator-agent/issues)
 - 🤝 **Want to contribute?** Visit the [repository](https://github.com/workfloworchestrator/orchestrator-agent)
-- 📖 **How does it work?** Read the [architecture](architecture/index.md)
+- 📖 **How does it work?** Read [How it works](explanation/index.md)
 - 🚀 **From first try to production?** See
   [Learn / Orchestrator Agent](https://workfloworchestrator.org/learn/orchestrator-agent/)
