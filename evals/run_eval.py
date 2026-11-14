@@ -15,6 +15,7 @@ import argparse
 import json
 import os
 import sys
+from collections.abc import Awaitable, Callable
 from collections import defaultdict
 from pathlib import Path
 from statistics import fmean
@@ -66,7 +67,7 @@ def build_model(name: str, api_key: str) -> Model:
     raise SystemExit(f"{name}: no provider {provider!r} in build_model")
 
 
-def task_for(agent: WFOAgent):
+def task_for(agent: WFOAgent) -> Callable[[str], Awaitable[str]]:
     """The task under evaluation: one user turn of this agent against the real MCP toolset."""
 
     async def run_wfo_agent(question: str) -> str:
@@ -247,10 +248,10 @@ def main() -> None:
 
     models: dict[str, str] = json.loads(eval_settings.models_file.read_text())
     if args.models:
-        wanted = [name.strip() for name in args.models.split(",")]
-        if unknown := [name for name in wanted if name not in models]:
+        selected = [name.strip() for name in args.models.split(",")]
+        if unknown := [name for name in selected if name not in models]:
             sys.exit(f"not in {eval_settings.models_file.name}: {', '.join(unknown)}")
-        models = {name: models[name] for name in wanted}
+        models = {name: models[name] for name in selected}
 
     failures: list[str] = []
     reports: dict[str, EvaluationReport | None] = {}
