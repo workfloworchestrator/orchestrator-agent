@@ -13,10 +13,9 @@ in what order, with which arguments.
 
 import argparse
 import json
-import os
 import sys
+from collections import Counter, defaultdict
 from collections.abc import Awaitable, Callable
-from collections import defaultdict
 from pathlib import Path
 from statistics import fmean
 
@@ -47,23 +46,28 @@ from rich.table import Table
 from orchestrator_agent.agent import WFOAgent, build_agent, new_deps
 
 
-def build_model(name: str, api_key: str) -> Model:
-    """The pydantic-ai model for a ``provider:model`` name, with that provider's key."""
+def build_model(name: str) -> Model | None:
+    """The pydantic-ai model for a ``provider:model`` name, or None when the settings hold no key for that provider."""
     provider, _, model_name = name.partition(":")
     if provider == "openai":
+        if not eval_settings.openai_api_key:
+            return None
         # Chat Completions, as the agent's own settings build it; the plain model string would take the
         # Responses API, which the locked openai SDK cannot read.
         from pydantic_ai.models.openai import OpenAIChatModel
         from pydantic_ai.providers.openai import OpenAIProvider
 
-        return OpenAIChatModel(model_name, provider=OpenAIProvider(api_key=api_key))
+        return OpenAIChatModel(model_name, provider=OpenAIProvider(api_key=eval_settings.openai_api_key))
     if provider == "anthropic":
+        if not eval_settings.anthropic_api_key:
+            return None
         from pydantic_ai.models.anthropic import AnthropicModel, AnthropicModelSettings
         from pydantic_ai.providers.anthropic import AnthropicProvider
 
         # The instructions and tool definitions are the same on every call: cache them.
         settings = AnthropicModelSettings(anthropic_cache_instructions=True, anthropic_cache_tool_definitions=True)
-        return AnthropicModel(model_name, provider=AnthropicProvider(api_key=api_key), settings=settings)
+        anthropic = AnthropicProvider(api_key=eval_settings.anthropic_api_key)
+        return AnthropicModel(model_name, provider=anthropic, settings=settings)
     raise SystemExit(f"{name}: no provider {provider!r} in build_model")
 
 
@@ -84,29 +88,36 @@ def for_model(path: Path, model: str) -> Path:
     return path.with_name(f"{path.stem}.{model.replace(':', '-').replace('/', '-')}{path.suffix}")
 
 
+def crashes(report: EvaluationReport) -> Counter[str]:
+    """Per case, how many of its runs failed to execute. Such a run counts as 0 on everything the case measures."""
+    return Counter(failure.source_case_name or failure.name for failure in report.failures)
+
+
 def case_means(report: EvaluationReport) -> dict[str, dict[str, float]]:
     """Per case, the average of every score and the pass rate of every assertion over the case's runs.
 
-    A ``--repeat`` report holds one entry per run of a case, which pydantic-evals
-    groups back by case; without repeats every case is its own single run.
+    A ``--repeat`` report holds one entry per run of a case. A crashed run counts as 0; a case
+    whose every run crashed has no measured names and maps to an empty dict.
     """
-    groups = report.case_groups()
-    runs_by_case = {case.name: [case] for case in report.cases} if groups is None else {g.name: g.runs for g in groups}
-    means: dict[str, dict[str, float]] = {}
-    for case_name, runs in runs_by_case.items():
-        values: defaultdict[str, list[float]] = defaultdict(list)
-        for run in runs:
-            for name, result in (run.scores | run.assertions).items():
-                values[name].append(float(result.value))
-        means[case_name] = {name: fmean(of_runs) for name, of_runs in values.items()}
-    return means
+    crashed = crashes(report)
+    values: defaultdict[str, defaultdict[str, list[float]]] = defaultdict(lambda: defaultdict(list))
+    for run in report.cases:
+        for name, result in (run.scores | run.assertions).items():
+            values[run.source_case_name or run.name][name].append(float(result.value))
+    return {
+        case_name: {
+            name: sum(of_runs) / (len(of_runs) + crashed[case_name]) for name, of_runs in values[case_name].items()
+        }
+        for case_name in values.keys() | crashed.keys()
+    }
 
 
 def route_and_arguments(report: EvaluationReport) -> dict[str, tuple[float, float | None]]:
     """Per case over its runs: the route score average and the argument-correctness pass rate.
 
-    A run that crashed scores 0 on both; a case without an argument assertion has no pass rate.
+    A run that crashed counts as 0 on both; a case without an argument assertion has no pass rate.
     """
+    crashed = crashes(report)
     runs: dict[str, list[tuple[float, float | None]]] = defaultdict(list)
     for case in report.cases:
         arguments = case.assertions.get("ArgumentCorrectness")
@@ -114,14 +125,14 @@ def route_and_arguments(report: EvaluationReport) -> dict[str, tuple[float, floa
         runs[case.source_case_name or case.name].append(
             (float(route), None if arguments is None else float(arguments.value))
         )
-    for failure in report.failures:
-        runs[failure.source_case_name or failure.name].append((0.0, 0.0))
     return {
         name: (
-            fmean(route for route, _ in pairs),
-            fmean(rates) if (rates := [a for _, a in pairs if a is not None]) else None,
+            sum(route for route, _ in runs[name]) / (len(runs[name]) + crashed[name]),
+            sum(rates) / (len(rates) + crashed[name])
+            if (rates := [a for _, a in runs[name] if a is not None])
+            else None,
         )
-        for name, pairs in runs.items()
+        for name in runs.keys() | crashed.keys()
     }
 
 
@@ -178,6 +189,7 @@ def compare_to_baseline(report: EvaluationReport, baseline: EvaluationReport, to
     tolerance absorbs run-to-run noise). With one run per case a pass rate is 1
     or 0, so an assertion that flips from passing to failing is a regression.
     Improvements and cases only present on one side never fail the comparison.
+    A crashed run counts as 0, so a case that starts crashing is a regression.
     """
     baseline_means = case_means(baseline)
     regressions: list[str] = []
@@ -186,6 +198,8 @@ def compare_to_baseline(report: EvaluationReport, baseline: EvaluationReport, to
         if base is None:
             print(f"baseline: case {case_name!r} not in baseline, skipping")
             continue
+        if not means:  # every run crashed
+            means = dict.fromkeys(base, 0.0)
         for name, value in means.items():
             if name in base and value - base[name] < -tolerance:
                 regressions.append(f"{case_name} :: {name} {base[name]:.2f} -> {value:.2f}")
@@ -246,20 +260,21 @@ def main() -> None:
             evaluators=dataset.evaluators,
         )
 
-    models: dict[str, str] = json.loads(eval_settings.models_file.read_text())
+    models: list[str] = json.loads(eval_settings.models_file.read_text())
     if args.models:
         selected = [name.strip() for name in args.models.split(",")]
         if unknown := [name for name in selected if name not in models]:
             sys.exit(f"not in {eval_settings.models_file.name}: {', '.join(unknown)}")
-        models = {name: models[name] for name in selected}
+        models = selected
 
     failures: list[str] = []
     reports: dict[str, EvaluationReport | None] = {}
-    for model_name, key in models.items():
-        if not os.environ.get(key):
+    for model_name in models:
+        model = build_model(model_name)
+        if model is None:
             reports[model_name] = None  # shown as "no key"
             continue
-        agent = build_agent(build_model(model_name, os.environ[key]))
+        agent = build_agent(model)
         report = dataset.evaluate_sync(
             task_for(agent), name=model_name, max_concurrency=args.concurrency, repeat=args.repeat
         )
@@ -271,8 +286,7 @@ def main() -> None:
             print(f"{model_name}: report written to {path}")
 
         if report.failures:
-            failures.append(f"{model_name}: {len(report.failures)} case(s) failed to execute")
-            continue
+            print(f"{model_name}: {len(report.failures)} run(s) failed to execute, counted as 0")
 
         if args.baseline:
             path = for_model(args.baseline, model_name)
@@ -294,13 +308,14 @@ def main() -> None:
             if averages.assertions is not None:
                 values.append(averages.assertions)
             mean = sum(values) / len(values) if values else 0.0
+            mean *= len(report.cases) / ((len(report.cases) + len(report.failures)) or 1)  # a crashed run is 0
             print(f"{model_name}: overall mean (score averages + assertion pass rate): {mean:.3f}")
             if mean < args.fail_under:
                 failures.append(f"{model_name}: overall mean {mean:.3f} below --fail-under {args.fail_under}")
 
     print_table(reports, [case.name for case in dataset.cases], args.repeat)
     if not any(reports.values()):
-        failures.append(f"no model ran: set a provider key from {eval_settings.models_file.name}")
+        failures.append("no model ran: set a provider key (see .env.example)")
     if failures:
         sys.exit("; ".join(failures))
 

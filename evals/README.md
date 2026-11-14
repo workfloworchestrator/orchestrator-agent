@@ -31,8 +31,9 @@ uv run python run_eval.py --concurrency 8    # runs at once (default 4)
 uv run python run_eval.py --fail-under 0.7   # CI gate: exit non-zero below the floor
 ```
 
-`../eval-models.json` maps each model to the environment variable holding its
-provider's API key; a model runs when that variable is set and is reported as
+`../eval-models.json` lists the models. The provider keys are settings
+(`settings.py`, from the environment or `.env`); a model runs when its
+provider's key is set and is reported as
 skipped otherwise. Scores are only comparable across runs on the same model.
 The output is one table: the models as columns, a row per case, each cell the
 route match and the argument-correctness pass rate averaged over the runs.
@@ -96,7 +97,8 @@ uv run python run_eval.py --repeat 5 --save-report baseline_report.json  # bless
 does not take the same route every time, so one run of a case is a single
 sample. The comparison is between per-case averages: a score average or an
 assertion pass rate that drops more than `--tolerance` (default 0.2) below the
-baseline's fails the run and names the case. Improvements never fail. Compare
+baseline's fails the run and names the case. A run that fails to execute counts
+as 0 on everything its case measures. Improvements never fail. Compare
 with the repeat count the baseline was blessed with. Re-bless the baseline
 deliberately — in the same MR as the change that moves the numbers, on the
 pinned model — so a baseline change is always a reviewed diff.
@@ -108,4 +110,5 @@ pinned model — so a baseline change is always a reviewed diff.
 backing services, run the golden set in-process from the branch's working
 tree, five times per case and per model, gate on the committed baselines plus
 the `--fail-under` floor. A model runs when its provider's key is set: the
-`EVAL_OPENAI_API_KEY` and `EVAL_ANTHROPIC_API_KEY` repository secrets.
+`OPENAI_API_KEY` and `ANTHROPIC_API_KEY` repository secrets, the same names
+as in `.env`.

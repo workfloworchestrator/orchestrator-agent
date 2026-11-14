@@ -25,9 +25,11 @@ class EvalSettings(BaseSettings):
     oauth2_active: bool = False
 
     dataset_file: Path = EVALS_DIR / "wfo_search_dataset.yaml"
-    # ``provider:model`` -> the environment variable holding that provider's API key. Every model whose
-    # key is set runs; scores are only comparable across runs on the same model.
+    # The ``provider:model`` names to evaluate. Every model whose provider key below is set runs; scores are
+    # only comparable across runs on the same model.
     models_file: Path = EVALS_DIR.parent / "eval-models.json"
+    openai_api_key: str | None = None
+    anthropic_api_key: str | None = None
 
     def apply_to_environment(self) -> None:
         """Publish the resolved values for the agent's ``AgentSettings`` to read."""

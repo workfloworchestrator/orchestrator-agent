@@ -2,7 +2,7 @@ name: Eval
 
 # Golden-set behavior benchmark (pydantic-evals) of the agent code on this
 # branch, run in-process against a live orchestrator-core MCP server. Each run
-# invokes a real LLM (secrets.EVAL_AGENT_API_KEY) so it does not run per-push:
+# invokes a real LLM (the provider keys in secrets) so it does not run per-push:
 # manually, nightly, or on PRs labeled 'eval'.
 on:
   workflow_dispatch:
@@ -20,8 +20,8 @@ jobs:
       contains(github.event.pull_request.labels.*.name, 'eval')
     env:
       # A model in eval-models.json runs when its provider's key is set.
-      OPENAI_API_KEY: ${{ secrets.EVAL_OPENAI_API_KEY }}
-      ANTHROPIC_API_KEY: ${{ secrets.EVAL_ANTHROPIC_API_KEY }}
+      OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+      ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
 
     steps:
       - uses: actions/checkout@v6
