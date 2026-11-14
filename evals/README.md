@@ -22,12 +22,21 @@ Then, from this folder (dependencies managed with [uv](https://docs.astral.sh/uv
 
 ```bash
 uv sync
-cp .env.example .env   # fill in AGENT_API_KEY (gitignored); pin AGENT_MODEL — scores
-                       # are only comparable on the same model. Real env vars win over .env.
-uv run python run_eval.py                    # full golden set
+cp .env.example .env   # fill in the provider keys (gitignored). Real env vars win over .env.
+uv run python run_eval.py                    # full golden set, once per model whose key is set
+uv run python run_eval.py --models openai:gpt-4o-mini   # one model
 uv run python run_eval.py --cases fuzzy-search-nodes   # subset (smoke)
+uv run python run_eval.py --repeat 5         # every case five times, averaged per case
+uv run python run_eval.py --concurrency 8    # runs at once (default 4)
 uv run python run_eval.py --fail-under 0.7   # CI gate: exit non-zero below the floor
 ```
+
+`../eval-models.json` lists the models. The provider keys are settings
+(`settings.py`, from the environment or `.env`); a model runs when its
+provider's key is set and is reported as
+skipped otherwise. Scores are only comparable across runs on the same model.
+The output is one table: the models as columns, a row per case, each cell the
+route match and the argument-correctness pass rate averaged over the runs.
 
 ## The dataset
 
@@ -73,26 +82,33 @@ Kept out until needed, as custom evaluators when they come:
 
 ## Baseline
 
-**`baseline_report.json` is the committed baseline**: a full report of a
-blessed run, serialized with pydantic-evals' own `EvaluationReportAdapter`.
-Every benchmark run can compare itself against it per case:
+**The committed baselines are one report per model**, a full report of a
+blessed run serialized with pydantic-evals' own `EvaluationReportAdapter`, with
+the model in the file name: `baseline_report.openai-gpt-4o-mini.json`. Every
+benchmark run compares each model against its own baseline per case, and says
+so when a model has none yet:
 
 ```bash
-uv run python run_eval.py --baseline baseline_report.json   # fail on per-case regression
-uv run python run_eval.py --save-report baseline_report.json  # bless a new baseline
+uv run python run_eval.py --repeat 5 --baseline baseline_report.json   # fail on per-case regression
+uv run python run_eval.py --repeat 5 --save-report baseline_report.json  # bless a new baseline
 ```
 
-A score that drops more than `--tolerance` (default 0.2) below the baseline,
-or an assertion that flips from passing to failing, fails the run and names
-the case. Improvements never fail. Re-bless the baseline deliberately — in the
-same MR as the change that moves the numbers, on the pinned model — so a
-baseline change is always a reviewed diff.
+`--repeat N` runs every case N times (pydantic-evals' own `repeat`): the model
+does not take the same route every time, so one run of a case is a single
+sample. The comparison is between per-case averages: a score average or an
+assertion pass rate that drops more than `--tolerance` (default 0.2) below the
+baseline's fails the run and names the case. A run that fails to execute counts
+as 0 on everything its case measures. Improvements never fail. Compare
+with the repeat count the baseline was blessed with. Re-bless the baseline
+deliberately — in the same MR as the change that moves the numbers, on the
+pinned model — so a baseline change is always a reviewed diff.
 
 ## CI
 
 `.github/workflows/eval.yml` runs the benchmark on demand
 (`workflow_dispatch`), nightly, and on PRs labeled `eval`: compose up the
 backing services, run the golden set in-process from the branch's working
-tree, gate on the committed baseline plus the `--fail-under` floor. Requires
-the `EVAL_AGENT_API_KEY` repository secret (and optionally an
-`EVAL_AGENT_MODEL` variable, default `openai:gpt-4o`).
+tree, five times per case and per model, gate on the committed baselines plus
+the `--fail-under` floor. A model runs when its provider's key is set: the
+`OPENAI_API_KEY` and `ANTHROPIC_API_KEY` repository secrets, the same names
+as in `.env`.

@@ -1,0 +1,5 @@
+[
+  "openai:gpt-4o-mini",
+  "anthropic:claude-haiku-5-5",
+  "anthropic:claude-opus-5-5"
+]

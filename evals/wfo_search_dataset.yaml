@@ -68,6 +68,25 @@ cases:
       tool_name: aggregate
       expected_arguments:
         entity_type: SUBSCRIPTION
+- name: filtered-count-active
+  inputs: show me how many active subscriptions there are
+  metadata:
+    failure_modes:
+    - aggregation
+    - structured-filters
+    curation_note: '"Show me" with a quantity as its object is a count, not a search:
+      the request is for a number about the subscriptions, not for the subscriptions
+      themselves. The status is a structured filter, so its path is discovered first.'
+  expected_output: null
+  evaluators:
+  - TrajectoryMatch:
+    - discover_filter_paths
+    - aggregate
+  - ArgumentCorrectness:
+      tool_name: aggregate
+      expected_arguments:
+        entity_type: SUBSCRIPTION
+        operation: count
 - name: resolve-by-prefix
   inputs: show details for subscription aa1b2c3d
   metadata:
@@ -91,19 +110,20 @@ cases:
   metadata:
     failure_modes:
     - entity-lookup
-    curation_note: '"Give me" is a details fetch, not an export; with a full UUID
-      in hand the direct details fetch is the ideal route, and the UUID must pass
-      through verbatim.'
+    curation_note: '"Give me" is a details fetch, not an export; resolving the id
+      returns the one subscription with its header, so that call alone is the route,
+      and the UUID must pass through verbatim.'
   expected_output: null
   evaluators:
   - TrajectoryMatch:
       expected_trajectory:
-      - get_subscription_details
+      - resolve_entity
       order: exact
   - ArgumentCorrectness:
-      tool_name: get_subscription_details
+      tool_name: resolve_entity
       expected_arguments:
-        subscription_id: aa1b2c3d-0000-4000-8000-000000000003
+        id_or_prefix: aa1b2c3d-0000-4000-8000-000000000003
+        entity_type: SUBSCRIPTION
 - name: search-workflows
   inputs: search for workflows containing 'validate'
   metadata:
@@ -134,6 +154,28 @@ cases:
   evaluators:
   - TrajectoryMatch:
       expected_trajectory:
+      - search
+      - export_query
+      order: exact
+  - ArgumentCorrectness:
+      tool_name: search
+      expected_arguments:
+        entity_type: SUBSCRIPTION
+- name: export-named-alone
+  inputs: export active subscriptions
+  metadata:
+    failure_modes:
+    - export
+    - structured-filters
+    curation_note: Only the export is named and no query exists yet, so the search
+      that produces the query comes first, in the same turn, with the status as a
+      structured filter. Stopping after the search leaves the person without the file
+      they asked for.
+  expected_output: null
+  evaluators:
+  - TrajectoryMatch:
+      expected_trajectory:
+      - discover_filter_paths
       - search
       - export_query
       order: exact

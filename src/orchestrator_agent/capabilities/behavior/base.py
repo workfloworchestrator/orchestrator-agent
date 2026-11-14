@@ -164,7 +164,7 @@ def _injection_notice(artifact: ToolArtifact) -> str | None:
     kind = "chart" if block.type == "mermaid" else "table"
     return (
         f"A {kind} for this result is shown to the user automatically below your reply. "
-        "Summarise in one sentence; do not reproduce it or restate its rows/numbers."
+        f"In that reply one sentence on the outcome is enough: do not reproduce the {kind} or restate its rows/numbers."
     )
 
 
