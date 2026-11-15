@@ -19,4 +19,3 @@ Prepare a downloadable export of an existing query's results.
   "Download has been successfully prepared." and nothing else, never a URL or a link, which does not work
   from a chat.
 - Viewing/showing/getting results is NOT an export — do not prepare one for those requests.
-- If a query hasn't been run yet, tell the user a search is needed first.

@@ -11,7 +11,7 @@ artifact: data
 ---
 # Fetching entity details
 
-Fetch the full domain model / details for a single entity the user references.
+Fetch the details of a single entity the user references: resolving it returns them.
 
 ## How to act
 - When the user references an entity by id or id-prefix (and the entity type is stated or clear),

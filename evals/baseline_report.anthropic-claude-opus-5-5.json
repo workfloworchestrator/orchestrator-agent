@@ -1,0 +1,4496 @@
+{
+  "name": "anthropic:claude-opus-5-5",
+  "cases": [
+    {
+      "name": "fuzzy-search-nodes [1/5]",
+      "inputs": "find subscriptions for network nodes",
+      "metadata": {
+        "failure_modes": [
+          "fuzzy-search"
+        ],
+        "curation_note": "Plain descriptive request; one fuzzy/semantic search, no filters needed."
+      },
+      "expected_output": null,
+      "output": "I found 4 network node subscriptions: 2 are active, 1 is still provisioning and 1 is terminated.",
+      "metrics": {
+        "requests": 4,
+        "input_tokens": 58598,
+        "output_tokens": 240,
+        "cache_creation.input_tokens": 14311,
+        "cache_creation_input_tokens": 14311,
+        "cache_write_tokens": 14311,
+        "cost": 0.0795252,
+        "cache_write.input_tokens": 14311,
+        "cache_read.input_tokens": 28622,
+        "cache_read_input_tokens": 14311,
+        "cache_read_tokens": 14311
+      },
+      "attributes": {},
+      "scores": {
+        "TrajectoryMatch": {
+          "name": "TrajectoryMatch",
+          "value": 1.0,
+          "reason": "actual trajectory matches expected: ['search']",
+          "source": {
+            "name": "TrajectoryMatch",
+            "arguments": {
+              "expected_trajectory": [
+                "search"
+              ],
+              "order": "exact"
+            }
+          },
+          "evaluator_version": null
+        }
+      },
+      "labels": {},
+      "assertions": {
+        "ArgumentCorrectness": {
+          "name": "ArgumentCorrectness",
+          "value": true,
+          "reason": null,
+          "source": {
+            "name": "ArgumentCorrectness",
+            "arguments": {
+              "tool_name": "search",
+              "expected_arguments": {
+                "entity_type": "SUBSCRIPTION"
+              }
+            }
+          },
+          "evaluator_version": null
+        },
+        "MaxToolCalls": {
+          "name": "MaxToolCalls",
+          "value": true,
+          "reason": "1 tool call(s), budget=8",
+          "source": {
+            "name": "MaxToolCalls",
+            "arguments": [
+              8
+            ]
+          },
+          "evaluator_version": null
+        }
+      },
+      "task_duration": 4.196954445999836,
+      "total_duration": 4.197632551193237,
+      "source_case_name": "fuzzy-search-nodes",
+      "trace_id": null,
+      "span_id": null,
+      "evaluator_failures": []
+    },
+    {
+      "name": "fuzzy-search-nodes [2/5]",
+      "inputs": "find subscriptions for network nodes",
+      "metadata": {
+        "failure_modes": [
+          "fuzzy-search"
+        ],
+        "curation_note": "Plain descriptive request; one fuzzy/semantic search, no filters needed."
+      },
+      "expected_output": null,
+      "output": "I found 4 network node subscriptions in mixed lifecycle states: most are active, one is terminated and one is still provisioning.",
+      "metrics": {
+        "requests": 4,
+        "input_tokens": 58598,
+        "output_tokens": 318,
+        "cache_creation.input_tokens": 14311,
+        "cache_creation_input_tokens": 14311,
+        "cache_write_tokens": 14311,
+        "cost": 0.08030520000000001,
+        "cache_write.input_tokens": 14311,
+        "cache_read.input_tokens": 28622,
+        "cache_read_input_tokens": 14311,
+        "thinking_tokens": 35,
+        "cache_read_tokens": 14311,
+        "reasoning.output_tokens": 35
+      },
+      "attributes": {},
+      "scores": {
+        "TrajectoryMatch": {
+          "name": "TrajectoryMatch",
+          "value": 1.0,
+          "reason": "actual trajectory matches expected: ['search']",
+          "source": {
+            "name": "TrajectoryMatch",
+            "arguments": {
+              "expected_trajectory": [
+                "search"
+              ],
+              "order": "exact"
+            }
+          },
+          "evaluator_version": null
+        }
+      },
+      "labels": {},
+      "assertions": {
+        "ArgumentCorrectness": {
+          "name": "ArgumentCorrectness",
+          "value": true,
+          "reason": null,
+          "source": {
+            "name": "ArgumentCorrectness",
+            "arguments": {
+              "tool_name": "search",
+              "expected_arguments": {
+                "entity_type": "SUBSCRIPTION"
+              }
+            }
+          },
+          "evaluator_version": null
+        },
+        "MaxToolCalls": {
+          "name": "MaxToolCalls",
+          "value": true,
+          "reason": "1 tool call(s), budget=8",
+          "source": {
+            "name": "MaxToolCalls",
+            "arguments": [
+              8
+            ]
+          },
+          "evaluator_version": null
+        }
+      },
+      "task_duration": 4.953437670999847,
+      "total_duration": 4.954320907592773,
+      "source_case_name": "fuzzy-search-nodes",
+      "trace_id": null,
+      "span_id": null,
+      "evaluator_failures": []
+    },
+    {
+      "name": "fuzzy-search-nodes [3/5]",
+      "inputs": "find subscriptions for network nodes",
+      "metadata": {
+        "failure_modes": [
+          "fuzzy-search"
+        ],
+        "curation_note": "Plain descriptive request; one fuzzy/semantic search, no filters needed."
+      },
+      "expected_output": null,
+      "output": "I found 4 network node subscriptions. Most are active, but one has been terminated and one is still being set up.",
+      "metrics": {
+        "requests": 4,
+        "input_tokens": 58602,
+        "output_tokens": 232,
+        "cache_read.input_tokens": 57244,
+        "cache_read_input_tokens": 28622,
+        "cache_read_tokens": 28622,
+        "cost": 0.0107604
+      },
+      "attributes": {},
+      "scores": {
+        "TrajectoryMatch": {
+          "name": "TrajectoryMatch",
+          "value": 1.0,
+          "reason": "actual trajectory matches expected: ['search']",
+          "source": {
+            "name": "TrajectoryMatch",
+            "arguments": {
+              "expected_trajectory": [
+                "search"
+              ],
+              "order": "exact"
+            }
+          },
+          "evaluator_version": null
+        }
+      },
+      "labels": {},
+      "assertions": {
+        "ArgumentCorrectness": {
+          "name": "ArgumentCorrectness",
+          "value": true,
+          "reason": null,
+          "source": {
+            "name": "ArgumentCorrectness",
+            "arguments": {
+              "tool_name": "search",
+              "expected_arguments": {
+                "entity_type": "SUBSCRIPTION"
+              }
+            }
+          },
+          "evaluator_version": null
+        },
+        "MaxToolCalls": {
+          "name": "MaxToolCalls",
+          "value": true,
+          "reason": "1 tool call(s), budget=8",
+          "source": {
+            "name": "MaxToolCalls",
+            "arguments": [
+              8
+            ]
+          },
+          "evaluator_version": null
+        }
+      },
+      "task_duration": 4.655037848000575,
+      "total_duration": 4.656277418136597,
+      "source_case_name": "fuzzy-search-nodes",
+      "trace_id": null,
+      "span_id": null,
+      "evaluator_failures": []
+    },
+    {
+      "name": "fuzzy-search-nodes [4/5]",
+      "inputs": "find subscriptions for network nodes",
+      "metadata": {
+        "failure_modes": [
+          "fuzzy-search"
+        ],
+        "curation_note": "Plain descriptive request; one fuzzy/semantic search, no filters needed."
+      },
+      "expected_output": null,
+      "output": "I found 4 network node subscriptions. Most are active, and the others are terminated or still provisioning.",
+      "metrics": {
+        "requests": 4,
+        "input_tokens": 58608,
+        "output_tokens": 230,
+        "cache_creation.input_tokens": 14311,
+        "cache_creation_input_tokens": 14311,
+        "cache_write_tokens": 14311,
+        "cost": 0.07944520000000001,
+        "cache_write.input_tokens": 14311,
+        "cache_read.input_tokens": 28622,
+        "cache_read_input_tokens": 14311,
+        "cache_read_tokens": 14311
+      },
+      "attributes": {},
+      "scores": {
+        "TrajectoryMatch": {
+          "name": "TrajectoryMatch",
+          "value": 1.0,
+          "reason": "actual trajectory matches expected: ['search']",
+          "source": {
+            "name": "TrajectoryMatch",
+            "arguments": {
+              "expected_trajectory": [
+                "search"
+              ],
+              "order": "exact"
+            }
+          },
+          "evaluator_version": null
+        }
+      },
+      "labels": {},
+      "assertions": {
+        "ArgumentCorrectness": {
+          "name": "ArgumentCorrectness",
+          "value": true,
+          "reason": null,
+          "source": {
+            "name": "ArgumentCorrectness",
+            "arguments": {
+              "tool_name": "search",
+              "expected_arguments": {
+                "entity_type": "SUBSCRIPTION"
+              }
+            }
+          },
+          "evaluator_version": null
+        },
+        "MaxToolCalls": {
+          "name": "MaxToolCalls",
+          "value": true,
+          "reason": "1 tool call(s), budget=8",
+          "source": {
+            "name": "MaxToolCalls",
+            "arguments": [
+              8
+            ]
+          },
+          "evaluator_version": null
+        }
+      },
+      "task_duration": 4.197183397000117,
+      "total_duration": 4.197581768035889,
+      "source_case_name": "fuzzy-search-nodes",
+      "trace_id": null,
+      "span_id": null,
+      "evaluator_failures": []
+    },
+    {
+      "name": "fuzzy-search-nodes [5/5]",
+      "inputs": "find subscriptions for network nodes",
+      "metadata": {
+        "failure_modes": [
+          "fuzzy-search"
+        ],
+        "curation_note": "Plain descriptive request; one fuzzy/semantic search, no filters needed."
+      },
+      "expected_output": null,
+      "output": "I found 4 network node subscriptions. Most are active, and one each is terminated or still provisioning.",
+      "metrics": {
+        "requests": 4,
+        "input_tokens": 58602,
+        "output_tokens": 230,
+        "cache_creation.input_tokens": 14311,
+        "cache_creation_input_tokens": 14311,
+        "cache_write_tokens": 14311,
+        "cost": 0.07943320000000001,
+        "cache_write.input_tokens": 14311,
+        "cache_read.input_tokens": 28622,
+        "cache_read_input_tokens": 14311,
+        "cache_read_tokens": 14311
+      },
+      "attributes": {},
+      "scores": {
+        "TrajectoryMatch": {
+          "name": "TrajectoryMatch",
+          "value": 1.0,
+          "reason": "actual trajectory matches expected: ['search']",
+          "source": {
+            "name": "TrajectoryMatch",
+            "arguments": {
+              "expected_trajectory": [
+                "search"
+              ],
+              "order": "exact"
+            }
+          },
+          "evaluator_version": null
+        }
+      },
+      "labels": {},
+      "assertions": {
+        "ArgumentCorrectness": {
+          "name": "ArgumentCorrectness",
+          "value": true,
+          "reason": null,
+          "source": {
+            "name": "ArgumentCorrectness",
+            "arguments": {
+              "tool_name": "search",
+              "expected_arguments": {
+                "entity_type": "SUBSCRIPTION"
+              }
+            }
+          },
+          "evaluator_version": null
+        },
+        "MaxToolCalls": {
+          "name": "MaxToolCalls",
+          "value": true,
+          "reason": "1 tool call(s), budget=8",
+          "source": {
+            "name": "MaxToolCalls",
+            "arguments": [
+              8
+            ]
+          },
+          "evaluator_version": null
+        }
+      },
+      "task_duration": 4.215595874999963,
+      "total_duration": 4.216033935546875,
+      "source_case_name": "fuzzy-search-nodes",
+      "trace_id": null,
+      "span_id": null,
+      "evaluator_failures": []
+    },
+    {
+      "name": "filtered-search-active [1/5]",
+      "inputs": "find all active subscriptions",
+      "metadata": {
+        "failure_modes": [
+          "structured-filters"
+        ],
+        "curation_note": "A concrete dimension (status) must become a structured filter, and filter paths must come from discover_filter_paths, never guessed. in_order tolerates an extra get_valid_operators check at a small precision cost."
+      },
+      "expected_output": null,
+      "output": "I found 3 active subscriptions: two nodes and the core link that connects them.",
+      "metrics": {
+        "requests": 6,
+        "input_tokens": 88180,
+        "output_tokens": 588,
+        "cache_creation.input_tokens": 14311,
+        "cache_creation_input_tokens": 14311,
+        "cache_write_tokens": 14311,
+        "cost": 0.0877874,
+        "cache_write.input_tokens": 14311,
+        "cache_read.input_tokens": 57244,
+        "cache_read_input_tokens": 28622,
+        "cache_read_tokens": 28622
+      },
+      "attributes": {},
+      "scores": {
+        "TrajectoryMatch": {
+          "name": "TrajectoryMatch",
+          "value": 1.0,
+          "reason": "LCS=2, precision=2/2=1.000, recall=2/2=1.000, F1=1.000 (expected: ['discover_filter_paths', 'search'], actual: ['discover_filter_paths', 'search'])",
+          "source": {
+            "name": "TrajectoryMatch",
+            "arguments": [
+              [
+                "discover_filter_paths",
+                "search"
+              ]
+            ]
+          },
+          "evaluator_version": null
+        }
+      },
+      "labels": {},
+      "assertions": {
+        "ArgumentCorrectness": {
+          "name": "ArgumentCorrectness",
+          "value": true,
+          "reason": null,
+          "source": {
+            "name": "ArgumentCorrectness",
+            "arguments": {
+              "tool_name": "discover_filter_paths",
+              "expected_arguments": {
+                "entity_type": "SUBSCRIPTION"
+              }
+            }
+          },
+          "evaluator_version": null
+        },
+        "MaxToolCalls": {
+          "name": "MaxToolCalls",
+          "value": true,
+          "reason": "2 tool call(s), budget=8",
+          "source": {
+            "name": "MaxToolCalls",
+            "arguments": [
+              8
+            ]
+          },
+          "evaluator_version": null
+        }
+      },
+      "task_duration": 6.650972283999181,
+      "total_duration": 6.651623010635376,
+      "source_case_name": "filtered-search-active",
+      "trace_id": null,
+      "span_id": null,
+      "evaluator_failures": []
+    },
+    {
+      "name": "filtered-search-active [2/5]",
+      "inputs": "find all active subscriptions",
+      "metadata": {
+        "failure_modes": [
+          "structured-filters"
+        ],
+        "curation_note": "A concrete dimension (status) must become a structured filter, and filter paths must come from discover_filter_paths, never guessed. in_order tolerates an extra get_valid_operators check at a small precision cost."
+      },
+      "expected_output": null,
+      "output": "I found 3 active subscriptions: two nodes and the core link that connects them.",
+      "metrics": {
+        "requests": 6,
+        "input_tokens": 88252,
+        "output_tokens": 616,
+        "cache_read.input_tokens": 85866,
+        "cache_read_input_tokens": 42933,
+        "thinking_tokens": 13,
+        "cache_read_tokens": 42933,
+        "cost": 0.0195186,
+        "reasoning.output_tokens": 13
+      },
+      "attributes": {},
+      "scores": {
+        "TrajectoryMatch": {
+          "name": "TrajectoryMatch",
+          "value": 1.0,
+          "reason": "LCS=2, precision=2/2=1.000, recall=2/2=1.000, F1=1.000 (expected: ['discover_filter_paths', 'search'], actual: ['discover_filter_paths', 'search'])",
+          "source": {
+            "name": "TrajectoryMatch",
+            "arguments": [
+              [
+                "discover_filter_paths",
+                "search"
+              ]
+            ]
+          },
+          "evaluator_version": null
+        }
+      },
+      "labels": {},
+      "assertions": {
+        "ArgumentCorrectness": {
+          "name": "ArgumentCorrectness",
+          "value": true,
+          "reason": null,
+          "source": {
+            "name": "ArgumentCorrectness",
+            "arguments": {
+              "tool_name": "discover_filter_paths",
+              "expected_arguments": {
+                "entity_type": "SUBSCRIPTION"
+              }
+            }
+          },
+          "evaluator_version": null
+        },
+        "MaxToolCalls": {
+          "name": "MaxToolCalls",
+          "value": true,
+          "reason": "2 tool call(s), budget=8",
+          "source": {
+            "name": "MaxToolCalls",
+            "arguments": [
+              8
+            ]
+          },
+          "evaluator_version": null
+        }
+      },
+      "task_duration": 6.872070924000582,
+      "total_duration": 6.873153209686279,
+      "source_case_name": "filtered-search-active",
+      "trace_id": null,
+      "span_id": null,
+      "evaluator_failures": []
+    },
+    {
+      "name": "filtered-search-active [3/5]",
+      "inputs": "find all active subscriptions",
+      "metadata": {
+        "failure_modes": [
+          "structured-filters"
+        ],
+        "curation_note": "A concrete dimension (status) must become a structured filter, and filter paths must come from discover_filter_paths, never guessed. in_order tolerates an extra get_valid_operators check at a small precision cost."
+      },
+      "expected_output": null,
+      "output": "I found 3 active subscriptions: two nodes and the core link between them. They're listed in the table below.",
+      "metrics": {
+        "requests": 6,
+        "input_tokens": 88136,
+        "output_tokens": 550,
+        "cache_creation.input_tokens": 14311,
+        "cache_creation_input_tokens": 14311,
+        "cache_write_tokens": 14311,
+        "cost": 0.0873194,
+        "cache_write.input_tokens": 14311,
+        "cache_read.input_tokens": 57244,
+        "cache_read_input_tokens": 28622,
+        "cache_read_tokens": 28622
+      },
+      "attributes": {},
+      "scores": {
+        "TrajectoryMatch": {
+          "name": "TrajectoryMatch",
+          "value": 1.0,
+          "reason": "LCS=2, precision=2/2=1.000, recall=2/2=1.000, F1=1.000 (expected: ['discover_filter_paths', 'search'], actual: ['discover_filter_paths', 'search'])",
+          "source": {
+            "name": "TrajectoryMatch",
+            "arguments": [
+              [
+                "discover_filter_paths",
+                "search"
+              ]
+            ]
+          },
+          "evaluator_version": null
+        }
+      },
+      "labels": {},
+      "assertions": {
+        "ArgumentCorrectness": {
+          "name": "ArgumentCorrectness",
+          "value": true,
+          "reason": null,
+          "source": {
+            "name": "ArgumentCorrectness",
+            "arguments": {
+              "tool_name": "discover_filter_paths",
+              "expected_arguments": {
+                "entity_type": "SUBSCRIPTION"
+              }
+            }
+          },
+          "evaluator_version": null
+        },
+        "MaxToolCalls": {
+          "name": "MaxToolCalls",
+          "value": true,
+          "reason": "2 tool call(s), budget=8",
+          "source": {
+            "name": "MaxToolCalls",
+            "arguments": [
+              8
+            ]
+          },
+          "evaluator_version": null
+        }
+      },
+      "task_duration": 6.2497342149999895,
+      "total_duration": 6.250413417816162,
+      "source_case_name": "filtered-search-active",
+      "trace_id": null,
+      "span_id": null,
+      "evaluator_failures": []
+    },
+    {
+      "name": "filtered-search-active [4/5]",
+      "inputs": "find all active subscriptions",
+      "metadata": {
+        "failure_modes": [
+          "structured-filters"
+        ],
+        "curation_note": "A concrete dimension (status) must become a structured filter, and filter paths must come from discover_filter_paths, never guessed. in_order tolerates an extra get_valid_operators check at a small precision cost."
+      },
+      "expected_output": null,
+      "output": "I found 3 active subscriptions: two nodes and the core link between them.",
+      "metrics": {
+        "requests": 6,
+        "input_tokens": 88182,
+        "output_tokens": 584,
+        "cache_read.input_tokens": 85866,
+        "cache_read_input_tokens": 42933,
+        "cache_read_tokens": 42933,
+        "cost": 0.0190586
+      },
+      "attributes": {},
+      "scores": {
+        "TrajectoryMatch": {
+          "name": "TrajectoryMatch",
+          "value": 1.0,
+          "reason": "LCS=2, precision=2/2=1.000, recall=2/2=1.000, F1=1.000 (expected: ['discover_filter_paths', 'search'], actual: ['discover_filter_paths', 'search'])",
+          "source": {
+            "name": "TrajectoryMatch",
+            "arguments": [
+              [
+                "discover_filter_paths",
+                "search"
+              ]
+            ]
+          },
+          "evaluator_version": null
+        }
+      },
+      "labels": {},
+      "assertions": {
+        "ArgumentCorrectness": {
+          "name": "ArgumentCorrectness",
+          "value": true,
+          "reason": null,
+          "source": {
+            "name": "ArgumentCorrectness",
+            "arguments": {
+              "tool_name": "discover_filter_paths",
+              "expected_arguments": {
+                "entity_type": "SUBSCRIPTION"
+              }
+            }
+          },
+          "evaluator_version": null
+        },
+        "MaxToolCalls": {
+          "name": "MaxToolCalls",
+          "value": true,
+          "reason": "2 tool call(s), budget=8",
+          "source": {
+            "name": "MaxToolCalls",
+            "arguments": [
+              8
+            ]
+          },
+          "evaluator_version": null
+        }
+      },
+      "task_duration": 7.538047973000175,
+      "total_duration": 7.54075026512146,
+      "source_case_name": "filtered-search-active",
+      "trace_id": null,
+      "span_id": null,
+      "evaluator_failures": []
+    },
+    {
+      "name": "filtered-search-active [5/5]",
+      "inputs": "find all active subscriptions",
+      "metadata": {
+        "failure_modes": [
+          "structured-filters"
+        ],
+        "curation_note": "A concrete dimension (status) must become a structured filter, and filter paths must come from discover_filter_paths, never guessed. in_order tolerates an extra get_valid_operators check at a small precision cost."
+      },
+      "expected_output": null,
+      "output": "I found 3 active subscriptions: two nodes and the core link that connects them.",
+      "metrics": {
+        "requests": 6,
+        "input_tokens": 88188,
+        "output_tokens": 588,
+        "cache_read.input_tokens": 85866,
+        "cache_read_input_tokens": 42933,
+        "cache_read_tokens": 42933,
+        "cost": 0.0191106
+      },
+      "attributes": {},
+      "scores": {
+        "TrajectoryMatch": {
+          "name": "TrajectoryMatch",
+          "value": 1.0,
+          "reason": "LCS=2, precision=2/2=1.000, recall=2/2=1.000, F1=1.000 (expected: ['discover_filter_paths', 'search'], actual: ['discover_filter_paths', 'search'])",
+          "source": {
+            "name": "TrajectoryMatch",
+            "arguments": [
+              [
+                "discover_filter_paths",
+                "search"
+              ]
+            ]
+          },
+          "evaluator_version": null
+        }
+      },
+      "labels": {},
+      "assertions": {
+        "ArgumentCorrectness": {
+          "name": "ArgumentCorrectness",
+          "value": true,
+          "reason": null,
+          "source": {
+            "name": "ArgumentCorrectness",
+            "arguments": {
+              "tool_name": "discover_filter_paths",
+              "expected_arguments": {
+                "entity_type": "SUBSCRIPTION"
+              }
+            }
+          },
+          "evaluator_version": null
+        },
+        "MaxToolCalls": {
+          "name": "MaxToolCalls",
+          "value": true,
+          "reason": "2 tool call(s), budget=8",
+          "source": {
+            "name": "MaxToolCalls",
+            "arguments": [
+              8
+            ]
+          },
+          "evaluator_version": null
+        }
+      },
+      "task_duration": 7.53975735899985,
+      "total_duration": 7.5414440631866455,
+      "source_case_name": "filtered-search-active",
+      "trace_id": null,
+      "span_id": null,
+      "evaluator_failures": []
+    },
+    {
+      "name": "count-subscriptions [1/5]",
+      "inputs": "how many subscriptions are there in total?",
+      "metadata": {
+        "failure_modes": [
+          "aggregation"
+        ],
+        "curation_note": "A \"how many\" question is one count, not a search whose rows get counted."
+      },
+      "expected_output": null,
+      "output": "There are **5** subscriptions in total.",
+      "metrics": {
+        "requests": 4,
+        "input_tokens": 57930,
+        "output_tokens": 194,
+        "cache_read.input_tokens": 57244,
+        "cache_read_input_tokens": 28622,
+        "cache_read_tokens": 28622,
+        "cost": 0.0090364
+      },
+      "attributes": {},
+      "scores": {
+        "TrajectoryMatch": {
+          "name": "TrajectoryMatch",
+          "value": 1.0,
+          "reason": "actual trajectory matches expected: ['aggregate']",
+          "source": {
+            "name": "TrajectoryMatch",
+            "arguments": {
+              "expected_trajectory": [
+                "aggregate"
+              ],
+              "order": "exact"
+            }
+          },
+          "evaluator_version": null
+        }
+      },
+      "labels": {},
+      "assertions": {
+        "ArgumentCorrectness": {
+          "name": "ArgumentCorrectness",
+          "value": true,
+          "reason": null,
+          "source": {
+            "name": "ArgumentCorrectness",
+            "arguments": {
+              "tool_name": "aggregate",
+              "expected_arguments": {
+                "entity_type": "SUBSCRIPTION"
+              }
+            }
+          },
+          "evaluator_version": null
+        },
+        "MaxToolCalls": {
+          "name": "MaxToolCalls",
+          "value": true,
+          "reason": "1 tool call(s), budget=8",
+          "source": {
+            "name": "MaxToolCalls",
+            "arguments": [
+              8
+            ]
+          },
+          "evaluator_version": null
+        }
+      },
+      "task_duration": 4.48047934799979,
+      "total_duration": 4.481323719024658,
+      "source_case_name": "count-subscriptions",
+      "trace_id": null,
+      "span_id": null,
+      "evaluator_failures": []
+    },
+    {
+      "name": "count-subscriptions [2/5]",
+      "inputs": "how many subscriptions are there in total?",
+      "metadata": {
+        "failure_modes": [
+          "aggregation"
+        ],
+        "curation_note": "A \"how many\" question is one count, not a search whose rows get counted."
+      },
+      "expected_output": null,
+      "output": "You have **5 subscriptions** in total.",
+      "metrics": {
+        "requests": 4,
+        "input_tokens": 57930,
+        "output_tokens": 196,
+        "cache_read.input_tokens": 57244,
+        "cache_read_input_tokens": 28622,
+        "cache_read_tokens": 28622,
+        "cost": 0.0090564
+      },
+      "attributes": {},
+      "scores": {
+        "TrajectoryMatch": {
+          "name": "TrajectoryMatch",
+          "value": 1.0,
+          "reason": "actual trajectory matches expected: ['aggregate']",
+          "source": {
+            "name": "TrajectoryMatch",
+            "arguments": {
+              "expected_trajectory": [
+                "aggregate"
+              ],
+              "order": "exact"
+            }
+          },
+          "evaluator_version": null
+        }
+      },
+      "labels": {},
+      "assertions": {
+        "ArgumentCorrectness": {
+          "name": "ArgumentCorrectness",
+          "value": true,
+          "reason": null,
+          "source": {
+            "name": "ArgumentCorrectness",
+            "arguments": {
+              "tool_name": "aggregate",
+              "expected_arguments": {
+                "entity_type": "SUBSCRIPTION"
+              }
+            }
+          },
+          "evaluator_version": null
+        },
+        "MaxToolCalls": {
+          "name": "MaxToolCalls",
+          "value": true,
+          "reason": "1 tool call(s), budget=8",
+          "source": {
+            "name": "MaxToolCalls",
+            "arguments": [
+              8
+            ]
+          },
+          "evaluator_version": null
+        }
+      },
+      "task_duration": 3.937213303000135,
+      "total_duration": 3.9382429122924805,
+      "source_case_name": "count-subscriptions",
+      "trace_id": null,
+      "span_id": null,
+      "evaluator_failures": []
+    },
+    {
+      "name": "count-subscriptions [3/5]",
+      "inputs": "how many subscriptions are there in total?",
+      "metadata": {
+        "failure_modes": [
+          "aggregation"
+        ],
+        "curation_note": "A \"how many\" question is one count, not a search whose rows get counted."
+      },
+      "expected_output": null,
+      "output": "You have **5 subscriptions** in total.",
+      "metrics": {
+        "requests": 4,
+        "input_tokens": 57922,
+        "output_tokens": 196,
+        "cache_read.input_tokens": 57244,
+        "cache_read_input_tokens": 28622,
+        "cache_read_tokens": 28622,
+        "cost": 0.0090404
+      },
+      "attributes": {},
+      "scores": {
+        "TrajectoryMatch": {
+          "name": "TrajectoryMatch",
+          "value": 1.0,
+          "reason": "actual trajectory matches expected: ['aggregate']",
+          "source": {
+            "name": "TrajectoryMatch",
+            "arguments": {
+              "expected_trajectory": [
+                "aggregate"
+              ],
+              "order": "exact"
+            }
+          },
+          "evaluator_version": null
+        }
+      },
+      "labels": {},
+      "assertions": {
+        "ArgumentCorrectness": {
+          "name": "ArgumentCorrectness",
+          "value": true,
+          "reason": null,
+          "source": {
+            "name": "ArgumentCorrectness",
+            "arguments": {
+              "tool_name": "aggregate",
+              "expected_arguments": {
+                "entity_type": "SUBSCRIPTION"
+              }
+            }
+          },
+          "evaluator_version": null
+        },
+        "MaxToolCalls": {
+          "name": "MaxToolCalls",
+          "value": true,
+          "reason": "1 tool call(s), budget=8",
+          "source": {
+            "name": "MaxToolCalls",
+            "arguments": [
+              8
+            ]
+          },
+          "evaluator_version": null
+        }
+      },
+      "task_duration": 3.639615961000345,
+      "total_duration": 3.6410107612609863,
+      "source_case_name": "count-subscriptions",
+      "trace_id": null,
+      "span_id": null,
+      "evaluator_failures": []
+    },
+    {
+      "name": "count-subscriptions [4/5]",
+      "inputs": "how many subscriptions are there in total?",
+      "metadata": {
+        "failure_modes": [
+          "aggregation"
+        ],
+        "curation_note": "A \"how many\" question is one count, not a search whose rows get counted."
+      },
+      "expected_output": null,
+      "output": "There are **5 subscriptions** in total.",
+      "metrics": {
+        "requests": 4,
+        "input_tokens": 57922,
+        "output_tokens": 196,
+        "cache_read.input_tokens": 57244,
+        "cache_read_input_tokens": 28622,
+        "cache_read_tokens": 28622,
+        "cost": 0.0090404
+      },
+      "attributes": {},
+      "scores": {
+        "TrajectoryMatch": {
+          "name": "TrajectoryMatch",
+          "value": 1.0,
+          "reason": "actual trajectory matches expected: ['aggregate']",
+          "source": {
+            "name": "TrajectoryMatch",
+            "arguments": {
+              "expected_trajectory": [
+                "aggregate"
+              ],
+              "order": "exact"
+            }
+          },
+          "evaluator_version": null
+        }
+      },
+      "labels": {},
+      "assertions": {
+        "ArgumentCorrectness": {
+          "name": "ArgumentCorrectness",
+          "value": true,
+          "reason": null,
+          "source": {
+            "name": "ArgumentCorrectness",
+            "arguments": {
+              "tool_name": "aggregate",
+              "expected_arguments": {
+                "entity_type": "SUBSCRIPTION"
+              }
+            }
+          },
+          "evaluator_version": null
+        },
+        "MaxToolCalls": {
+          "name": "MaxToolCalls",
+          "value": true,
+          "reason": "1 tool call(s), budget=8",
+          "source": {
+            "name": "MaxToolCalls",
+            "arguments": [
+              8
+            ]
+          },
+          "evaluator_version": null
+        }
+      },
+      "task_duration": 5.4872247390003395,
+      "total_duration": 5.4885594844818115,
+      "source_case_name": "count-subscriptions",
+      "trace_id": null,
+      "span_id": null,
+      "evaluator_failures": []
+    },
+    {
+      "name": "count-subscriptions [5/5]",
+      "inputs": "how many subscriptions are there in total?",
+      "metadata": {
+        "failure_modes": [
+          "aggregation"
+        ],
+        "curation_note": "A \"how many\" question is one count, not a search whose rows get counted."
+      },
+      "expected_output": null,
+      "output": "There are **5** subscriptions in total.",
+      "metrics": {
+        "requests": 4,
+        "input_tokens": 57922,
+        "output_tokens": 194,
+        "cache_read.input_tokens": 57244,
+        "cache_read_input_tokens": 28622,
+        "cache_read_tokens": 28622,
+        "cost": 0.009020400000000001
+      },
+      "attributes": {},
+      "scores": {
+        "TrajectoryMatch": {
+          "name": "TrajectoryMatch",
+          "value": 1.0,
+          "reason": "actual trajectory matches expected: ['aggregate']",
+          "source": {
+            "name": "TrajectoryMatch",
+            "arguments": {
+              "expected_trajectory": [
+                "aggregate"
+              ],
+              "order": "exact"
+            }
+          },
+          "evaluator_version": null
+        }
+      },
+      "labels": {},
+      "assertions": {
+        "ArgumentCorrectness": {
+          "name": "ArgumentCorrectness",
+          "value": true,
+          "reason": null,
+          "source": {
+            "name": "ArgumentCorrectness",
+            "arguments": {
+              "tool_name": "aggregate",
+              "expected_arguments": {
+                "entity_type": "SUBSCRIPTION"
+              }
+            }
+          },
+          "evaluator_version": null
+        },
+        "MaxToolCalls": {
+          "name": "MaxToolCalls",
+          "value": true,
+          "reason": "1 tool call(s), budget=8",
+          "source": {
+            "name": "MaxToolCalls",
+            "arguments": [
+              8
+            ]
+          },
+          "evaluator_version": null
+        }
+      },
+      "task_duration": 6.241771723000056,
+      "total_duration": 6.2423670291900635,
+      "source_case_name": "count-subscriptions",
+      "trace_id": null,
+      "span_id": null,
+      "evaluator_failures": []
+    },
+    {
+      "name": "count-by-status [1/5]",
+      "inputs": "how many subscriptions are there per status?",
+      "metadata": {
+        "failure_modes": [
+          "aggregation",
+          "structured-filters"
+        ],
+        "curation_note": "Grouped count; group_by paths need discovery just like filters."
+      },
+      "expected_output": null,
+      "output": "Most subscriptions are active, and a few are in provisioning or terminated status.",
+      "metrics": {
+        "requests": 6,
+        "input_tokens": 87848,
+        "output_tokens": 554,
+        "cache_read.input_tokens": 85866,
+        "cache_read_input_tokens": 42933,
+        "cache_read_tokens": 42933,
+        "cost": 0.0180906,
+        "thinking_tokens": 22,
+        "reasoning.output_tokens": 22
+      },
+      "attributes": {},
+      "scores": {
+        "TrajectoryMatch": {
+          "name": "TrajectoryMatch",
+          "value": 1.0,
+          "reason": "LCS=2, precision=2/2=1.000, recall=2/2=1.000, F1=1.000 (expected: ['discover_filter_paths', 'aggregate'], actual: ['discover_filter_paths', 'aggregate'])",
+          "source": {
+            "name": "TrajectoryMatch",
+            "arguments": [
+              [
+                "discover_filter_paths",
+                "aggregate"
+              ]
+            ]
+          },
+          "evaluator_version": null
+        }
+      },
+      "labels": {},
+      "assertions": {
+        "ArgumentCorrectness": {
+          "name": "ArgumentCorrectness",
+          "value": true,
+          "reason": null,
+          "source": {
+            "name": "ArgumentCorrectness",
+            "arguments": {
+              "tool_name": "aggregate",
+              "expected_arguments": {
+                "entity_type": "SUBSCRIPTION"
+              }
+            }
+          },
+          "evaluator_version": null
+        },
+        "MaxToolCalls": {
+          "name": "MaxToolCalls",
+          "value": true,
+          "reason": "2 tool call(s), budget=8",
+          "source": {
+            "name": "MaxToolCalls",
+            "arguments": [
+              8
+            ]
+          },
+          "evaluator_version": null
+        }
+      },
+      "task_duration": 8.786276959999668,
+      "total_duration": 8.787069082260132,
+      "source_case_name": "count-by-status",
+      "trace_id": null,
+      "span_id": null,
+      "evaluator_failures": []
+    },
+    {
+      "name": "count-by-status [2/5]",
+      "inputs": "how many subscriptions are there per status?",
+      "metadata": {
+        "failure_modes": [
+          "aggregation",
+          "structured-filters"
+        ],
+        "curation_note": "Grouped count; group_by paths need discovery just like filters."
+      },
+      "expected_output": null,
+      "output": "Subscriptions fall into three statuses, and most of them are active.",
+      "metrics": {
+        "requests": 6,
+        "input_tokens": 87850,
+        "output_tokens": 560,
+        "cache_read.input_tokens": 85866,
+        "cache_read_input_tokens": 42933,
+        "cache_read_tokens": 42933,
+        "cost": 0.0181546,
+        "thinking_tokens": 29,
+        "reasoning.output_tokens": 29
+      },
+      "attributes": {},
+      "scores": {
+        "TrajectoryMatch": {
+          "name": "TrajectoryMatch",
+          "value": 1.0,
+          "reason": "LCS=2, precision=2/2=1.000, recall=2/2=1.000, F1=1.000 (expected: ['discover_filter_paths', 'aggregate'], actual: ['discover_filter_paths', 'aggregate'])",
+          "source": {
+            "name": "TrajectoryMatch",
+            "arguments": [
+              [
+                "discover_filter_paths",
+                "aggregate"
+              ]
+            ]
+          },
+          "evaluator_version": null
+        }
+      },
+      "labels": {},
+      "assertions": {
+        "ArgumentCorrectness": {
+          "name": "ArgumentCorrectness",
+          "value": true,
+          "reason": null,
+          "source": {
+            "name": "ArgumentCorrectness",
+            "arguments": {
+              "tool_name": "aggregate",
+              "expected_arguments": {
+                "entity_type": "SUBSCRIPTION"
+              }
+            }
+          },
+          "evaluator_version": null
+        },
+        "MaxToolCalls": {
+          "name": "MaxToolCalls",
+          "value": true,
+          "reason": "2 tool call(s), budget=8",
+          "source": {
+            "name": "MaxToolCalls",
+            "arguments": [
+              8
+            ]
+          },
+          "evaluator_version": null
+        }
+      },
+      "task_duration": 7.171634862000246,
+      "total_duration": 7.172528982162476,
+      "source_case_name": "count-by-status",
+      "trace_id": null,
+      "span_id": null,
+      "evaluator_failures": []
+    },
+    {
+      "name": "count-by-status [3/5]",
+      "inputs": "how many subscriptions are there per status?",
+      "metadata": {
+        "failure_modes": [
+          "aggregation",
+          "structured-filters"
+        ],
+        "curation_note": "Grouped count; group_by paths need discovery just like filters."
+      },
+      "expected_output": null,
+      "output": "Most subscriptions are active, and a few are in provisioning or terminated, as the chart shows.",
+      "metrics": {
+        "requests": 6,
+        "input_tokens": 87856,
+        "output_tokens": 590,
+        "cache_read.input_tokens": 85866,
+        "cache_read_input_tokens": 42933,
+        "cache_read_tokens": 42933,
+        "cost": 0.0184666,
+        "thinking_tokens": 34,
+        "reasoning.output_tokens": 34
+      },
+      "attributes": {},
+      "scores": {
+        "TrajectoryMatch": {
+          "name": "TrajectoryMatch",
+          "value": 1.0,
+          "reason": "LCS=2, precision=2/2=1.000, recall=2/2=1.000, F1=1.000 (expected: ['discover_filter_paths', 'aggregate'], actual: ['discover_filter_paths', 'aggregate'])",
+          "source": {
+            "name": "TrajectoryMatch",
+            "arguments": [
+              [
+                "discover_filter_paths",
+                "aggregate"
+              ]
+            ]
+          },
+          "evaluator_version": null
+        }
+      },
+      "labels": {},
+      "assertions": {
+        "ArgumentCorrectness": {
+          "name": "ArgumentCorrectness",
+          "value": true,
+          "reason": null,
+          "source": {
+            "name": "ArgumentCorrectness",
+            "arguments": {
+              "tool_name": "aggregate",
+              "expected_arguments": {
+                "entity_type": "SUBSCRIPTION"
+              }
+            }
+          },
+          "evaluator_version": null
+        },
+        "MaxToolCalls": {
+          "name": "MaxToolCalls",
+          "value": true,
+          "reason": "2 tool call(s), budget=8",
+          "source": {
+            "name": "MaxToolCalls",
+            "arguments": [
+              8
+            ]
+          },
+          "evaluator_version": null
+        }
+      },
+      "task_duration": 7.735680560999754,
+      "total_duration": 7.73720121383667,
+      "source_case_name": "count-by-status",
+      "trace_id": null,
+      "span_id": null,
+      "evaluator_failures": []
+    },
+    {
+      "name": "count-by-status [4/5]",
+      "inputs": "how many subscriptions are there per status?",
+      "metadata": {
+        "failure_modes": [
+          "aggregation",
+          "structured-filters"
+        ],
+        "curation_note": "Grouped count; group_by paths need discovery just like filters."
+      },
+      "expected_output": null,
+      "output": "Most subscriptions are active; the rest are split between provisioning and terminated.",
+      "metrics": {
+        "requests": 6,
+        "input_tokens": 87850,
+        "output_tokens": 568,
+        "cache_read.input_tokens": 85866,
+        "cache_read_input_tokens": 42933,
+        "cache_read_tokens": 42933,
+        "cost": 0.0182346,
+        "thinking_tokens": 29,
+        "reasoning.output_tokens": 29
+      },
+      "attributes": {},
+      "scores": {
+        "TrajectoryMatch": {
+          "name": "TrajectoryMatch",
+          "value": 1.0,
+          "reason": "LCS=2, precision=2/2=1.000, recall=2/2=1.000, F1=1.000 (expected: ['discover_filter_paths', 'aggregate'], actual: ['discover_filter_paths', 'aggregate'])",
+          "source": {
+            "name": "TrajectoryMatch",
+            "arguments": [
+              [
+                "discover_filter_paths",
+                "aggregate"
+              ]
+            ]
+          },
+          "evaluator_version": null
+        }
+      },
+      "labels": {},
+      "assertions": {
+        "ArgumentCorrectness": {
+          "name": "ArgumentCorrectness",
+          "value": true,
+          "reason": null,
+          "source": {
+            "name": "ArgumentCorrectness",
+            "arguments": {
+              "tool_name": "aggregate",
+              "expected_arguments": {
+                "entity_type": "SUBSCRIPTION"
+              }
+            }
+          },
+          "evaluator_version": null
+        },
+        "MaxToolCalls": {
+          "name": "MaxToolCalls",
+          "value": true,
+          "reason": "2 tool call(s), budget=8",
+          "source": {
+            "name": "MaxToolCalls",
+            "arguments": [
+              8
+            ]
+          },
+          "evaluator_version": null
+        }
+      },
+      "task_duration": 7.072824204000426,
+      "total_duration": 7.0735695362091064,
+      "source_case_name": "count-by-status",
+      "trace_id": null,
+      "span_id": null,
+      "evaluator_failures": []
+    },
+    {
+      "name": "count-by-status [5/5]",
+      "inputs": "how many subscriptions are there per status?",
+      "metadata": {
+        "failure_modes": [
+          "aggregation",
+          "structured-filters"
+        ],
+        "curation_note": "Grouped count; group_by paths need discovery just like filters."
+      },
+      "expected_output": null,
+      "output": "Active is the largest of the three subscription statuses, with provisioning and terminated well behind.",
+      "metrics": {
+        "requests": 6,
+        "input_tokens": 87844,
+        "output_tokens": 566,
+        "cache_read.input_tokens": 85866,
+        "cache_read_input_tokens": 42933,
+        "cache_read_tokens": 42933,
+        "cost": 0.0182026,
+        "thinking_tokens": 24,
+        "reasoning.output_tokens": 24
+      },
+      "attributes": {},
+      "scores": {
+        "TrajectoryMatch": {
+          "name": "TrajectoryMatch",
+          "value": 1.0,
+          "reason": "LCS=2, precision=2/2=1.000, recall=2/2=1.000, F1=1.000 (expected: ['discover_filter_paths', 'aggregate'], actual: ['discover_filter_paths', 'aggregate'])",
+          "source": {
+            "name": "TrajectoryMatch",
+            "arguments": [
+              [
+                "discover_filter_paths",
+                "aggregate"
+              ]
+            ]
+          },
+          "evaluator_version": null
+        }
+      },
+      "labels": {},
+      "assertions": {
+        "ArgumentCorrectness": {
+          "name": "ArgumentCorrectness",
+          "value": true,
+          "reason": null,
+          "source": {
+            "name": "ArgumentCorrectness",
+            "arguments": {
+              "tool_name": "aggregate",
+              "expected_arguments": {
+                "entity_type": "SUBSCRIPTION"
+              }
+            }
+          },
+          "evaluator_version": null
+        },
+        "MaxToolCalls": {
+          "name": "MaxToolCalls",
+          "value": true,
+          "reason": "2 tool call(s), budget=8",
+          "source": {
+            "name": "MaxToolCalls",
+            "arguments": [
+              8
+            ]
+          },
+          "evaluator_version": null
+        }
+      },
+      "task_duration": 6.611164508000002,
+      "total_duration": 6.612112045288086,
+      "source_case_name": "count-by-status",
+      "trace_id": null,
+      "span_id": null,
+      "evaluator_failures": []
+    },
+    {
+      "name": "filtered-count-active [1/5]",
+      "inputs": "show me how many active subscriptions there are",
+      "metadata": {
+        "failure_modes": [
+          "aggregation",
+          "structured-filters"
+        ],
+        "curation_note": "\"Show me\" with a quantity as its object is a count, not a search: the request is for a number about the subscriptions, not for the subscriptions themselves. The status is a structured filter, so its path is discovered first."
+      },
+      "expected_output": null,
+      "output": "There are **3** active subscriptions.",
+      "metrics": {
+        "requests": 6,
+        "input_tokens": 87622,
+        "output_tokens": 516,
+        "cache_read.input_tokens": 85866,
+        "cache_read_input_tokens": 42933,
+        "cache_read_tokens": 42933,
+        "cost": 0.0172586
+      },
+      "attributes": {},
+      "scores": {
+        "TrajectoryMatch": {
+          "name": "TrajectoryMatch",
+          "value": 1.0,
+          "reason": "LCS=2, precision=2/2=1.000, recall=2/2=1.000, F1=1.000 (expected: ['discover_filter_paths', 'aggregate'], actual: ['discover_filter_paths', 'aggregate'])",
+          "source": {
+            "name": "TrajectoryMatch",
+            "arguments": [
+              [
+                "discover_filter_paths",
+                "aggregate"
+              ]
+            ]
+          },
+          "evaluator_version": null
+        }
+      },
+      "labels": {},
+      "assertions": {
+        "ArgumentCorrectness": {
+          "name": "ArgumentCorrectness",
+          "value": true,
+          "reason": null,
+          "source": {
+            "name": "ArgumentCorrectness",
+            "arguments": {
+              "tool_name": "aggregate",
+              "expected_arguments": {
+                "entity_type": "SUBSCRIPTION",
+                "operation": "count"
+              }
+            }
+          },
+          "evaluator_version": null
+        },
+        "MaxToolCalls": {
+          "name": "MaxToolCalls",
+          "value": true,
+          "reason": "2 tool call(s), budget=8",
+          "source": {
+            "name": "MaxToolCalls",
+            "arguments": [
+              8
+            ]
+          },
+          "evaluator_version": null
+        }
+      },
+      "task_duration": 5.922915135999574,
+      "total_duration": 5.923645973205566,
+      "source_case_name": "filtered-count-active",
+      "trace_id": null,
+      "span_id": null,
+      "evaluator_failures": []
+    },
+    {
+      "name": "filtered-count-active [2/5]",
+      "inputs": "show me how many active subscriptions there are",
+      "metadata": {
+        "failure_modes": [
+          "aggregation",
+          "structured-filters"
+        ],
+        "curation_note": "\"Show me\" with a quantity as its object is a count, not a search: the request is for a number about the subscriptions, not for the subscriptions themselves. The status is a structured filter, so its path is discovered first."
+      },
+      "expected_output": null,
+      "output": "There are **3** active subscriptions.",
+      "metrics": {
+        "requests": 6,
+        "input_tokens": 87612,
+        "output_tokens": 516,
+        "cache_read.input_tokens": 85866,
+        "cache_read_input_tokens": 42933,
+        "cache_read_tokens": 42933,
+        "cost": 0.0172386
+      },
+      "attributes": {},
+      "scores": {
+        "TrajectoryMatch": {
+          "name": "TrajectoryMatch",
+          "value": 1.0,
+          "reason": "LCS=2, precision=2/2=1.000, recall=2/2=1.000, F1=1.000 (expected: ['discover_filter_paths', 'aggregate'], actual: ['discover_filter_paths', 'aggregate'])",
+          "source": {
+            "name": "TrajectoryMatch",
+            "arguments": [
+              [
+                "discover_filter_paths",
+                "aggregate"
+              ]
+            ]
+          },
+          "evaluator_version": null
+        }
+      },
+      "labels": {},
+      "assertions": {
+        "ArgumentCorrectness": {
+          "name": "ArgumentCorrectness",
+          "value": true,
+          "reason": null,
+          "source": {
+            "name": "ArgumentCorrectness",
+            "arguments": {
+              "tool_name": "aggregate",
+              "expected_arguments": {
+                "entity_type": "SUBSCRIPTION",
+                "operation": "count"
+              }
+            }
+          },
+          "evaluator_version": null
+        },
+        "MaxToolCalls": {
+          "name": "MaxToolCalls",
+          "value": true,
+          "reason": "2 tool call(s), budget=8",
+          "source": {
+            "name": "MaxToolCalls",
+            "arguments": [
+              8
+            ]
+          },
+          "evaluator_version": null
+        }
+      },
+      "task_duration": 6.0250217049997445,
+      "total_duration": 6.026546955108643,
+      "source_case_name": "filtered-count-active",
+      "trace_id": null,
+      "span_id": null,
+      "evaluator_failures": []
+    },
+    {
+      "name": "filtered-count-active [3/5]",
+      "inputs": "show me how many active subscriptions there are",
+      "metadata": {
+        "failure_modes": [
+          "aggregation",
+          "structured-filters"
+        ],
+        "curation_note": "\"Show me\" with a quantity as its object is a count, not a search: the request is for a number about the subscriptions, not for the subscriptions themselves. The status is a structured filter, so its path is discovered first."
+      },
+      "expected_output": null,
+      "output": "You have **3** active subscriptions.",
+      "metrics": {
+        "requests": 6,
+        "input_tokens": 87608,
+        "output_tokens": 516,
+        "cache_read.input_tokens": 85866,
+        "cache_read_input_tokens": 42933,
+        "cache_read_tokens": 42933,
+        "cost": 0.0172306
+      },
+      "attributes": {},
+      "scores": {
+        "TrajectoryMatch": {
+          "name": "TrajectoryMatch",
+          "value": 1.0,
+          "reason": "LCS=2, precision=2/2=1.000, recall=2/2=1.000, F1=1.000 (expected: ['discover_filter_paths', 'aggregate'], actual: ['discover_filter_paths', 'aggregate'])",
+          "source": {
+            "name": "TrajectoryMatch",
+            "arguments": [
+              [
+                "discover_filter_paths",
+                "aggregate"
+              ]
+            ]
+          },
+          "evaluator_version": null
+        }
+      },
+      "labels": {},
+      "assertions": {
+        "ArgumentCorrectness": {
+          "name": "ArgumentCorrectness",
+          "value": true,
+          "reason": null,
+          "source": {
+            "name": "ArgumentCorrectness",
+            "arguments": {
+              "tool_name": "aggregate",
+              "expected_arguments": {
+                "entity_type": "SUBSCRIPTION",
+                "operation": "count"
+              }
+            }
+          },
+          "evaluator_version": null
+        },
+        "MaxToolCalls": {
+          "name": "MaxToolCalls",
+          "value": true,
+          "reason": "2 tool call(s), budget=8",
+          "source": {
+            "name": "MaxToolCalls",
+            "arguments": [
+              8
+            ]
+          },
+          "evaluator_version": null
+        }
+      },
+      "task_duration": 6.196720889999597,
+      "total_duration": 6.197621583938599,
+      "source_case_name": "filtered-count-active",
+      "trace_id": null,
+      "span_id": null,
+      "evaluator_failures": []
+    },
+    {
+      "name": "filtered-count-active [4/5]",
+      "inputs": "show me how many active subscriptions there are",
+      "metadata": {
+        "failure_modes": [
+          "aggregation",
+          "structured-filters"
+        ],
+        "curation_note": "\"Show me\" with a quantity as its object is a count, not a search: the request is for a number about the subscriptions, not for the subscriptions themselves. The status is a structured filter, so its path is discovered first."
+      },
+      "expected_output": null,
+      "output": "You have **3** active subscriptions.",
+      "metrics": {
+        "requests": 6,
+        "input_tokens": 87612,
+        "output_tokens": 516,
+        "cache_read.input_tokens": 85866,
+        "cache_read_input_tokens": 42933,
+        "cache_read_tokens": 42933,
+        "cost": 0.0172386
+      },
+      "attributes": {},
+      "scores": {
+        "TrajectoryMatch": {
+          "name": "TrajectoryMatch",
+          "value": 1.0,
+          "reason": "LCS=2, precision=2/2=1.000, recall=2/2=1.000, F1=1.000 (expected: ['discover_filter_paths', 'aggregate'], actual: ['discover_filter_paths', 'aggregate'])",
+          "source": {
+            "name": "TrajectoryMatch",
+            "arguments": [
+              [
+                "discover_filter_paths",
+                "aggregate"
+              ]
+            ]
+          },
+          "evaluator_version": null
+        }
+      },
+      "labels": {},
+      "assertions": {
+        "ArgumentCorrectness": {
+          "name": "ArgumentCorrectness",
+          "value": true,
+          "reason": null,
+          "source": {
+            "name": "ArgumentCorrectness",
+            "arguments": {
+              "tool_name": "aggregate",
+              "expected_arguments": {
+                "entity_type": "SUBSCRIPTION",
+                "operation": "count"
+              }
+            }
+          },
+          "evaluator_version": null
+        },
+        "MaxToolCalls": {
+          "name": "MaxToolCalls",
+          "value": true,
+          "reason": "2 tool call(s), budget=8",
+          "source": {
+            "name": "MaxToolCalls",
+            "arguments": [
+              8
+            ]
+          },
+          "evaluator_version": null
+        }
+      },
+      "task_duration": 6.041146083000058,
+      "total_duration": 6.041624069213867,
+      "source_case_name": "filtered-count-active",
+      "trace_id": null,
+      "span_id": null,
+      "evaluator_failures": []
+    },
+    {
+      "name": "filtered-count-active [5/5]",
+      "inputs": "show me how many active subscriptions there are",
+      "metadata": {
+        "failure_modes": [
+          "aggregation",
+          "structured-filters"
+        ],
+        "curation_note": "\"Show me\" with a quantity as its object is a count, not a search: the request is for a number about the subscriptions, not for the subscriptions themselves. The status is a structured filter, so its path is discovered first."
+      },
+      "expected_output": null,
+      "output": "There are **3** active subscriptions.",
+      "metrics": {
+        "requests": 6,
+        "input_tokens": 87614,
+        "output_tokens": 516,
+        "cache_read.input_tokens": 85866,
+        "cache_read_input_tokens": 42933,
+        "cache_read_tokens": 42933,
+        "cost": 0.0172426
+      },
+      "attributes": {},
+      "scores": {
+        "TrajectoryMatch": {
+          "name": "TrajectoryMatch",
+          "value": 1.0,
+          "reason": "LCS=2, precision=2/2=1.000, recall=2/2=1.000, F1=1.000 (expected: ['discover_filter_paths', 'aggregate'], actual: ['discover_filter_paths', 'aggregate'])",
+          "source": {
+            "name": "TrajectoryMatch",
+            "arguments": [
+              [
+                "discover_filter_paths",
+                "aggregate"
+              ]
+            ]
+          },
+          "evaluator_version": null
+        }
+      },
+      "labels": {},
+      "assertions": {
+        "ArgumentCorrectness": {
+          "name": "ArgumentCorrectness",
+          "value": true,
+          "reason": null,
+          "source": {
+            "name": "ArgumentCorrectness",
+            "arguments": {
+              "tool_name": "aggregate",
+              "expected_arguments": {
+                "entity_type": "SUBSCRIPTION",
+                "operation": "count"
+              }
+            }
+          },
+          "evaluator_version": null
+        },
+        "MaxToolCalls": {
+          "name": "MaxToolCalls",
+          "value": true,
+          "reason": "2 tool call(s), budget=8",
+          "source": {
+            "name": "MaxToolCalls",
+            "arguments": [
+              8
+            ]
+          },
+          "evaluator_version": null
+        }
+      },
+      "task_duration": 5.527896577999854,
+      "total_duration": 5.529416799545288,
+      "source_case_name": "filtered-count-active",
+      "trace_id": null,
+      "span_id": null,
+      "evaluator_failures": []
+    },
+    {
+      "name": "resolve-by-prefix [1/5]",
+      "inputs": "show details for subscription aa1b2c3d",
+      "metadata": {
+        "failure_modes": [
+          "entity-lookup"
+        ],
+        "curation_note": "An id-prefix reference goes straight to resolve_entity, not search."
+      },
+      "expected_output": null,
+      "output": "The prefix `aa1b2c3d` matches 5 subscriptions. Which one do you want to see?\n\n1. `aa1b2c3d-…0001`: node asd001 (active)\n2. `aa1b2c3d-…0002`: node ams002 (active)\n3. `aa1b2c3d-…0003`: core link 10G asd001 <-> ams002\n4. `aa1b2c3d-…0004`: node rtd003 (terminated)\n5. `aa1b2c3d-…0005`: node utr004 (provisioning)\n\nYou can answer with the number or the full ID.",
+      "metrics": {
+        "requests": 4,
+        "input_tokens": 58464,
+        "output_tokens": 578,
+        "cache_read.input_tokens": 57244,
+        "cache_read_input_tokens": 28622,
+        "cache_read_tokens": 28622,
+        "cost": 0.0139444
+      },
+      "attributes": {},
+      "scores": {
+        "TrajectoryMatch": {
+          "name": "TrajectoryMatch",
+          "value": 1.0,
+          "reason": "actual trajectory matches expected: ['resolve_entity']",
+          "source": {
+            "name": "TrajectoryMatch",
+            "arguments": {
+              "expected_trajectory": [
+                "resolve_entity"
+              ],
+              "order": "exact"
+            }
+          },
+          "evaluator_version": null
+        }
+      },
+      "labels": {},
+      "assertions": {
+        "ArgumentCorrectness": {
+          "name": "ArgumentCorrectness",
+          "value": true,
+          "reason": null,
+          "source": {
+            "name": "ArgumentCorrectness",
+            "arguments": {
+              "tool_name": "resolve_entity",
+              "expected_arguments": {
+                "entity_type": "SUBSCRIPTION",
+                "id_or_prefix": "aa1b2c3d"
+              }
+            }
+          },
+          "evaluator_version": null
+        },
+        "MaxToolCalls": {
+          "name": "MaxToolCalls",
+          "value": true,
+          "reason": "1 tool call(s), budget=8",
+          "source": {
+            "name": "MaxToolCalls",
+            "arguments": [
+              8
+            ]
+          },
+          "evaluator_version": null
+        }
+      },
+      "task_duration": 4.1240050659998815,
+      "total_duration": 4.1244120597839355,
+      "source_case_name": "resolve-by-prefix",
+      "trace_id": null,
+      "span_id": null,
+      "evaluator_failures": []
+    },
+    {
+      "name": "resolve-by-prefix [2/5]",
+      "inputs": "show details for subscription aa1b2c3d",
+      "metadata": {
+        "failure_modes": [
+          "entity-lookup"
+        ],
+        "curation_note": "An id-prefix reference goes straight to resolve_entity, not search."
+      },
+      "expected_output": null,
+      "output": "The prefix `aa1b2c3d` matches 5 subscriptions. Which one do you want to see?\n\n1. `aa1b2c3d-0000-4000-8000-000000000001`: node asd001 (active)\n2. `aa1b2c3d-0000-4000-8000-000000000002`: node ams002 (active)\n3. `aa1b2c3d-0000-4000-8000-000000000003`: core link 10G asd001 <-> ams002\n4. `aa1b2c3d-0000-4000-8000-000000000004`: node rtd003 (terminated)\n5. `aa1b2c3d-0000-4000-8000-000000000005`: node utr004 (provisioning)\n\nYou can reply with the number, the full ID or the node name.",
+      "metrics": {
+        "requests": 4,
+        "input_tokens": 58464,
+        "output_tokens": 686,
+        "cache_read.input_tokens": 57244,
+        "cache_read_input_tokens": 28622,
+        "cache_read_tokens": 28622,
+        "cost": 0.0150244
+      },
+      "attributes": {},
+      "scores": {
+        "TrajectoryMatch": {
+          "name": "TrajectoryMatch",
+          "value": 1.0,
+          "reason": "actual trajectory matches expected: ['resolve_entity']",
+          "source": {
+            "name": "TrajectoryMatch",
+            "arguments": {
+              "expected_trajectory": [
+                "resolve_entity"
+              ],
+              "order": "exact"
+            }
+          },
+          "evaluator_version": null
+        }
+      },
+      "labels": {},
+      "assertions": {
+        "ArgumentCorrectness": {
+          "name": "ArgumentCorrectness",
+          "value": true,
+          "reason": null,
+          "source": {
+            "name": "ArgumentCorrectness",
+            "arguments": {
+              "tool_name": "resolve_entity",
+              "expected_arguments": {
+                "entity_type": "SUBSCRIPTION",
+                "id_or_prefix": "aa1b2c3d"
+              }
+            }
+          },
+          "evaluator_version": null
+        },
+        "MaxToolCalls": {
+          "name": "MaxToolCalls",
+          "value": true,
+          "reason": "1 tool call(s), budget=8",
+          "source": {
+            "name": "MaxToolCalls",
+            "arguments": [
+              8
+            ]
+          },
+          "evaluator_version": null
+        }
+      },
+      "task_duration": 4.9701447929992355,
+      "total_duration": 4.971086740493774,
+      "source_case_name": "resolve-by-prefix",
+      "trace_id": null,
+      "span_id": null,
+      "evaluator_failures": []
+    },
+    {
+      "name": "resolve-by-prefix [3/5]",
+      "inputs": "show details for subscription aa1b2c3d",
+      "metadata": {
+        "failure_modes": [
+          "entity-lookup"
+        ],
+        "curation_note": "An id-prefix reference goes straight to resolve_entity, not search."
+      },
+      "expected_output": null,
+      "output": "The prefix `aa1b2c3d` matches 5 subscriptions. Which one do you want to see?\n\n1. `aa1b2c3d-…0001`: node asd001 (active)\n2. `aa1b2c3d-…0002`: node ams002 (active)\n3. `aa1b2c3d-…0003`: core link 10G asd001 <-> ams002\n4. `aa1b2c3d-…0004`: node rtd003 (terminated)\n5. `aa1b2c3d-…0005`: node utr004 (provisioning)\n\nYou can reply with the number, the full ID or the name.",
+      "metrics": {
+        "requests": 4,
+        "input_tokens": 58464,
+        "output_tokens": 584,
+        "cache_read.input_tokens": 57244,
+        "cache_read_input_tokens": 28622,
+        "cache_read_tokens": 28622,
+        "cost": 0.0140044
+      },
+      "attributes": {},
+      "scores": {
+        "TrajectoryMatch": {
+          "name": "TrajectoryMatch",
+          "value": 1.0,
+          "reason": "actual trajectory matches expected: ['resolve_entity']",
+          "source": {
+            "name": "TrajectoryMatch",
+            "arguments": {
+              "expected_trajectory": [
+                "resolve_entity"
+              ],
+              "order": "exact"
+            }
+          },
+          "evaluator_version": null
+        }
+      },
+      "labels": {},
+      "assertions": {
+        "ArgumentCorrectness": {
+          "name": "ArgumentCorrectness",
+          "value": true,
+          "reason": null,
+          "source": {
+            "name": "ArgumentCorrectness",
+            "arguments": {
+              "tool_name": "resolve_entity",
+              "expected_arguments": {
+                "entity_type": "SUBSCRIPTION",
+                "id_or_prefix": "aa1b2c3d"
+              }
+            }
+          },
+          "evaluator_version": null
+        },
+        "MaxToolCalls": {
+          "name": "MaxToolCalls",
+          "value": true,
+          "reason": "1 tool call(s), budget=8",
+          "source": {
+            "name": "MaxToolCalls",
+            "arguments": [
+              8
+            ]
+          },
+          "evaluator_version": null
+        }
+      },
+      "task_duration": 4.091254926000147,
+      "total_duration": 4.091856956481934,
+      "source_case_name": "resolve-by-prefix",
+      "trace_id": null,
+      "span_id": null,
+      "evaluator_failures": []
+    },
+    {
+      "name": "resolve-by-prefix [4/5]",
+      "inputs": "show details for subscription aa1b2c3d",
+      "metadata": {
+        "failure_modes": [
+          "entity-lookup"
+        ],
+        "curation_note": "An id-prefix reference goes straight to resolve_entity, not search."
+      },
+      "expected_output": null,
+      "output": "I found more than one subscription that starts with `aa1b2c3d`. Which one do you want?\n\n1. `aa1b2c3d-0000-4000-8000-000000000001`: node asd001 (active)\n2. `aa1b2c3d-0000-4000-8000-000000000002`: node ams002 (active)\n3. `aa1b2c3d-0000-4000-8000-000000000003`: core link 10G asd001 <-> ams002\n4. `aa1b2c3d-0000-4000-8000-000000000004`: node rtd003 (terminated)\n5. `aa1b2c3d-0000-4000-8000-000000000005`: node utr004 (provisioning)\n\nYou can reply with the number, the full ID or the name.",
+      "metrics": {
+        "requests": 4,
+        "input_tokens": 58464,
+        "output_tokens": 676,
+        "cache_read.input_tokens": 57244,
+        "cache_read_input_tokens": 28622,
+        "cache_read_tokens": 28622,
+        "cost": 0.0149244
+      },
+      "attributes": {},
+      "scores": {
+        "TrajectoryMatch": {
+          "name": "TrajectoryMatch",
+          "value": 1.0,
+          "reason": "actual trajectory matches expected: ['resolve_entity']",
+          "source": {
+            "name": "TrajectoryMatch",
+            "arguments": {
+              "expected_trajectory": [
+                "resolve_entity"
+              ],
+              "order": "exact"
+            }
+          },
+          "evaluator_version": null
+        }
+      },
+      "labels": {},
+      "assertions": {
+        "ArgumentCorrectness": {
+          "name": "ArgumentCorrectness",
+          "value": true,
+          "reason": null,
+          "source": {
+            "name": "ArgumentCorrectness",
+            "arguments": {
+              "tool_name": "resolve_entity",
+              "expected_arguments": {
+                "entity_type": "SUBSCRIPTION",
+                "id_or_prefix": "aa1b2c3d"
+              }
+            }
+          },
+          "evaluator_version": null
+        },
+        "MaxToolCalls": {
+          "name": "MaxToolCalls",
+          "value": true,
+          "reason": "1 tool call(s), budget=8",
+          "source": {
+            "name": "MaxToolCalls",
+            "arguments": [
+              8
+            ]
+          },
+          "evaluator_version": null
+        }
+      },
+      "task_duration": 4.18060128199977,
+      "total_duration": 4.181081056594849,
+      "source_case_name": "resolve-by-prefix",
+      "trace_id": null,
+      "span_id": null,
+      "evaluator_failures": []
+    },
+    {
+      "name": "resolve-by-prefix [5/5]",
+      "inputs": "show details for subscription aa1b2c3d",
+      "metadata": {
+        "failure_modes": [
+          "entity-lookup"
+        ],
+        "curation_note": "An id-prefix reference goes straight to resolve_entity, not search."
+      },
+      "expected_output": null,
+      "output": "More than one subscription ID starts with `aa1b2c3d`. Which one do you want?\n\n1. `aa1b2c3d-0000-4000-8000-000000000001`: node asd001 (active)\n2. `aa1b2c3d-0000-4000-8000-000000000002`: node ams002 (active)\n3. `aa1b2c3d-0000-4000-8000-000000000003`: core link 10G asd001 <-> ams002\n4. `aa1b2c3d-0000-4000-8000-000000000004`: node rtd003 (terminated)\n5. `aa1b2c3d-0000-4000-8000-000000000005`: node utr004 (provisioning)\n\nYou can reply with the number, the full ID or a longer prefix.",
+      "metrics": {
+        "requests": 4,
+        "input_tokens": 58464,
+        "output_tokens": 682,
+        "cache_read.input_tokens": 57244,
+        "cache_read_input_tokens": 28622,
+        "cache_read_tokens": 28622,
+        "cost": 0.014984400000000002
+      },
+      "attributes": {},
+      "scores": {
+        "TrajectoryMatch": {
+          "name": "TrajectoryMatch",
+          "value": 1.0,
+          "reason": "actual trajectory matches expected: ['resolve_entity']",
+          "source": {
+            "name": "TrajectoryMatch",
+            "arguments": {
+              "expected_trajectory": [
+                "resolve_entity"
+              ],
+              "order": "exact"
+            }
+          },
+          "evaluator_version": null
+        }
+      },
+      "labels": {},
+      "assertions": {
+        "ArgumentCorrectness": {
+          "name": "ArgumentCorrectness",
+          "value": true,
+          "reason": null,
+          "source": {
+            "name": "ArgumentCorrectness",
+            "arguments": {
+              "tool_name": "resolve_entity",
+              "expected_arguments": {
+                "entity_type": "SUBSCRIPTION",
+                "id_or_prefix": "aa1b2c3d"
+              }
+            }
+          },
+          "evaluator_version": null
+        },
+        "MaxToolCalls": {
+          "name": "MaxToolCalls",
+          "value": true,
+          "reason": "1 tool call(s), budget=8",
+          "source": {
+            "name": "MaxToolCalls",
+            "arguments": [
+              8
+            ]
+          },
+          "evaluator_version": null
+        }
+      },
+      "task_duration": 5.255867760999536,
+      "total_duration": 5.256333351135254,
+      "source_case_name": "resolve-by-prefix",
+      "trace_id": null,
+      "span_id": null,
+      "evaluator_failures": []
+    },
+    {
+      "name": "fetch-by-full-uuid [1/5]",
+      "inputs": "look up subscription aa1b2c3d-0000-4000-8000-000000000003 and give me its details",
+      "metadata": {
+        "failure_modes": [
+          "entity-lookup"
+        ],
+        "curation_note": "\"Give me\" is a details fetch, not an export; resolving the id returns the one subscription with its header, so that call alone is the route, and the UUID must pass through verbatim."
+      },
+      "expected_output": null,
+      "output": "I found the subscription. It's an **active** core link between asd001 and ams002, and it's in sync.\n\n| Field | Value |\n|---|---|\n| **Subscription ID** | `aa1b2c3d-0000-4000-8000-000000000003` |\n| **Description** | core link 10G asd001 <-> ams002 |\n| **Status** | active |\n| **In sync** | Yes |\n| **Product** | core link 10G (type: CoreLink, tag: CORE_LINK): 10G core link between nodes |\n| **Product ID** | `d8a3f9b0-0000-4000-8000-000000000003` |\n| **Customer ID** | `e6c5c2ae-1b3a-4f5f-9c1e-000000000001` |\n| **Start date** | 2026-03-12 (UTC) |\n| **End date** | None |\n| **Note** | None |",
+      "metrics": {
+        "requests": 4,
+        "input_tokens": 58520,
+        "output_tokens": 1038,
+        "cache_read.input_tokens": 57244,
+        "cache_read_input_tokens": 28622,
+        "cache_read_tokens": 28622,
+        "cost": 0.0186564,
+        "thinking_tokens": 123,
+        "reasoning.output_tokens": 123
+      },
+      "attributes": {},
+      "scores": {
+        "TrajectoryMatch": {
+          "name": "TrajectoryMatch",
+          "value": 1.0,
+          "reason": "actual trajectory matches expected: ['resolve_entity']",
+          "source": {
+            "name": "TrajectoryMatch",
+            "arguments": {
+              "expected_trajectory": [
+                "resolve_entity"
+              ],
+              "order": "exact"
+            }
+          },
+          "evaluator_version": null
+        }
+      },
+      "labels": {},
+      "assertions": {
+        "ArgumentCorrectness": {
+          "name": "ArgumentCorrectness",
+          "value": true,
+          "reason": null,
+          "source": {
+            "name": "ArgumentCorrectness",
+            "arguments": {
+              "tool_name": "resolve_entity",
+              "expected_arguments": {
+                "id_or_prefix": "aa1b2c3d-0000-4000-8000-000000000003",
+                "entity_type": "SUBSCRIPTION"
+              }
+            }
+          },
+          "evaluator_version": null
+        },
+        "MaxToolCalls": {
+          "name": "MaxToolCalls",
+          "value": true,
+          "reason": "1 tool call(s), budget=8",
+          "source": {
+            "name": "MaxToolCalls",
+            "arguments": [
+              8
+            ]
+          },
+          "evaluator_version": null
+        }
+      },
+      "task_duration": 6.794754262999959,
+      "total_duration": 6.795407056808472,
+      "source_case_name": "fetch-by-full-uuid",
+      "trace_id": null,
+      "span_id": null,
+      "evaluator_failures": []
+    },
+    {
+      "name": "fetch-by-full-uuid [2/5]",
+      "inputs": "look up subscription aa1b2c3d-0000-4000-8000-000000000003 and give me its details",
+      "metadata": {
+        "failure_modes": [
+          "entity-lookup"
+        ],
+        "curation_note": "\"Give me\" is a details fetch, not an export; resolving the id returns the one subscription with its header, so that call alone is the route, and the UUID must pass through verbatim."
+      },
+      "expected_output": null,
+      "output": "I found the subscription: **core link 10G asd001 <-> ams002**.\n\n| Field | Value |\n|---|---|\n| Subscription ID | `aa1b2c3d-0000-4000-8000-000000000003` |\n| Status | Active |\n| In sync | Yes |\n| Product | core link 10G (type `CoreLink`, tag `CORE_LINK`): a 10G core link between nodes |\n| Product ID | `d8a3f9b0-0000-4000-8000-000000000003` |\n| Customer ID | `e6c5c2ae-1b3a-4f5f-9c1e-000000000001` |\n| Start date | 12 March 2026 (UTC) |\n| End date | None |\n| Note | None |",
+      "metrics": {
+        "requests": 4,
+        "input_tokens": 58520,
+        "output_tokens": 1136,
+        "cache_read.input_tokens": 57244,
+        "cache_read_input_tokens": 28622,
+        "cache_read_tokens": 28622,
+        "cost": 0.0196364,
+        "thinking_tokens": 217,
+        "reasoning.output_tokens": 217
+      },
+      "attributes": {},
+      "scores": {
+        "TrajectoryMatch": {
+          "name": "TrajectoryMatch",
+          "value": 1.0,
+          "reason": "actual trajectory matches expected: ['resolve_entity']",
+          "source": {
+            "name": "TrajectoryMatch",
+            "arguments": {
+              "expected_trajectory": [
+                "resolve_entity"
+              ],
+              "order": "exact"
+            }
+          },
+          "evaluator_version": null
+        }
+      },
+      "labels": {},
+      "assertions": {
+        "ArgumentCorrectness": {
+          "name": "ArgumentCorrectness",
+          "value": true,
+          "reason": null,
+          "source": {
+            "name": "ArgumentCorrectness",
+            "arguments": {
+              "tool_name": "resolve_entity",
+              "expected_arguments": {
+                "id_or_prefix": "aa1b2c3d-0000-4000-8000-000000000003",
+                "entity_type": "SUBSCRIPTION"
+              }
+            }
+          },
+          "evaluator_version": null
+        },
+        "MaxToolCalls": {
+          "name": "MaxToolCalls",
+          "value": true,
+          "reason": "1 tool call(s), budget=8",
+          "source": {
+            "name": "MaxToolCalls",
+            "arguments": [
+              8
+            ]
+          },
+          "evaluator_version": null
+        }
+      },
+      "task_duration": 6.939496082000005,
+      "total_duration": 6.940444469451904,
+      "source_case_name": "fetch-by-full-uuid",
+      "trace_id": null,
+      "span_id": null,
+      "evaluator_failures": []
+    },
+    {
+      "name": "fetch-by-full-uuid [3/5]",
+      "inputs": "look up subscription aa1b2c3d-0000-4000-8000-000000000003 and give me its details",
+      "metadata": {
+        "failure_modes": [
+          "entity-lookup"
+        ],
+        "curation_note": "\"Give me\" is a details fetch, not an export; resolving the id returns the one subscription with its header, so that call alone is the route, and the UUID must pass through verbatim."
+      },
+      "expected_output": null,
+      "output": "I found the subscription: **core link 10G asd001 <-> ams002**.\n\n| Field | Value |\n|---|---|\n| Subscription ID | `aa1b2c3d-0000-4000-8000-000000000003` |\n| Status | Active |\n| In sync | Yes |\n| Product | core link 10G (type CoreLink, tag CORE_LINK), a 10G core link between nodes |\n| Product ID | `d8a3f9b0-0000-4000-8000-000000000003` |\n| Customer ID | `e6c5c2ae-1b3a-4f5f-9c1e-000000000001` |\n| Start date | 2026-03-12 (UTC) |\n| End date | None |\n| Note | None |\n\nI can also show you its full product-block tree, or which workflows can be run on it.",
+      "metrics": {
+        "requests": 4,
+        "input_tokens": 58520,
+        "output_tokens": 1046,
+        "cache_read.input_tokens": 57244,
+        "cache_read_input_tokens": 28622,
+        "cache_read_tokens": 28622,
+        "cost": 0.0187364,
+        "thinking_tokens": 151,
+        "reasoning.output_tokens": 151
+      },
+      "attributes": {},
+      "scores": {
+        "TrajectoryMatch": {
+          "name": "TrajectoryMatch",
+          "value": 1.0,
+          "reason": "actual trajectory matches expected: ['resolve_entity']",
+          "source": {
+            "name": "TrajectoryMatch",
+            "arguments": {
+              "expected_trajectory": [
+                "resolve_entity"
+              ],
+              "order": "exact"
+            }
+          },
+          "evaluator_version": null
+        }
+      },
+      "labels": {},
+      "assertions": {
+        "ArgumentCorrectness": {
+          "name": "ArgumentCorrectness",
+          "value": true,
+          "reason": null,
+          "source": {
+            "name": "ArgumentCorrectness",
+            "arguments": {
+              "tool_name": "resolve_entity",
+              "expected_arguments": {
+                "id_or_prefix": "aa1b2c3d-0000-4000-8000-000000000003",
+                "entity_type": "SUBSCRIPTION"
+              }
+            }
+          },
+          "evaluator_version": null
+        },
+        "MaxToolCalls": {
+          "name": "MaxToolCalls",
+          "value": true,
+          "reason": "1 tool call(s), budget=8",
+          "source": {
+            "name": "MaxToolCalls",
+            "arguments": [
+              8
+            ]
+          },
+          "evaluator_version": null
+        }
+      },
+      "task_duration": 6.867103359999419,
+      "total_duration": 6.867827892303467,
+      "source_case_name": "fetch-by-full-uuid",
+      "trace_id": null,
+      "span_id": null,
+      "evaluator_failures": []
+    },
+    {
+      "name": "fetch-by-full-uuid [4/5]",
+      "inputs": "look up subscription aa1b2c3d-0000-4000-8000-000000000003 and give me its details",
+      "metadata": {
+        "failure_modes": [
+          "entity-lookup"
+        ],
+        "curation_note": "\"Give me\" is a details fetch, not an export; resolving the id returns the one subscription with its header, so that call alone is the route, and the UUID must pass through verbatim."
+      },
+      "expected_output": null,
+      "output": "I found the subscription. It's **core link 10G asd001 <-> ams002**, which is active and in sync.\n\n| Field | Value |\n|---|---|\n| Subscription ID | `aa1b2c3d-0000-4000-8000-000000000003` |\n| Status | Active |\n| In sync | Yes |\n| Product | core link 10G (type: CoreLink, tag: CORE_LINK): \"10G core link between nodes\" |\n| Product ID | `d8a3f9b0-0000-4000-8000-000000000003` |\n| Customer ID | `e6c5c2ae-1b3a-4f5f-9c1e-000000000001` |\n| Start date | 2026-03-12 |\n| End date | None |\n| Note | None |",
+      "metrics": {
+        "requests": 4,
+        "input_tokens": 58520,
+        "output_tokens": 910,
+        "cache_read.input_tokens": 57244,
+        "cache_read_input_tokens": 28622,
+        "cache_read_tokens": 28622,
+        "cost": 0.0173764,
+        "thinking_tokens": 101,
+        "reasoning.output_tokens": 101
+      },
+      "attributes": {},
+      "scores": {
+        "TrajectoryMatch": {
+          "name": "TrajectoryMatch",
+          "value": 1.0,
+          "reason": "actual trajectory matches expected: ['resolve_entity']",
+          "source": {
+            "name": "TrajectoryMatch",
+            "arguments": {
+              "expected_trajectory": [
+                "resolve_entity"
+              ],
+              "order": "exact"
+            }
+          },
+          "evaluator_version": null
+        }
+      },
+      "labels": {},
+      "assertions": {
+        "ArgumentCorrectness": {
+          "name": "ArgumentCorrectness",
+          "value": true,
+          "reason": null,
+          "source": {
+            "name": "ArgumentCorrectness",
+            "arguments": {
+              "tool_name": "resolve_entity",
+              "expected_arguments": {
+                "id_or_prefix": "aa1b2c3d-0000-4000-8000-000000000003",
+                "entity_type": "SUBSCRIPTION"
+              }
+            }
+          },
+          "evaluator_version": null
+        },
+        "MaxToolCalls": {
+          "name": "MaxToolCalls",
+          "value": true,
+          "reason": "1 tool call(s), budget=8",
+          "source": {
+            "name": "MaxToolCalls",
+            "arguments": [
+              8
+            ]
+          },
+          "evaluator_version": null
+        }
+      },
+      "task_duration": 6.32358065400058,
+      "total_duration": 6.324423789978027,
+      "source_case_name": "fetch-by-full-uuid",
+      "trace_id": null,
+      "span_id": null,
+      "evaluator_failures": []
+    },
+    {
+      "name": "fetch-by-full-uuid [5/5]",
+      "inputs": "look up subscription aa1b2c3d-0000-4000-8000-000000000003 and give me its details",
+      "metadata": {
+        "failure_modes": [
+          "entity-lookup"
+        ],
+        "curation_note": "\"Give me\" is a details fetch, not an export; resolving the id returns the one subscription with its header, so that call alone is the route, and the UUID must pass through verbatim."
+      },
+      "expected_output": null,
+      "output": "I found the subscription: **core link 10G asd001 <-> ams002**. It's active and in sync.\n\n| Field | Value |\n|---|---|\n| Subscription ID | `aa1b2c3d-0000-4000-8000-000000000003` |\n| Description | core link 10G asd001 <-> ams002 |\n| Status | Active |\n| In sync | Yes |\n| Product | core link 10G: a 10G core link between nodes (type CoreLink, tag `CORE_LINK`) |\n| Product ID | `d8a3f9b0-0000-4000-8000-000000000003` |\n| Customer ID | `e6c5c2ae-1b3a-4f5f-9c1e-000000000001` |\n| Start date | 12 March 2026 (UTC) |\n| End date | None |\n| Note | None |",
+      "metrics": {
+        "requests": 4,
+        "input_tokens": 58520,
+        "output_tokens": 1136,
+        "cache_read.input_tokens": 57244,
+        "cache_read_input_tokens": 28622,
+        "cache_read_tokens": 28622,
+        "cost": 0.0196364,
+        "thinking_tokens": 188,
+        "reasoning.output_tokens": 188
+      },
+      "attributes": {},
+      "scores": {
+        "TrajectoryMatch": {
+          "name": "TrajectoryMatch",
+          "value": 1.0,
+          "reason": "actual trajectory matches expected: ['resolve_entity']",
+          "source": {
+            "name": "TrajectoryMatch",
+            "arguments": {
+              "expected_trajectory": [
+                "resolve_entity"
+              ],
+              "order": "exact"
+            }
+          },
+          "evaluator_version": null
+        }
+      },
+      "labels": {},
+      "assertions": {
+        "ArgumentCorrectness": {
+          "name": "ArgumentCorrectness",
+          "value": true,
+          "reason": null,
+          "source": {
+            "name": "ArgumentCorrectness",
+            "arguments": {
+              "tool_name": "resolve_entity",
+              "expected_arguments": {
+                "id_or_prefix": "aa1b2c3d-0000-4000-8000-000000000003",
+                "entity_type": "SUBSCRIPTION"
+              }
+            }
+          },
+          "evaluator_version": null
+        },
+        "MaxToolCalls": {
+          "name": "MaxToolCalls",
+          "value": true,
+          "reason": "1 tool call(s), budget=8",
+          "source": {
+            "name": "MaxToolCalls",
+            "arguments": [
+              8
+            ]
+          },
+          "evaluator_version": null
+        }
+      },
+      "task_duration": 7.87088778099951,
+      "total_duration": 7.871811151504517,
+      "source_case_name": "fetch-by-full-uuid",
+      "trace_id": null,
+      "span_id": null,
+      "evaluator_failures": []
+    },
+    {
+      "name": "search-workflows [1/5]",
+      "inputs": "search for workflows containing 'validate'",
+      "metadata": {
+        "failure_modes": [
+          "fuzzy-search",
+          "entity-type"
+        ],
+        "curation_note": "The entity type must switch to WORKFLOW; the term is the query text."
+      },
+      "expected_output": null,
+      "output": "I found 4 workflows matching \"validate\". Three have \"Validate\" in the title, and \"Fail callback steps that exceeded their timeout\" probably matched on a field other than its title.",
+      "metrics": {
+        "requests": 4,
+        "input_tokens": 58604,
+        "output_tokens": 384,
+        "cache_read.input_tokens": 57244,
+        "cache_read_input_tokens": 28622,
+        "cache_read_tokens": 28622,
+        "cost": 0.012284400000000001,
+        "thinking_tokens": 55,
+        "reasoning.output_tokens": 55
+      },
+      "attributes": {},
+      "scores": {
+        "TrajectoryMatch": {
+          "name": "TrajectoryMatch",
+          "value": 1.0,
+          "reason": "actual trajectory matches expected: ['search']",
+          "source": {
+            "name": "TrajectoryMatch",
+            "arguments": {
+              "expected_trajectory": [
+                "search"
+              ],
+              "order": "exact"
+            }
+          },
+          "evaluator_version": null
+        }
+      },
+      "labels": {},
+      "assertions": {
+        "ArgumentCorrectness": {
+          "name": "ArgumentCorrectness",
+          "value": true,
+          "reason": null,
+          "source": {
+            "name": "ArgumentCorrectness",
+            "arguments": {
+              "tool_name": "search",
+              "expected_arguments": {
+                "entity_type": "WORKFLOW",
+                "query_text": "validate"
+              }
+            }
+          },
+          "evaluator_version": null
+        },
+        "MaxToolCalls": {
+          "name": "MaxToolCalls",
+          "value": true,
+          "reason": "1 tool call(s), budget=8",
+          "source": {
+            "name": "MaxToolCalls",
+            "arguments": [
+              8
+            ]
+          },
+          "evaluator_version": null
+        }
+      },
+      "task_duration": 4.656649635000576,
+      "total_duration": 4.657402992248535,
+      "source_case_name": "search-workflows",
+      "trace_id": null,
+      "span_id": null,
+      "evaluator_failures": []
+    },
+    {
+      "name": "search-workflows [2/5]",
+      "inputs": "search for workflows containing 'validate'",
+      "metadata": {
+        "failure_modes": [
+          "fuzzy-search",
+          "entity-type"
+        ],
+        "curation_note": "The entity type must switch to WORKFLOW; the term is the query text."
+      },
+      "expected_output": null,
+      "output": "I found 4 workflows matching 'validate'. Three have it in their title, and \"Fail callback steps that exceeded their timeout\" probably matched on its name or description, not its title.",
+      "metrics": {
+        "requests": 4,
+        "input_tokens": 58602,
+        "output_tokens": 388,
+        "cache_read.input_tokens": 57244,
+        "cache_read_input_tokens": 28622,
+        "cache_read_tokens": 28622,
+        "cost": 0.0123204,
+        "thinking_tokens": 57,
+        "reasoning.output_tokens": 57
+      },
+      "attributes": {},
+      "scores": {
+        "TrajectoryMatch": {
+          "name": "TrajectoryMatch",
+          "value": 1.0,
+          "reason": "actual trajectory matches expected: ['search']",
+          "source": {
+            "name": "TrajectoryMatch",
+            "arguments": {
+              "expected_trajectory": [
+                "search"
+              ],
+              "order": "exact"
+            }
+          },
+          "evaluator_version": null
+        }
+      },
+      "labels": {},
+      "assertions": {
+        "ArgumentCorrectness": {
+          "name": "ArgumentCorrectness",
+          "value": true,
+          "reason": null,
+          "source": {
+            "name": "ArgumentCorrectness",
+            "arguments": {
+              "tool_name": "search",
+              "expected_arguments": {
+                "entity_type": "WORKFLOW",
+                "query_text": "validate"
+              }
+            }
+          },
+          "evaluator_version": null
+        },
+        "MaxToolCalls": {
+          "name": "MaxToolCalls",
+          "value": true,
+          "reason": "1 tool call(s), budget=8",
+          "source": {
+            "name": "MaxToolCalls",
+            "arguments": [
+              8
+            ]
+          },
+          "evaluator_version": null
+        }
+      },
+      "task_duration": 4.788252447000559,
+      "total_duration": 4.789132833480835,
+      "source_case_name": "search-workflows",
+      "trace_id": null,
+      "span_id": null,
+      "evaluator_failures": []
+    },
+    {
+      "name": "search-workflows [3/5]",
+      "inputs": "search for workflows containing 'validate'",
+      "metadata": {
+        "failure_modes": [
+          "fuzzy-search",
+          "entity-type"
+        ],
+        "curation_note": "The entity type must switch to WORKFLOW; the term is the query text."
+      },
+      "expected_output": null,
+      "output": "The search found 4 workflows matching \"validate\". Three have it in their title, and \"Fail callback steps that exceeded their timeout\" was probably matched on another field, like its internal name or description.",
+      "metrics": {
+        "requests": 4,
+        "input_tokens": 58606,
+        "output_tokens": 380,
+        "cache_read.input_tokens": 57244,
+        "cache_read_input_tokens": 28622,
+        "cache_read_tokens": 28622,
+        "cost": 0.0122484,
+        "thinking_tokens": 51,
+        "reasoning.output_tokens": 51
+      },
+      "attributes": {},
+      "scores": {
+        "TrajectoryMatch": {
+          "name": "TrajectoryMatch",
+          "value": 1.0,
+          "reason": "actual trajectory matches expected: ['search']",
+          "source": {
+            "name": "TrajectoryMatch",
+            "arguments": {
+              "expected_trajectory": [
+                "search"
+              ],
+              "order": "exact"
+            }
+          },
+          "evaluator_version": null
+        }
+      },
+      "labels": {},
+      "assertions": {
+        "ArgumentCorrectness": {
+          "name": "ArgumentCorrectness",
+          "value": true,
+          "reason": null,
+          "source": {
+            "name": "ArgumentCorrectness",
+            "arguments": {
+              "tool_name": "search",
+              "expected_arguments": {
+                "entity_type": "WORKFLOW",
+                "query_text": "validate"
+              }
+            }
+          },
+          "evaluator_version": null
+        },
+        "MaxToolCalls": {
+          "name": "MaxToolCalls",
+          "value": true,
+          "reason": "1 tool call(s), budget=8",
+          "source": {
+            "name": "MaxToolCalls",
+            "arguments": [
+              8
+            ]
+          },
+          "evaluator_version": null
+        }
+      },
+      "task_duration": 4.8022418370001105,
+      "total_duration": 4.8030126094818115,
+      "source_case_name": "search-workflows",
+      "trace_id": null,
+      "span_id": null,
+      "evaluator_failures": []
+    },
+    {
+      "name": "search-workflows [4/5]",
+      "inputs": "search for workflows containing 'validate'",
+      "metadata": {
+        "failure_modes": [
+          "fuzzy-search",
+          "entity-type"
+        ],
+        "curation_note": "The entity type must switch to WORKFLOW; the term is the query text."
+      },
+      "expected_output": null,
+      "output": "I found 4 workflows matching \"validate\". Three have it in their title. The fourth, \"Fail callback steps that exceeded their timeout\", must have matched on another field, since \"validate\" isn't in its title.",
+      "metrics": {
+        "requests": 4,
+        "input_tokens": 58590,
+        "output_tokens": 386,
+        "cache_read.input_tokens": 57244,
+        "cache_read_input_tokens": 28622,
+        "cache_read_tokens": 28622,
+        "cost": 0.0122764,
+        "thinking_tokens": 48,
+        "reasoning.output_tokens": 48
+      },
+      "attributes": {},
+      "scores": {
+        "TrajectoryMatch": {
+          "name": "TrajectoryMatch",
+          "value": 1.0,
+          "reason": "actual trajectory matches expected: ['search']",
+          "source": {
+            "name": "TrajectoryMatch",
+            "arguments": {
+              "expected_trajectory": [
+                "search"
+              ],
+              "order": "exact"
+            }
+          },
+          "evaluator_version": null
+        }
+      },
+      "labels": {},
+      "assertions": {
+        "ArgumentCorrectness": {
+          "name": "ArgumentCorrectness",
+          "value": true,
+          "reason": null,
+          "source": {
+            "name": "ArgumentCorrectness",
+            "arguments": {
+              "tool_name": "search",
+              "expected_arguments": {
+                "entity_type": "WORKFLOW",
+                "query_text": "validate"
+              }
+            }
+          },
+          "evaluator_version": null
+        },
+        "MaxToolCalls": {
+          "name": "MaxToolCalls",
+          "value": true,
+          "reason": "1 tool call(s), budget=8",
+          "source": {
+            "name": "MaxToolCalls",
+            "arguments": [
+              8
+            ]
+          },
+          "evaluator_version": null
+        }
+      },
+      "task_duration": 5.0407316490000085,
+      "total_duration": 5.041338920593262,
+      "source_case_name": "search-workflows",
+      "trace_id": null,
+      "span_id": null,
+      "evaluator_failures": []
+    },
+    {
+      "name": "search-workflows [5/5]",
+      "inputs": "search for workflows containing 'validate'",
+      "metadata": {
+        "failure_modes": [
+          "fuzzy-search",
+          "entity-type"
+        ],
+        "curation_note": "The entity type must switch to WORKFLOW; the term is the query text."
+      },
+      "expected_output": null,
+      "output": "The search found 4 workflows for \"validate\". Three have it in their title, and the fourth (the callback-timeout task) probably matched on its internal name or description.",
+      "metrics": {
+        "requests": 4,
+        "input_tokens": 58608,
+        "output_tokens": 348,
+        "cache_read.input_tokens": 57244,
+        "cache_read_input_tokens": 28622,
+        "cache_read_tokens": 28622,
+        "cost": 0.0119324,
+        "thinking_tokens": 45,
+        "reasoning.output_tokens": 45
+      },
+      "attributes": {},
+      "scores": {
+        "TrajectoryMatch": {
+          "name": "TrajectoryMatch",
+          "value": 1.0,
+          "reason": "actual trajectory matches expected: ['search']",
+          "source": {
+            "name": "TrajectoryMatch",
+            "arguments": {
+              "expected_trajectory": [
+                "search"
+              ],
+              "order": "exact"
+            }
+          },
+          "evaluator_version": null
+        }
+      },
+      "labels": {},
+      "assertions": {
+        "ArgumentCorrectness": {
+          "name": "ArgumentCorrectness",
+          "value": true,
+          "reason": null,
+          "source": {
+            "name": "ArgumentCorrectness",
+            "arguments": {
+              "tool_name": "search",
+              "expected_arguments": {
+                "entity_type": "WORKFLOW",
+                "query_text": "validate"
+              }
+            }
+          },
+          "evaluator_version": null
+        },
+        "MaxToolCalls": {
+          "name": "MaxToolCalls",
+          "value": true,
+          "reason": "1 tool call(s), budget=8",
+          "source": {
+            "name": "MaxToolCalls",
+            "arguments": [
+              8
+            ]
+          },
+          "evaluator_version": null
+        }
+      },
+      "task_duration": 4.644621354999799,
+      "total_duration": 4.645716667175293,
+      "source_case_name": "search-workflows",
+      "trace_id": null,
+      "span_id": null,
+      "evaluator_failures": []
+    },
+    {
+      "name": "export-after-search [1/5]",
+      "inputs": "find core link subscriptions and export them as CSV",
+      "metadata": {
+        "failure_modes": [
+          "export"
+        ],
+        "curation_note": "Explicit \"export as CSV\" sanctions export_query, after the search that produces the query to export."
+      },
+      "expected_output": null,
+      "output": "Download has been successfully prepared.",
+      "metrics": {
+        "requests": 6,
+        "input_tokens": 88152,
+        "output_tokens": 418,
+        "cache_read.input_tokens": 85866,
+        "cache_read_input_tokens": 42933,
+        "thinking_tokens": 19,
+        "cache_read_tokens": 42933,
+        "cost": 0.0173386,
+        "reasoning.output_tokens": 19
+      },
+      "attributes": {},
+      "scores": {
+        "TrajectoryMatch": {
+          "name": "TrajectoryMatch",
+          "value": 1.0,
+          "reason": "actual trajectory matches expected: ['search', 'export_query']",
+          "source": {
+            "name": "TrajectoryMatch",
+            "arguments": {
+              "expected_trajectory": [
+                "search",
+                "export_query"
+              ],
+              "order": "exact"
+            }
+          },
+          "evaluator_version": null
+        }
+      },
+      "labels": {},
+      "assertions": {
+        "ArgumentCorrectness": {
+          "name": "ArgumentCorrectness",
+          "value": true,
+          "reason": null,
+          "source": {
+            "name": "ArgumentCorrectness",
+            "arguments": {
+              "tool_name": "search",
+              "expected_arguments": {
+                "entity_type": "SUBSCRIPTION"
+              }
+            }
+          },
+          "evaluator_version": null
+        },
+        "MaxToolCalls": {
+          "name": "MaxToolCalls",
+          "value": true,
+          "reason": "2 tool call(s), budget=8",
+          "source": {
+            "name": "MaxToolCalls",
+            "arguments": [
+              8
+            ]
+          },
+          "evaluator_version": null
+        }
+      },
+      "task_duration": 4.894368850000319,
+      "total_duration": 4.895357847213745,
+      "source_case_name": "export-after-search",
+      "trace_id": null,
+      "span_id": null,
+      "evaluator_failures": []
+    },
+    {
+      "name": "export-after-search [2/5]",
+      "inputs": "find core link subscriptions and export them as CSV",
+      "metadata": {
+        "failure_modes": [
+          "export"
+        ],
+        "curation_note": "Explicit \"export as CSV\" sanctions export_query, after the search that produces the query to export."
+      },
+      "expected_output": null,
+      "output": "Download has been successfully prepared.",
+      "metrics": {
+        "requests": 6,
+        "input_tokens": 88104,
+        "output_tokens": 386,
+        "cache_read.input_tokens": 85866,
+        "cache_read_input_tokens": 42933,
+        "cache_read_tokens": 42933,
+        "cost": 0.0169226
+      },
+      "attributes": {},
+      "scores": {
+        "TrajectoryMatch": {
+          "name": "TrajectoryMatch",
+          "value": 1.0,
+          "reason": "actual trajectory matches expected: ['search', 'export_query']",
+          "source": {
+            "name": "TrajectoryMatch",
+            "arguments": {
+              "expected_trajectory": [
+                "search",
+                "export_query"
+              ],
+              "order": "exact"
+            }
+          },
+          "evaluator_version": null
+        }
+      },
+      "labels": {},
+      "assertions": {
+        "ArgumentCorrectness": {
+          "name": "ArgumentCorrectness",
+          "value": true,
+          "reason": null,
+          "source": {
+            "name": "ArgumentCorrectness",
+            "arguments": {
+              "tool_name": "search",
+              "expected_arguments": {
+                "entity_type": "SUBSCRIPTION"
+              }
+            }
+          },
+          "evaluator_version": null
+        },
+        "MaxToolCalls": {
+          "name": "MaxToolCalls",
+          "value": true,
+          "reason": "2 tool call(s), budget=8",
+          "source": {
+            "name": "MaxToolCalls",
+            "arguments": [
+              8
+            ]
+          },
+          "evaluator_version": null
+        }
+      },
+      "task_duration": 4.524928054000156,
+      "total_duration": 4.525407314300537,
+      "source_case_name": "export-after-search",
+      "trace_id": null,
+      "span_id": null,
+      "evaluator_failures": []
+    },
+    {
+      "name": "export-after-search [3/5]",
+      "inputs": "find core link subscriptions and export them as CSV",
+      "metadata": {
+        "failure_modes": [
+          "export"
+        ],
+        "curation_note": "Explicit \"export as CSV\" sanctions export_query, after the search that produces the query to export."
+      },
+      "expected_output": null,
+      "output": "Download has been successfully prepared.",
+      "metrics": {
+        "requests": 6,
+        "input_tokens": 88412,
+        "output_tokens": 546,
+        "cache_read.input_tokens": 85866,
+        "cache_read_input_tokens": 42933,
+        "thinking_tokens": 82,
+        "cache_read_tokens": 42933,
+        "cost": 0.0191386,
+        "reasoning.output_tokens": 82
+      },
+      "attributes": {},
+      "scores": {
+        "TrajectoryMatch": {
+          "name": "TrajectoryMatch",
+          "value": 1.0,
+          "reason": "actual trajectory matches expected: ['search', 'export_query']",
+          "source": {
+            "name": "TrajectoryMatch",
+            "arguments": {
+              "expected_trajectory": [
+                "search",
+                "export_query"
+              ],
+              "order": "exact"
+            }
+          },
+          "evaluator_version": null
+        }
+      },
+      "labels": {},
+      "assertions": {
+        "ArgumentCorrectness": {
+          "name": "ArgumentCorrectness",
+          "value": true,
+          "reason": null,
+          "source": {
+            "name": "ArgumentCorrectness",
+            "arguments": {
+              "tool_name": "search",
+              "expected_arguments": {
+                "entity_type": "SUBSCRIPTION"
+              }
+            }
+          },
+          "evaluator_version": null
+        },
+        "MaxToolCalls": {
+          "name": "MaxToolCalls",
+          "value": true,
+          "reason": "2 tool call(s), budget=8",
+          "source": {
+            "name": "MaxToolCalls",
+            "arguments": [
+              8
+            ]
+          },
+          "evaluator_version": null
+        }
+      },
+      "task_duration": 5.525944969999728,
+      "total_duration": 5.527028560638428,
+      "source_case_name": "export-after-search",
+      "trace_id": null,
+      "span_id": null,
+      "evaluator_failures": []
+    },
+    {
+      "name": "export-after-search [4/5]",
+      "inputs": "find core link subscriptions and export them as CSV",
+      "metadata": {
+        "failure_modes": [
+          "export"
+        ],
+        "curation_note": "Explicit \"export as CSV\" sanctions export_query, after the search that produces the query to export."
+      },
+      "expected_output": null,
+      "output": "Download has been successfully prepared.",
+      "metrics": {
+        "requests": 6,
+        "input_tokens": 88072,
+        "output_tokens": 378,
+        "cache_read.input_tokens": 85866,
+        "cache_read_input_tokens": 42933,
+        "cache_read_tokens": 42933,
+        "cost": 0.0167786
+      },
+      "attributes": {},
+      "scores": {
+        "TrajectoryMatch": {
+          "name": "TrajectoryMatch",
+          "value": 1.0,
+          "reason": "actual trajectory matches expected: ['search', 'export_query']",
+          "source": {
+            "name": "TrajectoryMatch",
+            "arguments": {
+              "expected_trajectory": [
+                "search",
+                "export_query"
+              ],
+              "order": "exact"
+            }
+          },
+          "evaluator_version": null
+        }
+      },
+      "labels": {},
+      "assertions": {
+        "ArgumentCorrectness": {
+          "name": "ArgumentCorrectness",
+          "value": true,
+          "reason": null,
+          "source": {
+            "name": "ArgumentCorrectness",
+            "arguments": {
+              "tool_name": "search",
+              "expected_arguments": {
+                "entity_type": "SUBSCRIPTION"
+              }
+            }
+          },
+          "evaluator_version": null
+        },
+        "MaxToolCalls": {
+          "name": "MaxToolCalls",
+          "value": true,
+          "reason": "2 tool call(s), budget=8",
+          "source": {
+            "name": "MaxToolCalls",
+            "arguments": [
+              8
+            ]
+          },
+          "evaluator_version": null
+        }
+      },
+      "task_duration": 4.6678725390002,
+      "total_duration": 4.668327808380127,
+      "source_case_name": "export-after-search",
+      "trace_id": null,
+      "span_id": null,
+      "evaluator_failures": []
+    },
+    {
+      "name": "export-after-search [5/5]",
+      "inputs": "find core link subscriptions and export them as CSV",
+      "metadata": {
+        "failure_modes": [
+          "export"
+        ],
+        "curation_note": "Explicit \"export as CSV\" sanctions export_query, after the search that produces the query to export."
+      },
+      "expected_output": null,
+      "output": "Download has been successfully prepared.",
+      "metrics": {
+        "requests": 6,
+        "input_tokens": 88088,
+        "output_tokens": 382,
+        "cache_read.input_tokens": 85866,
+        "cache_read_input_tokens": 42933,
+        "cache_read_tokens": 42933,
+        "cost": 0.0168506
+      },
+      "attributes": {},
+      "scores": {
+        "TrajectoryMatch": {
+          "name": "TrajectoryMatch",
+          "value": 1.0,
+          "reason": "actual trajectory matches expected: ['search', 'export_query']",
+          "source": {
+            "name": "TrajectoryMatch",
+            "arguments": {
+              "expected_trajectory": [
+                "search",
+                "export_query"
+              ],
+              "order": "exact"
+            }
+          },
+          "evaluator_version": null
+        }
+      },
+      "labels": {},
+      "assertions": {
+        "ArgumentCorrectness": {
+          "name": "ArgumentCorrectness",
+          "value": true,
+          "reason": null,
+          "source": {
+            "name": "ArgumentCorrectness",
+            "arguments": {
+              "tool_name": "search",
+              "expected_arguments": {
+                "entity_type": "SUBSCRIPTION"
+              }
+            }
+          },
+          "evaluator_version": null
+        },
+        "MaxToolCalls": {
+          "name": "MaxToolCalls",
+          "value": true,
+          "reason": "2 tool call(s), budget=8",
+          "source": {
+            "name": "MaxToolCalls",
+            "arguments": [
+              8
+            ]
+          },
+          "evaluator_version": null
+        }
+      },
+      "task_duration": 4.402390605000619,
+      "total_duration": 4.40313720703125,
+      "source_case_name": "export-after-search",
+      "trace_id": null,
+      "span_id": null,
+      "evaluator_failures": []
+    },
+    {
+      "name": "export-named-alone [1/5]",
+      "inputs": "export active subscriptions",
+      "metadata": {
+        "failure_modes": [
+          "export",
+          "structured-filters"
+        ],
+        "curation_note": "Only the export is named and no query exists yet, so the search that produces the query comes first, in the same turn, with the status as a structured filter. Stopping after the search leaves the person without the file they asked for."
+      },
+      "expected_output": null,
+      "output": "Download has been successfully prepared.",
+      "metrics": {
+        "requests": 8,
+        "input_tokens": 118986,
+        "output_tokens": 876,
+        "cache_read.input_tokens": 114488,
+        "cache_read_input_tokens": 57244,
+        "cache_read_tokens": 57244,
+        "cost": 0.0292048,
+        "thinking_tokens": 68,
+        "reasoning.output_tokens": 68
+      },
+      "attributes": {},
+      "scores": {
+        "TrajectoryMatch": {
+          "name": "TrajectoryMatch",
+          "value": 1.0,
+          "reason": "actual trajectory matches expected: ['discover_filter_paths', 'search', 'export_query']",
+          "source": {
+            "name": "TrajectoryMatch",
+            "arguments": {
+              "expected_trajectory": [
+                "discover_filter_paths",
+                "search",
+                "export_query"
+              ],
+              "order": "exact"
+            }
+          },
+          "evaluator_version": null
+        }
+      },
+      "labels": {},
+      "assertions": {
+        "ArgumentCorrectness": {
+          "name": "ArgumentCorrectness",
+          "value": true,
+          "reason": null,
+          "source": {
+            "name": "ArgumentCorrectness",
+            "arguments": {
+              "tool_name": "search",
+              "expected_arguments": {
+                "entity_type": "SUBSCRIPTION"
+              }
+            }
+          },
+          "evaluator_version": null
+        },
+        "MaxToolCalls": {
+          "name": "MaxToolCalls",
+          "value": true,
+          "reason": "3 tool call(s), budget=8",
+          "source": {
+            "name": "MaxToolCalls",
+            "arguments": [
+              8
+            ]
+          },
+          "evaluator_version": null
+        }
+      },
+      "task_duration": 7.823424450999482,
+      "total_duration": 7.824070453643799,
+      "source_case_name": "export-named-alone",
+      "trace_id": null,
+      "span_id": null,
+      "evaluator_failures": []
+    },
+    {
+      "name": "export-named-alone [2/5]",
+      "inputs": "export active subscriptions",
+      "metadata": {
+        "failure_modes": [
+          "export",
+          "structured-filters"
+        ],
+        "curation_note": "Only the export is named and no query exists yet, so the search that produces the query comes first, in the same turn, with the status as a structured filter. Stopping after the search leaves the person without the file they asked for."
+      },
+      "expected_output": null,
+      "output": "Download has been successfully prepared.",
+      "metrics": {
+        "requests": 8,
+        "input_tokens": 118930,
+        "output_tokens": 762,
+        "cache_read.input_tokens": 114488,
+        "cache_read_input_tokens": 57244,
+        "thinking_tokens": 24,
+        "cache_read_tokens": 57244,
+        "cost": 0.0279528,
+        "reasoning.output_tokens": 24
+      },
+      "attributes": {},
+      "scores": {
+        "TrajectoryMatch": {
+          "name": "TrajectoryMatch",
+          "value": 1.0,
+          "reason": "actual trajectory matches expected: ['discover_filter_paths', 'search', 'export_query']",
+          "source": {
+            "name": "TrajectoryMatch",
+            "arguments": {
+              "expected_trajectory": [
+                "discover_filter_paths",
+                "search",
+                "export_query"
+              ],
+              "order": "exact"
+            }
+          },
+          "evaluator_version": null
+        }
+      },
+      "labels": {},
+      "assertions": {
+        "ArgumentCorrectness": {
+          "name": "ArgumentCorrectness",
+          "value": true,
+          "reason": null,
+          "source": {
+            "name": "ArgumentCorrectness",
+            "arguments": {
+              "tool_name": "search",
+              "expected_arguments": {
+                "entity_type": "SUBSCRIPTION"
+              }
+            }
+          },
+          "evaluator_version": null
+        },
+        "MaxToolCalls": {
+          "name": "MaxToolCalls",
+          "value": true,
+          "reason": "3 tool call(s), budget=8",
+          "source": {
+            "name": "MaxToolCalls",
+            "arguments": [
+              8
+            ]
+          },
+          "evaluator_version": null
+        }
+      },
+      "task_duration": 6.852302821999729,
+      "total_duration": 6.8539509773254395,
+      "source_case_name": "export-named-alone",
+      "trace_id": null,
+      "span_id": null,
+      "evaluator_failures": []
+    },
+    {
+      "name": "export-named-alone [3/5]",
+      "inputs": "export active subscriptions",
+      "metadata": {
+        "failure_modes": [
+          "export",
+          "structured-filters"
+        ],
+        "curation_note": "Only the export is named and no query exists yet, so the search that produces the query comes first, in the same turn, with the status as a structured filter. Stopping after the search leaves the person without the file they asked for."
+      },
+      "expected_output": null,
+      "output": "Download has been successfully prepared.",
+      "metrics": {
+        "requests": 8,
+        "input_tokens": 118912,
+        "output_tokens": 758,
+        "cache_read.input_tokens": 114488,
+        "cache_read_input_tokens": 57244,
+        "thinking_tokens": 25,
+        "cache_read_tokens": 57244,
+        "cost": 0.027876800000000004,
+        "reasoning.output_tokens": 25
+      },
+      "attributes": {},
+      "scores": {
+        "TrajectoryMatch": {
+          "name": "TrajectoryMatch",
+          "value": 1.0,
+          "reason": "actual trajectory matches expected: ['discover_filter_paths', 'search', 'export_query']",
+          "source": {
+            "name": "TrajectoryMatch",
+            "arguments": {
+              "expected_trajectory": [
+                "discover_filter_paths",
+                "search",
+                "export_query"
+              ],
+              "order": "exact"
+            }
+          },
+          "evaluator_version": null
+        }
+      },
+      "labels": {},
+      "assertions": {
+        "ArgumentCorrectness": {
+          "name": "ArgumentCorrectness",
+          "value": true,
+          "reason": null,
+          "source": {
+            "name": "ArgumentCorrectness",
+            "arguments": {
+              "tool_name": "search",
+              "expected_arguments": {
+                "entity_type": "SUBSCRIPTION"
+              }
+            }
+          },
+          "evaluator_version": null
+        },
+        "MaxToolCalls": {
+          "name": "MaxToolCalls",
+          "value": true,
+          "reason": "3 tool call(s), budget=8",
+          "source": {
+            "name": "MaxToolCalls",
+            "arguments": [
+              8
+            ]
+          },
+          "evaluator_version": null
+        }
+      },
+      "task_duration": 6.7211656809995475,
+      "total_duration": 6.722560405731201,
+      "source_case_name": "export-named-alone",
+      "trace_id": null,
+      "span_id": null,
+      "evaluator_failures": []
+    },
+    {
+      "name": "export-named-alone [4/5]",
+      "inputs": "export active subscriptions",
+      "metadata": {
+        "failure_modes": [
+          "export",
+          "structured-filters"
+        ],
+        "curation_note": "Only the export is named and no query exists yet, so the search that produces the query comes first, in the same turn, with the status as a structured filter. Stopping after the search leaves the person without the file they asked for."
+      },
+      "expected_output": null,
+      "output": "Download has been successfully prepared.",
+      "metrics": {
+        "requests": 8,
+        "input_tokens": 118918,
+        "output_tokens": 760,
+        "cache_read.input_tokens": 114488,
+        "cache_read_input_tokens": 57244,
+        "thinking_tokens": 26,
+        "cache_read_tokens": 57244,
+        "cost": 0.027908799999999997,
+        "reasoning.output_tokens": 26
+      },
+      "attributes": {},
+      "scores": {
+        "TrajectoryMatch": {
+          "name": "TrajectoryMatch",
+          "value": 1.0,
+          "reason": "actual trajectory matches expected: ['discover_filter_paths', 'search', 'export_query']",
+          "source": {
+            "name": "TrajectoryMatch",
+            "arguments": {
+              "expected_trajectory": [
+                "discover_filter_paths",
+                "search",
+                "export_query"
+              ],
+              "order": "exact"
+            }
+          },
+          "evaluator_version": null
+        }
+      },
+      "labels": {},
+      "assertions": {
+        "ArgumentCorrectness": {
+          "name": "ArgumentCorrectness",
+          "value": true,
+          "reason": null,
+          "source": {
+            "name": "ArgumentCorrectness",
+            "arguments": {
+              "tool_name": "search",
+              "expected_arguments": {
+                "entity_type": "SUBSCRIPTION"
+              }
+            }
+          },
+          "evaluator_version": null
+        },
+        "MaxToolCalls": {
+          "name": "MaxToolCalls",
+          "value": true,
+          "reason": "3 tool call(s), budget=8",
+          "source": {
+            "name": "MaxToolCalls",
+            "arguments": [
+              8
+            ]
+          },
+          "evaluator_version": null
+        }
+      },
+      "task_duration": 6.49931001799996,
+      "total_duration": 6.500072002410889,
+      "source_case_name": "export-named-alone",
+      "trace_id": null,
+      "span_id": null,
+      "evaluator_failures": []
+    },
+    {
+      "name": "export-named-alone [5/5]",
+      "inputs": "export active subscriptions",
+      "metadata": {
+        "failure_modes": [
+          "export",
+          "structured-filters"
+        ],
+        "curation_note": "Only the export is named and no query exists yet, so the search that produces the query comes first, in the same turn, with the status as a structured filter. Stopping after the search leaves the person without the file they asked for."
+      },
+      "expected_output": null,
+      "output": "Download has been successfully prepared.",
+      "metrics": {
+        "requests": 8,
+        "input_tokens": 118944,
+        "output_tokens": 766,
+        "cache_read.input_tokens": 114488,
+        "cache_read_input_tokens": 57244,
+        "thinking_tokens": 25,
+        "cache_read_tokens": 57244,
+        "cost": 0.028020800000000002,
+        "reasoning.output_tokens": 25
+      },
+      "attributes": {},
+      "scores": {
+        "TrajectoryMatch": {
+          "name": "TrajectoryMatch",
+          "value": 1.0,
+          "reason": "actual trajectory matches expected: ['discover_filter_paths', 'search', 'export_query']",
+          "source": {
+            "name": "TrajectoryMatch",
+            "arguments": {
+              "expected_trajectory": [
+                "discover_filter_paths",
+                "search",
+                "export_query"
+              ],
+              "order": "exact"
+            }
+          },
+          "evaluator_version": null
+        }
+      },
+      "labels": {},
+      "assertions": {
+        "ArgumentCorrectness": {
+          "name": "ArgumentCorrectness",
+          "value": true,
+          "reason": null,
+          "source": {
+            "name": "ArgumentCorrectness",
+            "arguments": {
+              "tool_name": "search",
+              "expected_arguments": {
+                "entity_type": "SUBSCRIPTION"
+              }
+            }
+          },
+          "evaluator_version": null
+        },
+        "MaxToolCalls": {
+          "name": "MaxToolCalls",
+          "value": true,
+          "reason": "3 tool call(s), budget=8",
+          "source": {
+            "name": "MaxToolCalls",
+            "arguments": [
+              8
+            ]
+          },
+          "evaluator_version": null
+        }
+      },
+      "task_duration": 7.099375623999549,
+      "total_duration": 7.100498914718628,
+      "source_case_name": "export-named-alone",
+      "trace_id": null,
+      "span_id": null,
+      "evaluator_failures": []
+    },
+    {
+      "name": "negative-offtopic [1/5]",
+      "inputs": "what is the weather in Amsterdam today?",
+      "metadata": {
+        "failure_modes": [
+          "negative-example"
+        ],
+        "curation_note": "Out of scope for the orchestrator; the correct behavior is to answer/decline without calling any tool (empty expected trajectory scores 1.0 only when the agent also calls nothing)."
+      },
+      "expected_output": null,
+      "output": "I can't check the weather. I only have tools for orchestration data: subscriptions, products, workflows, processes and related entities. For today's forecast in Amsterdam, a weather service like KNMI or Buienradar will have it.\n\nI can help with things like finding subscriptions, checking process statuses or starting a workflow.",
+      "metrics": {
+        "requests": 2,
+        "input_tokens": 28802,
+        "output_tokens": 206,
+        "cache_read.input_tokens": 28622,
+        "cache_read_input_tokens": 14311,
+        "cache_read_tokens": 14311,
+        "cost": 0.0052822
+      },
+      "attributes": {},
+      "scores": {
+        "TrajectoryMatch": {
+          "name": "TrajectoryMatch",
+          "value": 1.0,
+          "reason": "actual trajectory matches expected: []",
+          "source": {
+            "name": "TrajectoryMatch",
+            "arguments": {
+              "expected_trajectory": [],
+              "order": "exact"
+            }
+          },
+          "evaluator_version": null
+        }
+      },
+      "labels": {},
+      "assertions": {
+        "MaxToolCalls": {
+          "name": "MaxToolCalls",
+          "value": true,
+          "reason": "0 tool call(s), budget=8",
+          "source": {
+            "name": "MaxToolCalls",
+            "arguments": [
+              8
+            ]
+          },
+          "evaluator_version": null
+        }
+      },
+      "task_duration": 1.8271288510004524,
+      "total_duration": 1.8276212215423584,
+      "source_case_name": "negative-offtopic",
+      "trace_id": null,
+      "span_id": null,
+      "evaluator_failures": []
+    },
+    {
+      "name": "negative-offtopic [2/5]",
+      "inputs": "what is the weather in Amsterdam today?",
+      "metadata": {
+        "failure_modes": [
+          "negative-example"
+        ],
+        "curation_note": "Out of scope for the orchestrator; the correct behavior is to answer/decline without calling any tool (empty expected trajectory scores 1.0 only when the agent also calls nothing)."
+      },
+      "expected_output": null,
+      "output": "I can't check the weather. I don't have a weather or internet tool, only tools for the orchestration system (subscriptions, products, workflows and processes). A weather site or app like KNMI or Buienradar will have today's forecast for Amsterdam.\n\nI can help with things like finding subscriptions, checking the status of a process, counting active subscriptions by product or starting a workflow.",
+      "metrics": {
+        "requests": 2,
+        "input_tokens": 28802,
+        "output_tokens": 286,
+        "cache_read.input_tokens": 28622,
+        "cache_read_input_tokens": 14311,
+        "thinking_tokens": 21,
+        "cache_read_tokens": 14311,
+        "cost": 0.0060822,
+        "reasoning.output_tokens": 21
+      },
+      "attributes": {},
+      "scores": {
+        "TrajectoryMatch": {
+          "name": "TrajectoryMatch",
+          "value": 1.0,
+          "reason": "actual trajectory matches expected: []",
+          "source": {
+            "name": "TrajectoryMatch",
+            "arguments": {
+              "expected_trajectory": [],
+              "order": "exact"
+            }
+          },
+          "evaluator_version": null
+        }
+      },
+      "labels": {},
+      "assertions": {
+        "MaxToolCalls": {
+          "name": "MaxToolCalls",
+          "value": true,
+          "reason": "0 tool call(s), budget=8",
+          "source": {
+            "name": "MaxToolCalls",
+            "arguments": [
+              8
+            ]
+          },
+          "evaluator_version": null
+        }
+      },
+      "task_duration": 2.559171998000238,
+      "total_duration": 2.5599682331085205,
+      "source_case_name": "negative-offtopic",
+      "trace_id": null,
+      "span_id": null,
+      "evaluator_failures": []
+    },
+    {
+      "name": "negative-offtopic [3/5]",
+      "inputs": "what is the weather in Amsterdam today?",
+      "metadata": {
+        "failure_modes": [
+          "negative-example"
+        ],
+        "curation_note": "Out of scope for the orchestrator; the correct behavior is to answer/decline without calling any tool (empty expected trajectory scores 1.0 only when the agent also calls nothing)."
+      },
+      "expected_output": null,
+      "output": "I can't check the weather. My tools only reach the orchestration system: subscriptions, products, workflows and processes. For Amsterdam's forecast, try a weather service like KNMI, Buienradar or a weather app.\n\nI can search subscriptions, check what processes are doing, or start a workflow for you.",
+      "metrics": {
+        "requests": 2,
+        "input_tokens": 28802,
+        "output_tokens": 198,
+        "cache_read.input_tokens": 28622,
+        "cache_read_input_tokens": 14311,
+        "cache_read_tokens": 14311,
+        "cost": 0.0052022
+      },
+      "attributes": {},
+      "scores": {
+        "TrajectoryMatch": {
+          "name": "TrajectoryMatch",
+          "value": 1.0,
+          "reason": "actual trajectory matches expected: []",
+          "source": {
+            "name": "TrajectoryMatch",
+            "arguments": {
+              "expected_trajectory": [],
+              "order": "exact"
+            }
+          },
+          "evaluator_version": null
+        }
+      },
+      "labels": {},
+      "assertions": {
+        "MaxToolCalls": {
+          "name": "MaxToolCalls",
+          "value": true,
+          "reason": "0 tool call(s), budget=8",
+          "source": {
+            "name": "MaxToolCalls",
+            "arguments": [
+              8
+            ]
+          },
+          "evaluator_version": null
+        }
+      },
+      "task_duration": 1.9981664489996547,
+      "total_duration": 1.9990193843841553,
+      "source_case_name": "negative-offtopic",
+      "trace_id": null,
+      "span_id": null,
+      "evaluator_failures": []
+    },
+    {
+      "name": "negative-offtopic [4/5]",
+      "inputs": "what is the weather in Amsterdam today?",
+      "metadata": {
+        "failure_modes": [
+          "negative-example"
+        ],
+        "curation_note": "Out of scope for the orchestrator; the correct behavior is to answer/decline without calling any tool (empty expected trajectory scores 1.0 only when the agent also calls nothing)."
+      },
+      "expected_output": null,
+      "output": "I can't check the weather. I only have tools for orchestration data: subscriptions, products, workflows and processes. A weather site or app will have today's forecast for Amsterdam.\n\nI can help with things like finding subscriptions, counting processes by status, or starting a workflow.",
+      "metrics": {
+        "requests": 2,
+        "input_tokens": 28802,
+        "output_tokens": 176,
+        "cache_read.input_tokens": 28622,
+        "cache_read_input_tokens": 14311,
+        "cache_read_tokens": 14311,
+        "cost": 0.0049822
+      },
+      "attributes": {},
+      "scores": {
+        "TrajectoryMatch": {
+          "name": "TrajectoryMatch",
+          "value": 1.0,
+          "reason": "actual trajectory matches expected: []",
+          "source": {
+            "name": "TrajectoryMatch",
+            "arguments": {
+              "expected_trajectory": [],
+              "order": "exact"
+            }
+          },
+          "evaluator_version": null
+        }
+      },
+      "labels": {},
+      "assertions": {
+        "MaxToolCalls": {
+          "name": "MaxToolCalls",
+          "value": true,
+          "reason": "0 tool call(s), budget=8",
+          "source": {
+            "name": "MaxToolCalls",
+            "arguments": [
+              8
+            ]
+          },
+          "evaluator_version": null
+        }
+      },
+      "task_duration": 1.810533454000506,
+      "total_duration": 1.810962200164795,
+      "source_case_name": "negative-offtopic",
+      "trace_id": null,
+      "span_id": null,
+      "evaluator_failures": []
+    },
+    {
+      "name": "negative-offtopic [5/5]",
+      "inputs": "what is the weather in Amsterdam today?",
+      "metadata": {
+        "failure_modes": [
+          "negative-example"
+        ],
+        "curation_note": "Out of scope for the orchestrator; the correct behavior is to answer/decline without calling any tool (empty expected trajectory scores 1.0 only when the agent also calls nothing)."
+      },
+      "expected_output": null,
+      "output": "I can't check the weather. My tools only reach orchestration data such as subscriptions, products, workflows and processes, and they have no weather or internet access. For today's forecast in Amsterdam, try a weather site like KNMI or buienradar.nl, or a weather app.\n\nI can help with orchestration questions, for example finding subscriptions, checking a process's status, counting failed tasks or starting a workflow.",
+      "metrics": {
+        "requests": 2,
+        "input_tokens": 28802,
+        "output_tokens": 264,
+        "cache_read.input_tokens": 28622,
+        "cache_read_input_tokens": 14311,
+        "cache_read_tokens": 14311,
+        "cost": 0.0058622
+      },
+      "attributes": {},
+      "scores": {
+        "TrajectoryMatch": {
+          "name": "TrajectoryMatch",
+          "value": 1.0,
+          "reason": "actual trajectory matches expected: []",
+          "source": {
+            "name": "TrajectoryMatch",
+            "arguments": {
+              "expected_trajectory": [],
+              "order": "exact"
+            }
+          },
+          "evaluator_version": null
+        }
+      },
+      "labels": {},
+      "assertions": {
+        "MaxToolCalls": {
+          "name": "MaxToolCalls",
+          "value": true,
+          "reason": "0 tool call(s), budget=8",
+          "source": {
+            "name": "MaxToolCalls",
+            "arguments": [
+              8
+            ]
+          },
+          "evaluator_version": null
+        }
+      },
+      "task_duration": 2.26613674500004,
+      "total_duration": 2.2669856548309326,
+      "source_case_name": "negative-offtopic",
+      "trace_id": null,
+      "span_id": null,
+      "evaluator_failures": []
+    },
+    {
+      "name": "negative-no-export [1/5]",
+      "inputs": "show me the active subscriptions, no need for a file",
+      "metadata": {
+        "failure_modes": [
+          "export",
+          "structured-filters"
+        ],
+        "curation_note": "\"Show me\" is viewing, explicitly not an export; a trajectory ending in export_query loses precision here."
+      },
+      "expected_output": null,
+      "output": "I found 3 active subscriptions: two nodes and the core link between them. No file was made.",
+      "metrics": {
+        "requests": 6,
+        "input_tokens": 88326,
+        "output_tokens": 644,
+        "cache_read.input_tokens": 85866,
+        "cache_read_input_tokens": 42933,
+        "thinking_tokens": 24,
+        "cache_read_tokens": 42933,
+        "cost": 0.0199466,
+        "reasoning.output_tokens": 24
+      },
+      "attributes": {},
+      "scores": {
+        "TrajectoryMatch": {
+          "name": "TrajectoryMatch",
+          "value": 1.0,
+          "reason": "LCS=2, precision=2/2=1.000, recall=2/2=1.000, F1=1.000 (expected: ['discover_filter_paths', 'search'], actual: ['discover_filter_paths', 'search'])",
+          "source": {
+            "name": "TrajectoryMatch",
+            "arguments": [
+              [
+                "discover_filter_paths",
+                "search"
+              ]
+            ]
+          },
+          "evaluator_version": null
+        }
+      },
+      "labels": {},
+      "assertions": {
+        "MaxToolCalls": {
+          "name": "MaxToolCalls",
+          "value": true,
+          "reason": "2 tool call(s), budget=8",
+          "source": {
+            "name": "MaxToolCalls",
+            "arguments": [
+              8
+            ]
+          },
+          "evaluator_version": null
+        }
+      },
+      "task_duration": 6.032293743000082,
+      "total_duration": 6.0332701206207275,
+      "source_case_name": "negative-no-export",
+      "trace_id": null,
+      "span_id": null,
+      "evaluator_failures": []
+    },
+    {
+      "name": "negative-no-export [2/5]",
+      "inputs": "show me the active subscriptions, no need for a file",
+      "metadata": {
+        "failure_modes": [
+          "export",
+          "structured-filters"
+        ],
+        "curation_note": "\"Show me\" is viewing, explicitly not an export; a trajectory ending in export_query loses precision here."
+      },
+      "expected_output": null,
+      "output": "I found 3 active subscriptions: two nodes and the core link between them. As you asked, I didn't create a file.",
+      "metrics": {
+        "requests": 6,
+        "input_tokens": 88330,
+        "output_tokens": 658,
+        "cache_read.input_tokens": 85866,
+        "cache_read_input_tokens": 42933,
+        "thinking_tokens": 23,
+        "cache_read_tokens": 42933,
+        "cost": 0.0200946,
+        "reasoning.output_tokens": 23
+      },
+      "attributes": {},
+      "scores": {
+        "TrajectoryMatch": {
+          "name": "TrajectoryMatch",
+          "value": 1.0,
+          "reason": "LCS=2, precision=2/2=1.000, recall=2/2=1.000, F1=1.000 (expected: ['discover_filter_paths', 'search'], actual: ['discover_filter_paths', 'search'])",
+          "source": {
+            "name": "TrajectoryMatch",
+            "arguments": [
+              [
+                "discover_filter_paths",
+                "search"
+              ]
+            ]
+          },
+          "evaluator_version": null
+        }
+      },
+      "labels": {},
+      "assertions": {
+        "MaxToolCalls": {
+          "name": "MaxToolCalls",
+          "value": true,
+          "reason": "2 tool call(s), budget=8",
+          "source": {
+            "name": "MaxToolCalls",
+            "arguments": [
+              8
+            ]
+          },
+          "evaluator_version": null
+        }
+      },
+      "task_duration": 5.8375589889992625,
+      "total_duration": 5.838173151016235,
+      "source_case_name": "negative-no-export",
+      "trace_id": null,
+      "span_id": null,
+      "evaluator_failures": []
+    },
+    {
+      "name": "negative-no-export [3/5]",
+      "inputs": "show me the active subscriptions, no need for a file",
+      "metadata": {
+        "failure_modes": [
+          "export",
+          "structured-filters"
+        ],
+        "curation_note": "\"Show me\" is viewing, explicitly not an export; a trajectory ending in export_query loses precision here."
+      },
+      "expected_output": null,
+      "output": "There are 3 active subscriptions: two nodes and the core link between them. No file was created.",
+      "metrics": {
+        "requests": 6,
+        "input_tokens": 88326,
+        "output_tokens": 644,
+        "cache_read.input_tokens": 85866,
+        "cache_read_input_tokens": 42933,
+        "thinking_tokens": 24,
+        "cache_read_tokens": 42933,
+        "cost": 0.0199466,
+        "reasoning.output_tokens": 24
+      },
+      "attributes": {},
+      "scores": {
+        "TrajectoryMatch": {
+          "name": "TrajectoryMatch",
+          "value": 1.0,
+          "reason": "LCS=2, precision=2/2=1.000, recall=2/2=1.000, F1=1.000 (expected: ['discover_filter_paths', 'search'], actual: ['discover_filter_paths', 'search'])",
+          "source": {
+            "name": "TrajectoryMatch",
+            "arguments": [
+              [
+                "discover_filter_paths",
+                "search"
+              ]
+            ]
+          },
+          "evaluator_version": null
+        }
+      },
+      "labels": {},
+      "assertions": {
+        "MaxToolCalls": {
+          "name": "MaxToolCalls",
+          "value": true,
+          "reason": "2 tool call(s), budget=8",
+          "source": {
+            "name": "MaxToolCalls",
+            "arguments": [
+              8
+            ]
+          },
+          "evaluator_version": null
+        }
+      },
+      "task_duration": 5.746405082999445,
+      "total_duration": 5.747229099273682,
+      "source_case_name": "negative-no-export",
+      "trace_id": null,
+      "span_id": null,
+      "evaluator_failures": []
+    },
+    {
+      "name": "negative-no-export [4/5]",
+      "inputs": "show me the active subscriptions, no need for a file",
+      "metadata": {
+        "failure_modes": [
+          "export",
+          "structured-filters"
+        ],
+        "curation_note": "\"Show me\" is viewing, explicitly not an export; a trajectory ending in export_query loses precision here."
+      },
+      "expected_output": null,
+      "output": "I found 3 active subscriptions: two nodes and the core link between them. They're in the table below, and I didn't create a file.",
+      "metrics": {
+        "requests": 6,
+        "input_tokens": 88326,
+        "output_tokens": 664,
+        "cache_read.input_tokens": 85866,
+        "cache_read_input_tokens": 42933,
+        "thinking_tokens": 23,
+        "cache_read_tokens": 42933,
+        "cost": 0.0201466,
+        "reasoning.output_tokens": 23
+      },
+      "attributes": {},
+      "scores": {
+        "TrajectoryMatch": {
+          "name": "TrajectoryMatch",
+          "value": 1.0,
+          "reason": "LCS=2, precision=2/2=1.000, recall=2/2=1.000, F1=1.000 (expected: ['discover_filter_paths', 'search'], actual: ['discover_filter_paths', 'search'])",
+          "source": {
+            "name": "TrajectoryMatch",
+            "arguments": [
+              [
+                "discover_filter_paths",
+                "search"
+              ]
+            ]
+          },
+          "evaluator_version": null
+        }
+      },
+      "labels": {},
+      "assertions": {
+        "MaxToolCalls": {
+          "name": "MaxToolCalls",
+          "value": true,
+          "reason": "2 tool call(s), budget=8",
+          "source": {
+            "name": "MaxToolCalls",
+            "arguments": [
+              8
+            ]
+          },
+          "evaluator_version": null
+        }
+      },
+      "task_duration": 5.609728399999767,
+      "total_duration": 5.6107704639434814,
+      "source_case_name": "negative-no-export",
+      "trace_id": null,
+      "span_id": null,
+      "evaluator_failures": []
+    },
+    {
+      "name": "negative-no-export [5/5]",
+      "inputs": "show me the active subscriptions, no need for a file",
+      "metadata": {
+        "failure_modes": [
+          "export",
+          "structured-filters"
+        ],
+        "curation_note": "\"Show me\" is viewing, explicitly not an export; a trajectory ending in export_query loses precision here."
+      },
+      "expected_output": null,
+      "output": "There are 3 active subscriptions: two nodes and the core link that connects them. They're in the table below, and I haven't made a download file.",
+      "metrics": {
+        "requests": 6,
+        "input_tokens": 88324,
+        "output_tokens": 670,
+        "cache_read.input_tokens": 85866,
+        "cache_read_input_tokens": 42933,
+        "thinking_tokens": 23,
+        "cache_read_tokens": 42933,
+        "cost": 0.0202026,
+        "reasoning.output_tokens": 23
+      },
+      "attributes": {},
+      "scores": {
+        "TrajectoryMatch": {
+          "name": "TrajectoryMatch",
+          "value": 1.0,
+          "reason": "LCS=2, precision=2/2=1.000, recall=2/2=1.000, F1=1.000 (expected: ['discover_filter_paths', 'search'], actual: ['discover_filter_paths', 'search'])",
+          "source": {
+            "name": "TrajectoryMatch",
+            "arguments": [
+              [
+                "discover_filter_paths",
+                "search"
+              ]
+            ]
+          },
+          "evaluator_version": null
+        }
+      },
+      "labels": {},
+      "assertions": {
+        "MaxToolCalls": {
+          "name": "MaxToolCalls",
+          "value": true,
+          "reason": "2 tool call(s), budget=8",
+          "source": {
+            "name": "MaxToolCalls",
+            "arguments": [
+              8
+            ]
+          },
+          "evaluator_version": null
+        }
+      },
+      "task_duration": 5.940815402000226,
+      "total_duration": 5.943171262741089,
+      "source_case_name": "negative-no-export",
+      "trace_id": null,
+      "span_id": null,
+      "evaluator_failures": []
+    }
+  ],
+  "failures": [],
+  "analyses": [],
+  "report_evaluator_failures": [],
+  "experiment_metadata": null,
+  "trace_id": null,
+  "span_id": null,
+  "dataset_name": "wfo_search_dataset"
+}

@@ -20,8 +20,8 @@ services:
 
   orchestrator:
     # Keep in sync with a released orchestrator-core that carries the search
-    # MCP toolset the agent's tool contract requires (>= 5.1.0).
-    image: ${CORE_IMAGE:-ghcr.io/workfloworchestrator/orchestrator-core:5.1.0}
+    # MCP toolset the agent's tool contract requires (>= 5.7.0a1).
+    image: ${CORE_IMAGE:-ghcr.io/workfloworchestrator/orchestrator-core:5.7.0a2}
     environment:
       DATABASE_URI: postgresql+psycopg://nwa:nwa@postgres/orchestrator-core
       MCP_ENABLED: "True"
