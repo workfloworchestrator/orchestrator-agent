@@ -22,11 +22,12 @@ and the outcome once the form is over.
 from __future__ import annotations
 
 import json
-from typing import Any
+from dataclasses import replace
+from typing import Any, assert_never
 
 from pydantic import ValidationError
 
-from orchestrator_agent.state import FormReply, Reply, SummaryTable
+from orchestrator_agent.state import FormReply, FormStatus, Reply, SummaryTable
 
 SUMMARY_CAPTION = "The workflow's own summary:"
 
@@ -38,27 +39,31 @@ def shown(reply: Reply) -> str:
     data as a line of markdown, and at the approval as a table of the values as they will be sent — always,
     as that is what is approved — with the workflow's own summary under it when its form has one.
     """
+    if reply.said:
+        return f"{reply.said}\n\n{shown(replace(reply, said=None))}"
     form = _form(reply)
     if form is None:
         return reply.text
     key = f"`{form.workflow_key}`"
-    if form.status == "gathering":  # the start was refused on a page: what core said, for the person to correct
-        where = f" (page {form.page}{f', {form.title}' if form.title else ''})" if form.page is not None else ""
-        said = "; ".join(f"{'.'.join(str(p) for p in e.loc) or 'page'}: {e.msg}" for e in form.rejected)
-        return f"**Workflow form {key}**{where}: the orchestrator rejected it. {said}".rstrip()
-    if form.status == "prepared":
-        lines = [f"**The {key} form is complete, but {form.reason}.**", *_values_table(form)]
-        return "\n".join(lines)
-    if form.status == "confirming":
-        tables = [line for table in form.summary for line in _summary_table(table)]
-        summary = ["", SUMMARY_CAPTION, *tables] if tables else []
-        return "\n".join([f"**Start workflow {key} with these values?**", *_values_table(form), *summary])
-    if form.status == "started":
-        outcome = f"Process id: `{form.process_id}`" if form.process_id else (form.reason or "")
-        return f"Workflow {key} started. {outcome}".rstrip()
-    if form.status == "cancelled":
-        return f"The {key} form was cancelled; nothing was started."
-    return f"The {key} form failed: {form.reason}"
+    match form.status:
+        case FormStatus.GATHERING:  # the start was refused on a page: what core said, for the person to correct
+            where = f" (page {form.page}{f', {form.title}' if form.title else ''})" if form.page is not None else ""
+            said = "; ".join(f"{'.'.join(str(p) for p in e.loc) or 'page'}: {e.msg}" for e in form.rejected)
+            return f"**Workflow form {key}**{where}: the orchestrator rejected it. {said}".rstrip()
+        case FormStatus.PREPARED:
+            return "\n".join([f"**The {key} form is complete, but {form.reason}.**", *_values_table(form)])
+        case FormStatus.CONFIRMING:
+            tables = [line for table in form.summary for line in _summary_table(table)]
+            summary = ["", SUMMARY_CAPTION, *tables] if tables else []
+            return "\n".join([f"**Start workflow {key} with these values?**", *_values_table(form), *summary])
+        case FormStatus.STARTED:
+            outcome = f"Process id: `{form.process_id}`" if form.process_id else (form.reason or "")
+            return f"Workflow {key} started. {outcome}".rstrip()
+        case FormStatus.CANCELLED:
+            return f"The {key} form was cancelled; nothing was started."
+        case FormStatus.FAILED:
+            return f"The {key} form failed: {form.reason}"
+    assert_never(form.status)
 
 
 def _summary_table(table: SummaryTable) -> list[str]:

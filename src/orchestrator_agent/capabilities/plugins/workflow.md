@@ -13,8 +13,9 @@ tools: [LIST_WORKFLOWS_TOOL, START_WORKFLOW_FORM_TOOL]
 A request to create, modify or terminate something is a workflow start — not a search. Do not look the
 product, port or subscription up first: the workflow's form lists its options itself. Do exactly this:
 
-1. List the workflows (filter by target: create / modify / terminate; for a task, list the tasks) and pick
-   the one for that kind of thing. Only if two *workflows* could genuinely be meant, ask which.
+1. List the workflows and pick the one for that kind of thing. Filter by target only when the request
+   plainly says create, modify or terminate; otherwise list them all, tasks included. Only if two
+   *workflows* could genuinely be meant, ask which.
 2. Open its form with the key exactly as listed, passing the subscription id when one is known.
 
 The form is then filled page by page, by you, in conversation with the person: the form's instructions and

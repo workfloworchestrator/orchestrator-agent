@@ -15,16 +15,7 @@ from orchestrator_agent.form_fill import session as fs
 from orchestrator_agent.form_fill.model import ACCEPTED, FieldSpec, askable, fields_in
 from orchestrator_agent.form_fill.pages import describe, obvious, tool_schema
 from orchestrator_agent.form_fill.skill import COMPLETE_NOTE, FormFillSkill
-from orchestrator_agent.form_fill.tools import BUDGET_SPENT, MAX_CALLS, PageToolset
 from orchestrator_agent.state import Decision, FormFillSession, FormInput, FormReply, Reply, SearchState
-from orchestrator_agent.tool_names import (
-    CANCEL_FORM_TOOL,
-    RESTART_FROM_PAGE_TOOL,
-    SEARCH_OPTIONS_TOOL,
-    SUBMIT_PAGE_TOOL,
-)
-
-from .test_form_widgets import Fetches
 
 PRODUCT = "a19904e6-fa9f-4dd3-90c1-08dbd6d0821e"
 
@@ -364,7 +355,7 @@ class TestToolSchema:
         )
         assert schema["properties"]["vlan"]["anyOf"] == [{"type": "integer"}, {"type": "null"}]
 
-    def test_the_frontends_hints_and_the_source_are_stripped(self):
+    def test_the_frontends_hints_are_stripped(self):
         prop = {
             "type": "string",
             "title": "Customer",
@@ -372,8 +363,6 @@ class TestToolSchema:
             "options": {"c-1": "Alder"},
             "uniforms": {"x": 1},
             "extraProperties": {"y": 2},
-            "optionsSource": {"url": "/customers"},
-            "x-widget": {"id": "optionsSource"},
         }
         page = WorkflowFormPage(page=0, complete=False, status="next", schema={"properties": {"customer": prop}})
         assert tool_schema(page)["properties"]["customer"] == {
@@ -384,18 +373,12 @@ class TestToolSchema:
         }
 
     def test_a_long_list_is_a_value_to_search_for(self):
-        long = {
-            "type": "string",
-            "title": "Customer",
-            "optionsSource": {"url": "/c"},
-            "x-widget": {"id": "optionsSource", "total": 784},
-        }
+        long = {"type": "string", "title": "Customer", "optionsSource": {"url": "/c"}}
         later = {
             "type": "integer",
             "title": "Port",
             "description": "A free port.",
             "optionsSource": {"url": "/ports/{node}", "dependsOn": {"node": "/node"}},
-            "x-widget": {"id": "optionsSource", "later": True},
         }
         page = WorkflowFormPage(
             page=0,
@@ -407,7 +390,7 @@ class TestToolSchema:
         assert schema["customer"] == {
             "type": "string",
             "title": "Customer",
-            "description": "784 options: find the value with search_options and give one it returned.",
+            "description": "Find the value with search_options and give one it returned.",
         }
         assert schema["port"]["type"] == "integer" and "depend on node" in schema["port"]["description"]
         assert schema["port"]["description"].startswith("A free port. ")
@@ -438,17 +421,8 @@ class TestObvious:
         page = WorkflowFormPage.model_validate(raw_page(0, schema_of(None, fields)))
         assert obvious(page) == {"confirm": ACCEPTED, "product": PRODUCT, "node": ["n1"]}
 
-    def test_an_optional_or_sourced_single_option_is_the_persons(self):
-        sourced = {
-            "type": "string",
-            "enum": ["p-1"],
-            "options": {"p-1": "The one free port"},
-            "x-widget": {"id": "optionsSource"},
-        }
-        schema = {
-            "properties": {"port": sourced, **dict([field("ticket", options={"t": "T"}, required=False)[:2]])},
-            "required": ["port"],
-        }
+    def test_an_optional_single_option_is_the_persons(self):
+        schema = {"properties": dict([field("ticket", options={"t": "T"}, required=False)[:2]]), "required": []}
         page = WorkflowFormPage(page=0, complete=False, status="next", schema=schema)
         assert obvious(page) == {}
 
@@ -545,16 +519,14 @@ class TestSubmit:
         told = await skill.submit(session, core, {})  # nothing for the model to fill: code consents
         assert told["status"] == "complete" and session.page_inputs[-1] == {"confirm": ACCEPTED}
 
-    async def test_a_searched_fields_value_must_come_from_a_search(self):
-        customers = [{"value": "c-1", "label": "Alder (UA)"}]
-        customers += [{"value": f"c-{n}", "label": f"Customer {n}"} for n in range(2, 14)]
+    async def test_a_searched_fields_value_is_found_through_core_which_refuses_any_other(self):
+        customers = {"c-1": "Alder (UA)", **{f"c-{n}": f"Customer {n}" for n in range(2, 14)}}
         core = SourcedCore(customers)
-        skill = FormFillSkill(fetch=Fetches({"/customers": customers}))
+        skill = FormFillSkill()
         _, session, told = await opened(core, "create_sourced", skill)
         assert "search_options" in told["page"]["fields"]["customer_id"]
-        strange = await skill.submit(session, core, {"customer_id": "c-1"})
-        assert strange["status"] == "rejected" and core.submitted == []  # refused here, never sent
-        assert "search_options" in strange["errors"][0]["message"]
+        strange = await skill.submit(session, core, {"customer_id": "Alder"})
+        assert strange["status"] == "rejected" and strange["errors"][0]["field"] == "customer_id"
         found = await skill.search(session, core, "customer_id", "alder")
         assert found == {
             "field": "customer_id",
@@ -562,17 +534,8 @@ class TestSubmit:
             "truncated": False,
         }
         accepted = await skill.submit(session, core, {"customer_id": "c-1"})
-        assert accepted["status"] == "complete" and core.submitted == [[{"customer_id": "c-1"}]]
-        assert session.found == {"customer_id": {"c-1": "Alder (UA)"}}
-
-    async def test_a_short_sourced_list_is_in_the_schema_and_its_values_stand(self):
-        customers = [{"value": "c-1", "label": "Alder (UA)"}, {"value": "c-2", "label": "Birch (UB)"}]
-        core = SourcedCore(customers)
-        skill = FormFillSkill(fetch=Fetches({"/customers": customers}))
-        _, session, told = await opened(core, "create_sourced", skill)
-        assert told["page"]["fields"]["customer_id"] == "Customer; required; one of c-1 (Alder (UA)), c-2 (Birch (UB))"
-        assert (await skill.submit(session, core, {"customer_id": "c-3"}))["status"] == "rejected"  # not an option
-        assert (await skill.submit(session, core, {"customer_id": "c-2"}))["status"] == "complete"
+        assert accepted["status"] == "complete"
+        assert Stop(skill.summary(session)).labels == {"customer_id": "Alder (UA)"}  # as core labelled it
 
     async def test_a_refusal_that_is_no_verdict_is_said_and_the_form_stays(self):
         core = FakeCore(reject=(1, "core is having a moment"))
@@ -591,19 +554,13 @@ class TestSubmit:
 
 
 class TestSearch:
-    async def test_the_pages_own_options_are_narrowed_here(self):
+    async def test_the_pages_own_options_are_all_there_are(self):
         core = FakeCore()
         _, session, _ = await opened(core, "create_demo_lightpath")
         skill = FormFillSkill()
         await skill.submit(session, core, {"product": PRODUCT})
         found = await skill.search(session, core, "speed", "10 gbit")
-        assert (
-            found["options"][0] == {"value": "10000", "label": "10 Gbit/s"} and found["total"] == 3
-        )  # the best fit first
-        assert (await skill.search(session, core, "speed", "100"))["options"] == [
-            {"value": "100000", "label": "100 Gbit/s"}
-        ]
-        assert len((await skill.search(session, core, "speed", ""))["options"]) == 3
+        assert [o["value"] for o in found["options"]] == list(SPEED) and found["total"] == 3
 
     async def test_a_field_without_options_or_not_on_the_page_is_said(self):
         core = FakeCore()
@@ -618,33 +575,19 @@ class TestSearch:
         assert "error" in await skill.search(session, core, "header", "x")  # shown-only
 
     async def test_a_source_that_waits_for_another_value_says_so(self):
-        source = {"url": "/ports/{node}", "dependsOn": {"node": "/node"}, "value": "value", "label": "label"}
-        ports = {"type": "integer", "title": "Port", "optionsSource": source}
-        node = field("node")
-        core = SourcedCore([], extra={"node": node[1], "port": ports}, required=["node", "port"])
-        skill = FormFillSkill(fetch=Fetches({"/ports/n1": [{"value": 7, "label": "Port 7"}]}))
+        source = {"url": "/ports/{node}", "dependsOn": {"node": "/node"}}
+        ports = {"type": "string", "title": "Port", "optionsSource": source}
+        core = SourcedCore({"p-7": "Port 7"}, sourced="port", needs="node", extra={"node": field("node")[1]})
+        core.properties["port"] = ports
+        skill = FormFillSkill()
         _, session, told = await opened(core, "create_sourced", skill)
-        assert "depend on node" in told["page"]["fields"]["port"] or "search_options" in told["page"]["fields"]["port"]
-        waiting = await skill.search(session, core, "port", "7")
-        assert waiting["error"].startswith("The options of Port depend on another field")
+        assert "search_options" in told["page"]["fields"]["port"]
+        assert "depend on node" in (await skill.search(session, core, "port", "7"))["error"]
         rejected = await skill.submit(session, core, {"node": "n1"})  # port missing: core rejects, the draft keeps node
         assert rejected["status"] == "rejected"
         found = await skill.search(session, core, "port", "7")
-        assert found["options"] == [{"value": 7, "label": "Port 7"}]
-        assert (await skill.submit(session, core, {"node": "n1", "port": 7}))["status"] == "complete"
-
-    async def test_an_unreachable_source_is_said_not_raised(self):
-        core = SourcedCore([{"value": "c-1", "label": "A"}] * 20)
-
-        async def down(url):
-            raise RuntimeError("connection refused")
-
-        skill = FormFillSkill(fetch=down)
-        _, session, told = await opened(core, "create_sourced", skill)
-        assert told["page"]["fields"]["customer_id"].endswith("find the value with search_options")
-        assert "could not be fetched" in (await skill.search(session, core, "customer_id", "a"))["error"]
-        refused = await skill.submit(session, core, {"customer_id": "made-up"})  # never free text: nothing was found
-        assert refused["status"] == "rejected" and core.submitted == []
+        assert found["options"] == [{"value": "p-7", "label": "Port 7"}]
+        assert (await skill.submit(session, core, {"node": "n1", "port": "p-7"}))["status"] == "complete"
 
 
 class TestRestart:
@@ -701,15 +644,6 @@ class TestSummaryAndStart:
             and summary.approval.args["labels"] == summary.labels
         )
 
-    async def test_a_searched_value_is_labelled_as_the_search_labelled_it(self):
-        customers = [{"value": f"c-{n}", "label": f"Customer {n}"} for n in range(12)]
-        core = SourcedCore(customers)
-        skill = FormFillSkill(fetch=Fetches({"/customers": customers}))
-        _, session, _ = await opened(core, "create_sourced", skill)
-        await skill.search(session, core, "customer_id", "customer 7")
-        await skill.submit(session, core, {"customer_id": "c-7"})
-        assert Stop(skill.summary(session)).labels == {"customer_id": "Customer 7"}
-
     async def test_the_workflows_own_summary_page_is_carried_to_the_approval(self):
         _, _, session, skill = await completed(summary_page=True)
         assert Stop(skill.summary(session)).summary == [SUMMARY_TABLE]
@@ -724,23 +658,10 @@ class TestSummaryAndStart:
         assert core.created == [{"workflow_key": "create_demo_lightpath", "json_data": session.page_inputs}]
         assert state.form_fill is None
 
-    async def test_a_rejection_cancels_and_a_rejection_with_words_reopens_the_form(self):
+    async def test_a_rejection_without_words_cancels_the_form(self):
         core, state, session, skill = await completed()
         fs.paused(session, pending_approval("req-1"), unseen=False)
         assert (await decide(skill, core, state, REJECT)).status == "cancelled" and state.form_fill is None
-        core, state, session, skill = await completed()
-        fs.paused(session, pending_approval("req-1"), unseen=False)
-        assert await decide(skill, core, state, "make it 1G") is None  # the model's turn
-        assert session.status == "gathering" and session.reason == "make it 1G" and session.pending is None
-        assert fs.current(session) is None and session.page_inputs  # every page still accepted: restart to change one
-
-    async def test_a_message_instead_of_a_decision_reopens_the_form_unless_the_stop_was_not_shown(self):
-        core, state, session, skill = await completed()
-        fs.paused(session, pending_approval("req-1"), unseen=True)
-        again = await decide(skill, core, state, None)
-        assert again.status == "confirming" and session.status == "confirming"  # shown again, nothing else
-        fs.paused(session, pending_approval("req-2"), unseen=False)
-        assert await decide(skill, core, state, None) is None and session.status == "gathering"
 
     async def test_an_unreadable_response_shows_the_approval_again(self):
         core, state, session, skill = await completed()
@@ -789,117 +710,43 @@ class TestSummaryAndStart:
         assert started.status == "started" and started.process_id is None and "weird" in started.reason
         assert state.form_fill is None
 
-    async def test_a_caller_that_cannot_approve_gets_the_form_prepared_not_started(self):
-        core, _, session, skill = await completed()
-        prepared = Stop(skill.prepared(session))
-        assert (
-            prepared.status == "prepared"
-            and prepared.values["speed"] == "10000"
-            and prepared.labels["speed"] == "10 Gbit/s"
-        )
-        assert session.status == "done" and core.created == []
-
     async def test_session_survives_a_json_round_trip(self):
-        core, _, session, skill = await completed()
-        await skill.search(session, core, "speed", "1")
+        _, _, session, _ = await completed()
         restored = FormFillSession.model_validate_json(session.model_dump_json())
         assert restored == session and fs.given(restored) == fs.given(session)
 
 
-# --- the toolset: the tools are the state --------------------------------------------------------------------
-
-
-class _Ctx:
-    """What a toolset reads off the run context: the state."""
-
-    def __init__(self, state: SearchState) -> None:
-        self.deps = SimpleNamespace(state=state)
-
-
-def names(tools: dict) -> set[str]:
-    return set(tools)
-
-
-class TestPageToolset:
-    async def test_the_tools_follow_the_form(self):
-        core = FakeCore()
-        skill = FormFillSkill()
-        toolset = PageToolset(skill, core)
-        state = SearchState()
-        assert await toolset.get_tools(_Ctx(state)) == {}  # no form: no tools (the handoff is another toolset's)
-        state, session, _ = await opened(core, "create_demo_lightpath", skill)
-        tools = await toolset.get_tools(_Ctx(state))
-        assert names(tools) == {SUBMIT_PAGE_TOOL, SEARCH_OPTIONS_TOOL, CANCEL_FORM_TOOL}
-        assert list(tools[SUBMIT_PAGE_TOOL].tool_def.parameters_json_schema["properties"]) == ["product"]
-        await skill.submit(session, core, {"product": PRODUCT})
-        tools = await toolset.get_tools(_Ctx(state))
-        assert names(tools) == {SUBMIT_PAGE_TOOL, SEARCH_OPTIONS_TOOL, RESTART_FROM_PAGE_TOOL, CANCEL_FORM_TOOL}
-        assert set(tools[SUBMIT_PAGE_TOOL].tool_def.parameters_json_schema["properties"]) == {
-            "customer_name",
-            "speed",
-            "speed_policer",
-        }
-        await skill.submit(session, core, FILLED)
-        await skill.submit(session, core, {"redundancy": "protected"})
-        assert names(await toolset.get_tools(_Ctx(state))) == {RESTART_FROM_PAGE_TOOL, CANCEL_FORM_TOOL}  # complete
-        fs.close(session)
-        assert await toolset.get_tools(_Ctx(state)) == {}
-
-    async def test_the_budget_of_a_page_is_spent_by_calls_without_progress(self):
-        core = FakeCore()
-        skill = FormFillSkill()
-        toolset = PageToolset(skill, core)
-        state, session, _ = await opened(core, "create_demo_lightpath", skill)
-        ctx = _Ctx(state)
-        tool = (await toolset.get_tools(ctx))[SEARCH_OPTIONS_TOOL]
-        for _ in range(MAX_CALLS):
-            assert "error" not in await toolset.call_tool(
-                SEARCH_OPTIONS_TOOL, {"field": "product", "words": ""}, ctx, tool
-            )
-        spent = await toolset.call_tool(SUBMIT_PAGE_TOOL, {"product": PRODUCT}, ctx, tool)
-        assert spent == {"error": BUDGET_SPENT} and session.page_inputs == []
-        assert (await toolset.call_tool(CANCEL_FORM_TOOL, {}, ctx, tool))["status"] == "cancelled"  # always possible
-
-
 class SourcedCore:
-    """A one-page form whose customer field says where its options come from (``optionsSource``)."""
+    """A one-page form with a field core left its ``optionsSource`` on: found with the options tool, checked by core."""
 
-    def __init__(self, customers, extra=None, required=None):
-        self.customers = customers
-        self.submitted: list[list[dict]] = []
-        self.extra = extra or {}
-        self.required = required or ["customer_id"]
+    def __init__(self, options: dict[str, str], *, sourced="customer_id", needs=None, extra=None):
+        self.options, self.sourced, self.needs = options, sourced, needs
+        source = {"type": "string", "title": "Customer", "optionsSource": {"url": "/customers"}}
+        self.properties = {**(extra or {}), sourced: source}
 
     def _schema(self) -> dict:
-        customer = {
-            "type": "string",
-            "title": "Customer",
-            "optionsSource": {"url": "/customers", "value": "value", "label": "label"},
-        }
-        properties = {"customer_id": customer, **self.extra} if "customer_id" in self.required else dict(self.extra)
-        return {
-            "type": "object",
-            "title": "Sourced",
-            "properties": properties,
-            "required": self.required,
-            "additionalProperties": False,
-        }
+        return {"type": "object", "title": "Sourced", "properties": self.properties, "required": list(self.properties)}
 
     async def __call__(self, name, args):
         if name == "list_workflows":
             return [{**FakeCore.WORKFLOWS[0], "name": "create_sourced"}]
         if name == "create_workflow":
             return {"id": FakeCore.PROCESS_ID}
+        if name == "get_workflow_form_options":
+            if self.needs and not args["page_values"].get(self.needs):
+                raise ModelRetry(f"The options of '{args['field']}' depend on {self.needs}: pass it in page_values")
+            words = (args["search"] or "").casefold()
+            found = [{"value": v, "label": label} for v, label in self.options.items() if words in label.casefold()]
+            return {"field": args["field"], "options": found, "total": len(found)}
         assert name == "get_workflow_form"
         inputs = args["page_inputs"]
         if not inputs:
             return raw_page(0, self._schema(), title="Sourced")
-        self.submitted.append(inputs)
         if lacking := missing_in(self._schema(), inputs[0]):
             return raw_page(0, self._schema(), lacking, title="Sourced")
-        return complete(1)
+        if (value := inputs[0][self.sourced]) not in self.options:
+            return raw_page(0, self._schema(), errors({self.sourced: "not among the field's options"}), title="Sourced")
+        return {**complete(1), "labels": {self.sourced: self.options[value]}}
 
-
-from types import SimpleNamespace  # noqa: E402
 
 from orchestrator_agent.form_fill.pending import pending_approval  # noqa: E402

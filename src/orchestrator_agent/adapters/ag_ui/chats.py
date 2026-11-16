@@ -43,7 +43,7 @@ from orchestrator_agent.adapters.ag_ui.contract import carried
 from orchestrator_agent.adapters.words import shown
 from orchestrator_agent.artifacts import DataArtifact, ExportArtifact, QueryArtifact
 from orchestrator_agent.persistence import load_messages
-from orchestrator_agent.state import Reply, SearchState
+from orchestrator_agent.state import FormPhase, Reply, SearchState
 
 UNTITLED = "New chat"
 TITLE_LENGTH = 80
@@ -91,7 +91,7 @@ def transcript(state: SearchState, *, last: int | None = None) -> list[Message]:
 def pending_stop(state: SearchState) -> dict[str, Any] | None:
     """The form stop the thread waits on, as the client was shown it; None when no form is open."""
     session = state.form_fill
-    if session is None or session.status == "done" or not session.pending:
+    if session is None or session.status == FormPhase.DONE or not session.pending:
         return None
     shown_as = session.pending.get("shown")
     return dict(shown_as) if isinstance(shown_as, dict) else None

@@ -5,7 +5,7 @@ from datetime import datetime, timezone
 from sqlalchemy import select
 
 from orchestrator.core import app_settings
-from orchestrator.core.db import ProductTable, SubscriptionTable, db, init_database
+from orchestrator.core.db import ProductTable, SubscriptionTable, WorkflowTable, db, init_database
 
 CUSTOMER_ID = "e6c5c2ae-1b3a-4f5f-9c1e-000000000001"
 
@@ -80,7 +80,11 @@ def seed() -> None:
         )
         for sid, desc, idx, status, insync, start in SUBSCRIPTIONS
     ]
-    db.session.add_all(products + subscriptions)
+    workflows = [
+        WorkflowTable(name=name, target="CREATE", description=description, is_task=False)
+        for name, description in (("create_node", "Create a network node"), ("create_port", "Create a customer port"))
+    ]
+    db.session.add_all([*products, *subscriptions, *workflows])
     db.session.commit()
     print(f"seed: created {len(products)} products, {len(subscriptions)} subscriptions")
 

@@ -35,7 +35,6 @@ ACCEPT = "accept"  # consent, given once per page by picking its one option
 SUMMARY = "summary"  # a table of the workflow's own recap: shown, never filled
 ACCEPTED = "ACCEPTED"  # the one value of an accept field that core's validation passes
 HINTS = ("uniforms", "extraProperties")  # pydantic-forms' widget hints: a frontend reads them, a model never does
-WIDGET_MARK = "x-widget"  # what the agent's own widget wrote on a field (``widgets.enrich``): its id, size, step
 
 _TYPES = {"string": "string", "integer": "integer", "number": "number", "boolean": "boolean"}
 _TYPES |= {"array": "list", "object": "object"}
@@ -69,7 +68,6 @@ class FieldSpec(BaseModel):
     fields: list[FieldSpec] | None = None  # of a nested object: its own fields
     read_only: bool = False  # shown, never submitted
     data: Any = None  # of a summary: its table
-    widget: dict[str, Any] | None = None  # what the agent's widget wrote on it, if one did (``widgets.enrich``)
 
 
 # --- the page schema -> its fields ---------------------------------------------------------------------------
@@ -118,13 +116,7 @@ def _spec(name: str, prop: Mapping[str, Any], *, required: bool) -> FieldSpec:
         fields=fields_in(shape) if kind == "object" and shape.get("properties") else None,
         read_only=bool(shape.get("readOnly")),
         data=hints.get("data") if shape.get("format") == SUMMARY else None,
-        widget=shape[WIDGET_MARK] if isinstance(shape.get(WIDGET_MARK), dict) else None,
     )
-
-
-def shape_of(prop: Mapping[str, Any]) -> dict[str, Any]:
-    """The field's shape with a nullable field's ``anyOf`` unwrapped: what a widget is matched on."""
-    return _shape(prop)[0]
 
 
 def _shape(prop: Mapping[str, Any]) -> tuple[dict[str, Any], bool]:
@@ -187,7 +179,6 @@ __all__ = [
     "ACCEPTED",
     "HINTS",
     "SUMMARY",
-    "WIDGET_MARK",
     "FieldSpec",
     "Option",
     "askable",
@@ -195,5 +186,4 @@ __all__ = [
     "fields_of",
     "label_of",
     "options_of",
-    "shape_of",
 ]

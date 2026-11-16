@@ -17,8 +17,8 @@ Core's form tool answers a page as one JSON Schema (``model``). Here that page b
 the ``submit_page`` tool (``tool_schema``: the fields a model may fill, the frontend's hints dropped, a long
 list described as something to search), the one-line description a tool result gives of it
 (``describe``), the values code fills without asking anyone (``obvious``), and the labels the approval
-shows for the values (``labels``). The page's own options come from the schema; a sourced field's from
-its source (``widgets``), written into the page once when it is first seen (``seen``).
+shows for the values (``labels``). A short option list is in the schema; a field core left its
+``optionsSource`` on has a long one, found through core's options tool.
 """
 
 from __future__ import annotations
@@ -35,15 +35,12 @@ from orchestrator_agent.form_fill.model import (
     ACCEPTED,
     HINTS,
     SUMMARY,
-    WIDGET_MARK,
     FieldSpec,
     askable,
     fields_of,
     label_of,
     options_of,
 )
-from orchestrator_agent.form_fill.widgets import WidgetContext
-from orchestrator_agent.form_fill.widgets.enrich import enrich
 from orchestrator_agent.state import FormFillSession, SummaryTable
 from orchestrator_agent.tool_names import GET_WORKFLOW_FORM_TOOL
 
@@ -65,14 +62,6 @@ async def page_of(call_tool: CallTool, workflow_key: str, pages: Sequence[Mappin
     return WorkflowFormPage.model_validate(await call_tool(GET_WORKFLOW_FORM_TOOL, request.model_dump()))
 
 
-async def seen(page: WorkflowFormPage, ctx: WidgetContext) -> WorkflowFormPage:
-    """The page with its sourced fields' options written in, as every tool and stop reads it from then on."""
-    if page.schema_ is None:
-        return page
-    enriched = await enrich(page.schema_, ctx)
-    return page.model_copy(update={"schema_": enriched.schema})
-
-
 # --- what a field is to the model --------------------------------------------------------------------------
 
 
@@ -81,10 +70,15 @@ def fillable(field: FieldSpec) -> bool:
     return askable(field) and field.format not in DISPLAY and field.format != ACCEPT
 
 
+def source_of(prop: Mapping[str, Any]) -> Mapping[str, Any] | None:
+    """The options source core left on a property (or a list's items, or a nullable field's branch); None without one."""
+    branches = [prop, prop.get("items"), *(prop.get("anyOf") or [])]
+    return next((b[OPTIONS_SOURCE] for b in branches if isinstance(b, Mapping) and OPTIONS_SOURCE in b), None)
+
+
 def searched(prop: Mapping[str, Any]) -> bool:
     """Whether a property is a long list: its options are found with ``search_options``, not read."""
-    mark = prop.get(WIDGET_MARK) or {}
-    return bool(mark.get("later") or mark.get("unknown")) or "total" in mark
+    return source_of(prop) is not None
 
 
 def obvious(page: WorkflowFormPage) -> dict[str, Any]:
@@ -92,8 +86,7 @@ def obvious(page: WorkflowFormPage) -> dict[str, Any]:
 
     Consent (an ``accept`` field) is given at the approval of the start, by the person, before anything is
     written; the field is filled so the form can reach that approval. A required choice of the form's own
-    with exactly one option is that option (as the one-item list a single-select list wants). A sourced
-    field's only option is never taken: it is what the network has now, and choosing it is the person's.
+    with exactly one option is that option (as the one-item list a single-select list wants).
     """
     values: dict[str, Any] = {}
     for field in fields_of(page):
@@ -101,7 +94,7 @@ def obvious(page: WorkflowFormPage) -> dict[str, Any]:
             continue
         if field.format == ACCEPT:
             values[field.name] = ACCEPTED
-        elif field.required and field.widget is None and len(options := options_of(field) or []) == 1:
+        elif field.required and len(options := options_of(field) or []) == 1:
             if field.kind != "list" or field.constraints.get("max_length") == 1:
                 values[field.name] = [options[0].value] if field.kind == "list" else options[0].value
     return values
@@ -133,24 +126,17 @@ def _property(spec: FieldSpec, prop: Mapping[str, Any]) -> dict[str, Any]:
     clean = _strip(prop)
     if not searched(prop):
         return clean
-    mark = prop.get(WIDGET_MARK) or {}
-    if mark.get("later"):
-        deps = ", ".join(_dependencies(prop)) or "another field of this page"
+    if deps := ", ".join(_dependencies(prop)):
         note = f"Its options depend on {deps}: submit the page with that first, then find a value with search_options."
-    elif mark.get("total"):
-        note = f"{mark['total']} options: find the value with search_options and give one it returned."
-    elif mark.get("unknown"):
-        note = "Find the value with search_options and give one it returned."
     else:
-        note = "Its source has no options right now: tell the person."
+        note = "Find the value with search_options and give one it returned."
     return {**clean, "description": " ".join(filter(None, (spec.description, note)))}
 
 
 def _dependencies(prop: Mapping[str, Any]) -> list[str]:
     """The fields a sourced property's options depend on (``dependsOn`` pointers, by their first segment)."""
-    source = prop.get(OPTIONS_SOURCE) or ((prop.get("items") or {}).get(OPTIONS_SOURCE) if prop.get("items") else {})
     names: list[str] = []
-    for pointer in (source or {}).get(DEPENDS_ON, {}).values():
+    for pointer in (source_of(prop) or {}).get(DEPENDS_ON, {}).values():
         parsed = parse_pointer(str(pointer))
         if parsed is not None and parsed.segments:
             names.append(parsed.segments[0])
@@ -161,7 +147,7 @@ def _strip(prop: Mapping[str, Any]) -> dict[str, Any]:
     """The property without the frontend's hints, the widget's mark and the source: what a model reads."""
     out: dict[str, Any] = {}
     for key, value in prop.items():
-        if key in HINTS or key in (WIDGET_MARK, OPTIONS_SOURCE):
+        if key in HINTS or key == OPTIONS_SOURCE:
             continue
         if key == "items" and isinstance(value, Mapping):
             value = _strip(value)
@@ -208,19 +194,15 @@ def _option(value: Any, label: str) -> str:
 def labels(session: FormFillSession, values: Mapping[str, Any]) -> dict[str, Any]:
     """How the form shows each of ``values`` that is one of its field's options (an id says nothing to a person).
 
-    A field's own options label it; a searched value is labelled as the search that found it labelled it.
+    A field's own options label it; a searched value is labelled as core labelled it when it accepted the page.
     """
     from orchestrator_agent.form_fill import session as fs
 
     fields = fs.fields(session)
     shown = {name: label_of(fields[name], value) for name, value in values.items() if name in fields}
     result = {name: label for name, label in shown.items() if label is not None}
-    for name, value in values.items():
-        known = session.found.get(name) or {}
-        if isinstance(value, list) and any(str(item) in known for item in value):
-            result[name] = [known.get(str(item), item) for item in value]
-        elif not isinstance(value, list) and str(value) in known:
-            result[name] = known[str(value)]
+    for page_values, page_labels in zip(session.page_inputs, session.page_labels, strict=False):
+        result.update({name: label for name, label in page_labels.items() if page_values.get(name) == values.get(name)})
     return result
 
 
@@ -248,18 +230,9 @@ def summary_tables(session: FormFillSession) -> list[SummaryTable]:
     return [table for table in tables if table.get("labels")]
 
 
-def accepted_values(session: FormFillSession, field: FieldSpec) -> set[str] | None:
-    """The values a sourced field takes: those written into the page, or a search returned; None when core judges."""
-    if field.widget is None:
-        return None
-    inlined = {str(option.value) for option in options_of(field) or []}
-    return inlined | set(session.found.get(field.name, {}))
-
-
 __all__ = [
     "DISPLAY",
     "CallTool",
-    "accepted_values",
     "defaults",
     "describe",
     "fillable",
@@ -267,7 +240,6 @@ __all__ = [
     "obvious",
     "page_of",
     "searched",
-    "seen",
     "summary_tables",
     "tool_schema",
 ]

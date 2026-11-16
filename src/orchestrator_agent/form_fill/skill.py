@@ -16,10 +16,10 @@
 A form is filled by the model in conversation with the person: it reads their words into the current
 page and submits it (``submit``), searches a long list (``search``), brings an earlier page back
 (``restart``) or ends the form (``cancel``). Everything that must not be the model's is here, in code:
-which page is current and which pages core accepted (``session``), that a searched field only takes a
-value a search returned, what a page's schema fills by itself (``pages.obvious``), the summary of the
-start the person approves (``summary``), the start itself (``start``), and what their decision does
-(``handle``). Core's own validation is the only validation.
+which page is current and which pages core accepted (``session``), what a page's schema fills by itself
+(``pages.obvious``), the summary of the start the person approves (``summary``), the start itself
+(``start``), and what their decision does (``handle``). Core's own validation is the only validation: it
+also refuses a searched field's value that its options tool did not offer.
 """
 
 from __future__ import annotations
@@ -31,7 +31,7 @@ from dataclasses import field as dc_field
 from typing import Any
 
 import structlog
-from orchestrator.core.schemas.mcp_tools import WorkflowFormPage
+from orchestrator.core.schemas.mcp_tools import GetWorkflowFormOptionsRequest, WorkflowFormOptions, WorkflowFormPage
 from orchestrator.core.schemas.process import ProcessIdSchema
 from orchestrator.core.schemas.workflow import WorkflowSchema
 from pydantic import TypeAdapter, ValidationError
@@ -39,10 +39,9 @@ from pydantic_ai import ModelRetry
 from pydantic_forms.core import FormFieldError
 
 from orchestrator_agent.form_fill import session as fs
-from orchestrator_agent.form_fill.model import FieldSpec, fields_of, options_of
+from orchestrator_agent.form_fill.model import fields_of, options_of
 from orchestrator_agent.form_fill.pages import (
     CallTool,
-    accepted_values,
     defaults,
     describe,
     fillable,
@@ -50,20 +49,26 @@ from orchestrator_agent.form_fill.pages import (
     obvious,
     page_of,
     searched,
-    seen,
     summary_tables,
 )
 from orchestrator_agent.form_fill.session import Action, event_of, transition
-from orchestrator_agent.form_fill.widgets import (
-    Fetch,
-    Option,
-    WidgetContext,
-    narrow_options,
-    source_options,
-    widget_target,
+from orchestrator_agent.state import (
+    SUBSCRIPTION_ID,
+    Approval,
+    FormFillSession,
+    FormPhase,
+    FormReply,
+    FormStatus,
+    Reply,
+    SearchState,
 )
-from orchestrator_agent.state import SUBSCRIPTION_ID, Approval, FormFillSession, FormReply, Reply, SearchState
-from orchestrator_agent.tool_names import CREATE_WORKFLOW_TOOL, JSON_DATA_PARAM, LIST_WORKFLOWS_TOOL, WORKFLOW_KEY_PARAM
+from orchestrator_agent.tool_names import (
+    CREATE_WORKFLOW_TOOL,
+    GET_WORKFLOW_FORM_OPTIONS_TOOL,
+    JSON_DATA_PARAM,
+    LIST_WORKFLOWS_TOOL,
+    WORKFLOW_KEY_PARAM,
+)
 
 logger = structlog.get_logger(__name__)
 
@@ -83,27 +88,14 @@ def as_reply(data: FormReply, *, approval: Approval | None = None) -> Reply:
     return Reply(data.as_text(), approval=approval)
 
 
-def reply_of(session: FormFillSession, status: Any, **data: Any) -> Reply:
+def reply_of(session: FormFillSession, status: FormStatus, **data: Any) -> Reply:
     return as_reply(FormReply(workflow_key=session.workflow_key, status=status, **data))
-
-
-async def _no_fetch(url: str) -> Any:
-    raise RuntimeError("no API of core is configured to fetch a field's options from")
-
-
-def _values_of(pages: Sequence[Mapping[str, Any]]) -> dict[str, Any]:
-    return {name: value for page in pages for name, value in page.items()}
 
 
 @dataclass
 class FormFillSkill:
-    fetch: Fetch | None = None  # core's API, where a field's source is fetched from
     _catalogue: dict[str, str] | None = dc_field(default=None, init=False, repr=False)
     _catalogue_at: float = dc_field(default=0.0, init=False, repr=False)
-
-    def _context(self, call_tool: CallTool, values: Mapping[str, Any]) -> WidgetContext:
-        """What a sourced field may use to find its options: core's tools and API, and the values known."""
-        return WidgetContext(call_tool=call_tool, fetch=self.fetch or _no_fetch, values=dict(values))
 
     # --- core's catalogue ---------------------------------------------------
 
@@ -125,8 +117,7 @@ class FormFillSkill:
         """Open the form the model handed off: its first page from core; what the model is told about it.
 
         A subscription the model passed on is submitted by code where the first page asks for one (every
-        modify and terminate workflow's), so core's verdict on it is the first thing the model sees. A
-        new form replaces any open one.
+        modify and terminate workflow's), so core's verdict on it is the first thing the model sees.
         """
         session = FormFillSession(workflow_key=workflow_key)
         try:
@@ -137,7 +128,7 @@ class FormFillSkill:
         if first.complete:
             fs.opened(session, None)
             return {"status": "complete", "workflow": workflow_key, "note": COMPLETE_NOTE}
-        page = await seen(first, self._context(call_tool, {}))
+        page = first
         fs.opened(session, page)
         logger.info("Form-fill opened by the model", workflow=workflow_key, subscription_id=subscription_id)
         if subscription_id and any(f.name == SUBSCRIPTION_ID and fillable(f) for f in fields_of(page)):
@@ -150,10 +141,8 @@ class FormFillSkill:
     async def submit(self, session: FormFillSession, call_tool: CallTool, values: Mapping[str, Any]) -> dict[str, Any]:
         """Submit the current page with ``values``: core's verdict on it, and the page that follows.
 
-        What the model sent for fields the page does not have is dropped (and said). A searched field's
-        value must be one a search returned, or one written into the page: anything else is refused here,
-        without asking core, which takes any string for such a field. What the page fills by itself goes
-        in on top.
+        What the model sent for fields the page does not have is dropped (and said). What the page fills
+        by itself goes in on top.
         """
         page = fs.current(session)
         if page is None:
@@ -162,9 +151,6 @@ class FormFillSkill:
         given = {name: value for name, value in values.items() if name in specs}
         ignored = [name for name in values if name not in specs]
         submitted = {**given, **obvious(page)}
-        if problems := _strangers(session, specs, given):
-            fs.rejected(session, submitted, problems)
-            return _rejected(page, problems, ignored)
         try:
             verdict = await page_of(call_tool, session.workflow_key, [*session.page_inputs, submitted])
         except ModelRetry as exc:  # no verdict on the page: core refuses, or is in trouble
@@ -177,11 +163,10 @@ class FormFillSkill:
             fs.rejected(session, submitted, verdict.errors)
             return _rejected(page, verdict.errors, ignored)
         if verdict.complete:
-            fs.accepted(session, submitted, None)
+            fs.accepted(session, submitted, verdict.labels, None)
             return {"status": "complete", "note": COMPLETE_NOTE}
-        next_page = await seen(verdict, self._context(call_tool, {**fs.given(session), **submitted}))
-        fs.accepted(session, submitted, next_page)
-        result: dict[str, Any] = {"status": "accepted", "next_page": describe(next_page)}
+        fs.accepted(session, submitted, verdict.labels, verdict)
+        result: dict[str, Any] = {"status": "accepted", "next_page": describe(verdict)}
         return {**result, "ignored": ignored} if ignored else result
 
     async def search(
@@ -189,9 +174,8 @@ class FormFillSkill:
     ) -> dict[str, Any]:
         """The options of a field of the current page that the words fit (the first ones, for none).
 
-        A long list is fetched from the field's source, searched on the server when the source can, else
-        narrowed here; what is returned is remembered as the values the field takes. The page's own
-        options are narrowed here. A field without options says what it takes instead.
+        A long list is searched by core's options tool; a short one is given whole. A field without
+        options says what it takes instead.
         """
         page = fs.current(session)
         if page is None:
@@ -203,35 +187,23 @@ class FormFillSkill:
             fields = sorted(f.name for f in fields_of(page) if fillable(f))
             return {"error": f"No field {field!r} on this page. Its fields: {fields}."}
         if searched(prop):
-            return await self._search_source(session, call_tool, spec, prop, words, limit)
-        if options := options_of(spec):
-            listed = [Option(value=o.value, label=o.label) for o in options]
-            matches = narrow_options(listed, words, limit) if words.strip() else listed[:limit]
-            return {"field": field, "options": _options(matches), "total": len(listed)}
+            request = GetWorkflowFormOptionsRequest(
+                workflow_key=session.workflow_key,
+                page_inputs=session.page_inputs,
+                field=field,
+                search=words.strip() or None,
+                page_values=session.draft,
+                limit=limit,
+            )
+            try:
+                answer = await call_tool(GET_WORKFLOW_FORM_OPTIONS_TOOL, request.model_dump())
+            except ModelRetry as exc:  # core says why it has none: a field it depends on, a source it cannot read
+                return {"error": str(exc)}
+            found = WorkflowFormOptions.model_validate(answer)
+            return {"field": field, "options": _options(found.options), "truncated": found.total > len(found.options)}
+        if options := options_of(spec):  # a short list: all of it is in the page's schema already
+            return {"field": field, "options": _options(options[:limit]), "total": len(options)}
         return {"field": field, "note": f"{spec.title} has no option list: it takes a {spec.kind}."}
-
-    async def _search_source(
-        self,
-        session: FormFillSession,
-        call_tool: CallTool,
-        spec: FieldSpec,
-        prop: Mapping[str, Any],
-        words: str,
-        limit: int,
-    ) -> dict[str, Any]:
-        ctx = self._context(call_tool, fs.known(session))
-        try:
-            options = await source_options(widget_target(prop), ctx, search=words.strip() or None)
-        except Exception as exc:  # the source is an add-on; its failure is said, not raised
-            logger.warning("Form-fill: a field's options could not be fetched", field=spec.name, error=str(exc))
-            return {"error": f"The options of {spec.title} could not be fetched: {exc}"}
-        if options is None:
-            return {
-                "error": f"The options of {spec.title} depend on another field of this page: submit the page with that first."
-            }
-        listed = list(options)[:limit]
-        fs.found(session, spec.name, {option.value: option.label for option in listed})
-        return {"field": spec.name, "options": _options(listed), "truncated": len(options) > limit}
 
     async def restart(self, session: FormFillSession, call_tool: CallTool, page: Any) -> dict[str, Any]:
         """Page ``page`` (an accepted one) is current again, as core now describes it; what came after it is dropped."""
@@ -249,7 +221,7 @@ class FormFillSkill:
         if verdict.complete:  # the form no longer has that page: it is complete as it stands
             fs.restarted(session, index, None)
             return {"status": "complete", "note": COMPLETE_NOTE}
-        restarted = await seen(verdict, self._context(call_tool, _values_of(kept)))
+        restarted = verdict
         fs.restarted(session, index, restarted)
         if verdict.status == "rejected":
             fs.rejected(session, {}, verdict.errors)
@@ -273,7 +245,7 @@ class FormFillSkill:
         """The ``create_workflow`` call: what the person approves is exactly what is sent."""
         return {WORKFLOW_KEY_PARAM: session.workflow_key, JSON_DATA_PARAM: session.page_inputs}
 
-    def _outcome(self, session: FormFillSession, status: Any, **data: Any) -> FormReply:
+    def _outcome(self, session: FormFillSession, status: FormStatus, **data: Any) -> FormReply:
         """Every value to be submitted, with its label, and the defaults that apply: what the person approves."""
         given = fs.given(session)
         return FormReply(
@@ -292,7 +264,7 @@ class FormFillSkill:
         A form that ends in the workflow's own summary page (core's summary form) has its tables on the
         reply as well: what the workflow's author wants confirmed, as core made it of these very values.
         """
-        data = self._outcome(session, "confirming")
+        data = self._outcome(session, FormStatus.CONFIRMING)
         # The call is shown as it will be made; ``labels`` only says what its ids stand for.
         args = {**self._create_args(session), **({"labels": data.labels} if data.labels else {})}
         hint = f"Start workflow `{session.workflow_key}` with these values?"
@@ -300,7 +272,7 @@ class FormFillSkill:
 
     def prepared(self, session: FormFillSession) -> Reply:
         """Every page validated, nothing started: this caller cannot approve a start. The form closes."""
-        data = self._outcome(session, "prepared", reason=CANNOT_APPROVE)
+        data = self._outcome(session, FormStatus.PREPARED, reason=CANNOT_APPROVE)
         fs.close(session)
         return as_reply(data)
 
@@ -321,14 +293,14 @@ class FormFillSkill:
                     return self._refused(session, verdict)
             logger.exception("Form-fill: create_workflow failed", workflow=session.workflow_key)
             fs.close(session)
-            return reply_of(session, "failed", reason=str(exc) or type(exc).__name__)
+            return reply_of(session, FormStatus.FAILED, reason=str(exc) or type(exc).__name__)
         fs.close(session)
         try:
             process_id = str(ProcessIdSchema.model_validate(result).id)
         except ValidationError:  # core answered, so it started; what it answered goes back as it came
             logger.error("Form-fill: create_workflow answered without a process id", workflow=session.workflow_key)
-            return reply_of(session, "started", reason=str(result))
-        return reply_of(session, "started", process_id=process_id)
+            return reply_of(session, FormStatus.STARTED, reason=str(result))
+        return reply_of(session, FormStatus.STARTED, process_id=process_id)
 
     def _refused(self, session: FormFillSession, verdict: WorkflowFormPage) -> Reply:
         """Core refused the start on a page: that page is current again with core's verdict; the person reads it."""
@@ -339,7 +311,7 @@ class FormFillSkill:
         fs.rejected(session, rejected, verdict.errors)
         data = FormReply(
             workflow_key=session.workflow_key,
-            status="gathering",
+            status=FormStatus.GATHERING,
             page=index,
             title=page.title,
             rejected=list(verdict.errors),
@@ -360,40 +332,21 @@ class FormFillSkill:
         if session is None or not session.pending:
             return None  # no approval is out: there is nothing to decide, and nothing is started
         event = event_of(state.form_input, session.unseen)
-        match transition(fs.FormPhase(session.status), event):
+        match transition(session.status, event):
             case Action.NOTHING:
                 return None
             case Action.START:
                 reply = await self.start(session, call_tool)
             case Action.CANCEL:
                 fs.close(session)
-                reply = reply_of(session, "cancelled")
+                reply = reply_of(session, FormStatus.CANCELLED)
             case Action.SUMMARY:
                 reply = self.summary(session)
             case Action.REOPEN:
                 fs.reopened(session, getattr(event, "reason", None))
                 return None
-        state.form_fill = None if session.status == "done" else session
+        state.form_fill = None if session.status == FormPhase.DONE else session
         return reply
-
-
-def _strangers(
-    session: FormFillSession, specs: Mapping[str, FieldSpec], given: Mapping[str, Any]
-) -> list[FormFieldError]:
-    """A searched field's values that no search returned and the page does not list: refused here, not sent."""
-    problems: list[FormFieldError] = []
-    for name, value in given.items():
-        allowed = accepted_values(session, specs[name])
-        if allowed is None:
-            continue
-        items = value if isinstance(value, list) else [value]
-        if strangers := [item for item in items if str(item) not in allowed]:
-            message = (
-                f"{strangers!r} is not among the options of {specs[name].title}: find the value with "
-                "search_options and give one it returned."
-            )
-            problems.append(FormFieldError(loc=[name], msg=message, type="value_error"))
-    return problems
 
 
 def _rejected(page: WorkflowFormPage, errors: Sequence[FormFieldError], ignored: Sequence[str]) -> dict[str, Any]:
@@ -406,7 +359,7 @@ def _rejected(page: WorkflowFormPage, errors: Sequence[FormFieldError], ignored:
     return {**result, "ignored": list(ignored)} if ignored else result
 
 
-def _options(options: Sequence[Option]) -> list[dict[str, Any]]:
+def _options(options: Sequence[Any]) -> list[dict[str, Any]]:
     return [{"value": option.value, "label": option.label} for option in options]
 
 

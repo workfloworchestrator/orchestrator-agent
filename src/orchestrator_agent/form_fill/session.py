@@ -22,7 +22,7 @@ with. Nothing else writes a session.
 
 from __future__ import annotations
 
-from collections.abc import Mapping, Sequence
+from collections.abc import Sequence
 from dataclasses import dataclass
 from enum import StrEnum
 from typing import Any
@@ -32,16 +32,7 @@ from pydantic_forms.core import FormFieldError
 
 from orchestrator_agent.form_fill.model import FieldSpec, fields_of
 from orchestrator_agent.form_fill.pending import PendingStop
-from orchestrator_agent.state import Decision, FormFillSession, FormInput
-
-
-class FormPhase(StrEnum):
-    """Where a form stands; the strings are the session's ``status`` as persisted."""
-
-    GATHERING = "gathering"  # the model fills the current page with the person
-    CONFIRMING = "confirming"  # every page accepted: the start is out for approval
-    DONE = "done"  # closed: started, cancelled, prepared or failed; the session is dropped
-
+from orchestrator_agent.state import Decision, FormFillSession, FormInput, FormPhase
 
 # --- events: what one turn brings, as the transport made of the person's response ---------------------------
 
@@ -88,7 +79,7 @@ class Action(StrEnum):
     START = "start"  # send ``create_workflow`` with the validated pages
     CANCEL = "cancel"  # close the form as cancelled
     SUMMARY = "summary"  # show the start to approve again
-    REOPEN = "reopen"  # back to gathering: the model acts on what the person said
+    REOPEN = "reopen"  # the model acts on what the person said; the start is offered again after it
     NOTHING = "nothing"  # not the form's turn: the model's
 
 
@@ -114,31 +105,34 @@ def transition(phase: FormPhase, event: Event) -> Action:
 
 
 def _fresh_page(session: FormFillSession) -> None:
-    """The current page just changed: nothing submitted for it yet, no verdict, the call budget full."""
+    """The current page just changed: nothing submitted for it yet, no verdict."""
     session.draft = {}
     session.rejected = []
-    session.calls = 0
 
 
 def opened(session: FormFillSession, page: WorkflowFormPage | None) -> None:
     """The form's first page, as core described it: the form is gathering (without one, it is complete at once)."""
     session.pages = [page] if page is not None else []
     session.page_inputs = []
-    session.status = "gathering" if page is not None else "confirming"
+    session.page_labels = []
+    session.status = FormPhase.GATHERING if page is not None else FormPhase.CONFIRMING
     _fresh_page(session)
 
 
-def accepted(session: FormFillSession, values: dict[str, Any], next_page: WorkflowFormPage | None) -> None:
-    """Core accepted the current page with ``values``: the next page is current, or the form is complete."""
+def accepted(
+    session: FormFillSession, values: dict[str, Any], labels: dict[str, Any], next_page: WorkflowFormPage | None
+) -> None:
+    """Core accepted the current page with ``values``, shown as ``labels``: the next page is current, or the form is complete."""
     session.page_inputs = [*session.page_inputs, values]
+    session.page_labels = [*session.page_labels, labels]
     session.pages = session.pages[: len(session.page_inputs)]
     _fresh_page(session)
     if next_page is None:
-        session.status = "confirming"
+        session.status = FormPhase.CONFIRMING
         session.reason = None
         return
     session.pages.append(next_page)
-    session.status = "gathering"
+    session.status = FormPhase.GATHERING
 
 
 def rejected(session: FormFillSession, values: dict[str, Any], errors: Sequence[FormFieldError]) -> None:
@@ -154,44 +148,36 @@ def restarted(session: FormFillSession, index: int, page: WorkflowFormPage | Non
     dropped): the start is to be approved again.
     """
     session.page_inputs = session.page_inputs[:index]
+    session.page_labels = session.page_labels[:index]
     session.pages = session.pages[:index]
     session.pending = None
     session.reason = None
     _fresh_page(session)
     if page is None:
-        session.status = "confirming"
+        session.status = FormPhase.CONFIRMING
         return
     session.pages.append(page)
-    session.status = "gathering"
-
-
-def found(session: FormFillSession, field: str, options: Mapping[Any, str]) -> None:
-    """A search returned these options for ``field``: a value among them is accepted, its label is known."""
-    known = session.found.setdefault(field, {})
-    known.update({str(value): label for value, label in options.items()})
-
-
-def counted(session: FormFillSession) -> None:
-    """One more tool call on the current page."""
-    session.calls += 1
+    session.status = FormPhase.GATHERING
 
 
 def reopened(session: FormFillSession, reason: str | None) -> None:
-    """The person did not approve the start and said why (or wrote instead): the form is the model's again."""
-    session.status = "gathering"
-    session.pending = None
+    """The person did not approve the start and said why (or wrote instead): this turn is the model's.
+
+    The form stays complete; the start is offered again after the model, unless it restarted a page.
+    """
     session.reason = reason
 
 
 def paused(session: FormFillSession, pending: PendingStop, *, unseen: bool) -> None:
     """The stop a transport sent as a pause, to map the response back; ``unseen`` when the person has not seen it yet."""
     session.pending = pending.model_dump(mode="json", exclude_none=True)
+    session.reason = None
     session.unseen = unseen
 
 
 def close(session: FormFillSession) -> None:
     """The form is over: started, cancelled, prepared or failed; the session is dropped by the skill."""
-    session.status = "done"
+    session.status = FormPhase.DONE
 
 
 # --- projections: the session read as one thing ---------------------------------------------------------------
@@ -213,11 +199,6 @@ def given(session: FormFillSession) -> dict[str, Any]:
     return {name: value for page in session.page_inputs for name, value in page.items()}
 
 
-def known(session: FormFillSession) -> dict[str, Any]:
-    """Every value in play: the accepted pages' and the current page's draft (what a dependent source may read)."""
-    return {**given(session), **session.draft}
-
-
 __all__ = [
     "Action",
     "Approved",
@@ -228,13 +209,10 @@ __all__ = [
     "Shown",
     "accepted",
     "close",
-    "counted",
     "current",
     "event_of",
     "fields",
-    "found",
     "given",
-    "known",
     "opened",
     "paused",
     "rejected",

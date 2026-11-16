@@ -44,6 +44,7 @@ from rich.console import Console
 from rich.table import Table
 
 from orchestrator_agent.agent import WFOAgent, build_agent, new_deps
+from orchestrator_agent.form_fill import build_form_fill_skill
 
 
 def build_model(name: str) -> Model | None:
@@ -274,7 +275,7 @@ def main() -> None:
         if model is None:
             reports[model_name] = None  # shown as "no key"
             continue
-        agent = build_agent(model)
+        agent = build_agent(model, form_fill=build_form_fill_skill())
         report = dataset.evaluate_sync(
             task_for(agent), name=model_name, max_concurrency=args.concurrency, repeat=args.repeat
         )

@@ -32,6 +32,7 @@ services:
       - ./docker/core/main.py:/home/orchestrator/main.py:ro
       - ./docker/core/seed.py:/home/orchestrator/seed.py:ro
       - ./docker/core/demo_products.py:/home/orchestrator/demo_products.py:ro
+      - ./docker/core/demo_workflows.py:/home/orchestrator/demo_workflows.py:ro
       - ./docker/core/entrypoint.sh:/home/orchestrator/entrypoint.sh:ro
     entrypoint: ["/home/orchestrator/entrypoint.sh"]
     ports:

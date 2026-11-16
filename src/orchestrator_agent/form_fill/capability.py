@@ -20,6 +20,7 @@ The skill runs *inside* the agent run, through the framework's own seams:
 - ``get_instructions`` renders, per request, the rules of filling and where the form stands.
 - ``before_run`` carries out the person's decision on a pending approval, before anything is rendered for
   the model: a start, a cancel, or the form reopened with what they said.
+- ``after_run`` offers the start again when the model's turn left the form complete.
 - ``before_model_request`` answers in the model's place where the skill has the answer — the outcome of
   that decision, and the approval as soon as core says the form is complete: the model is skipped and the
   skill's reply is the run's output, recorded in message history like any model answer. The reply is also left on the state (``SearchState.form_reply``, transient): the transport turns
@@ -30,6 +31,7 @@ The skill calls core through the agent's own MCP session, so a turn costs no sec
 
 from __future__ import annotations
 
+from dataclasses import replace
 from typing import TYPE_CHECKING, Any
 
 import structlog
@@ -40,13 +42,13 @@ from pydantic_ai.messages import ModelResponse, TextPart
 from pydantic_ai.models import ModelRequestContext
 from pydantic_ai.toolsets import CombinedToolset
 
-from orchestrator_agent.form_fill.handoff import FormDeps, build_handoff_toolset
 from orchestrator_agent.form_fill.instructions import render
-from orchestrator_agent.form_fill.tools import PageToolset
-from orchestrator_agent.state import Reply, SearchState
+from orchestrator_agent.form_fill.tools import FormDeps, PageToolset, build_handoff_toolset
+from orchestrator_agent.state import FormPhase, Reply, SearchState
 
 if TYPE_CHECKING:
     from pydantic_ai.mcp import MCPToolset
+    from pydantic_ai.run import AgentRunResult
 
     from orchestrator_agent.form_fill.skill import FormFillSkill
 
@@ -77,7 +79,7 @@ class FormFillCapability(AbstractCapability[FormDeps]):
     def _instructions(self, ctx: RunContext[FormDeps]) -> str:
         """The form's instructions while one is open; nothing otherwise."""
         session = ctx.deps.state.form_fill
-        if session is None or session.status == "done":
+        if session is None or session.status == FormPhase.DONE:
             return ""
         return render(session, hitl=ctx.deps.state.hitl)
 
@@ -90,6 +92,18 @@ class FormFillCapability(AbstractCapability[FormDeps]):
         """
         state = ctx.deps.state
         state.form_reply = await self._claim(state)
+
+    async def after_run(self, ctx: RunContext[FormDeps], *, result: AgentRunResult[Any]) -> AgentRunResult[Any]:
+        """The start offered again when the model's turn left the form complete.
+
+        The person wrote instead of approving and the model answered without changing a page: the approval
+        they had is gone with their message, so a new one goes out under what the model said.
+        """
+        state = ctx.deps.state
+        session = state.form_fill
+        if state.hitl and state.form_reply is None and session is not None and session.status == FormPhase.CONFIRMING:
+            state.form_reply = replace(self.skill.summary(session), said=str(result.output))
+        return result
 
     async def before_model_request(
         self, ctx: RunContext[FormDeps], request_context: ModelRequestContext
@@ -129,7 +143,7 @@ class FormFillCapability(AbstractCapability[FormDeps]):
         For a caller that cannot approve, every page validated and nothing started instead; the form closes.
         """
         session = state.form_fill
-        if session is None or session.status != "confirming" or session.pending:
+        if session is None or session.status != FormPhase.CONFIRMING or session.pending:
             return None
         if state.hitl:
             return self.skill.summary(session)

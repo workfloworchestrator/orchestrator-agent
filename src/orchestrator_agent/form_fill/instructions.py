@@ -14,7 +14,7 @@
 """What the model is told while a form is open: the rules of filling it, and where the form stands.
 
 Rendered per model request from the session, so the model always reads the current page, the pages
-accepted with their values, core's last verdict and the searches so far. The rules are short and
+accepted with their values and core's last verdict. The rules are short and
 generic: the page's fields are in the ``submit_page`` tool's schema, not here.
 """
 
@@ -35,7 +35,8 @@ You are filling the input form of this workflow with the person, page by page. C
 - A field with a short option list: pick the value whose label is what the person means. A field whose description says to search: call `search_options` with their words and give only a value it returned. When the words fit several options, or none, ask the person which, naming the options; never pick for them.
 - Submit as soon as every required field is known; leave an optional field out unless the person said something about it. When the orchestrator rejects the page, fix what it names from what the person said, or ask.
 - Ask for everything still missing on the page in one short message, in plain words, with the choices when there are a few. Do not ask again for what was already said, and do not explain the form's mechanics.
-- A change to an earlier page: `restart_from_page`, then submit it again. A person who no longer wants the workflow, or asks for something else: `cancel_form` first.
+- A change to an earlier page: `restart_from_page`, then submit it again. A person who no longer wants the workflow: `cancel_form`.
+- A question or request on the side: answer it with your other tools and leave the form open, then say in one line what the form still needs.
 - When `submit_page` answers 'complete', write nothing: the person is shown the values and approves the start themselves. Never say that something was started; only the start's own message says that."""
 
 NO_APPROVAL = "- This client cannot approve a start: the form can be prepared here, not started. Say so if the person asks to start."
@@ -50,7 +51,6 @@ def render(session: FormFillSession, *, hitl: bool) -> str:
     lines.append("### Where the form stands")
     lines.extend(_accepted(session))
     lines.extend(_current(session))
-    lines.extend(_found(session))
     if session.reason:
         lines.append(f"The person did not approve the start and said: {json.dumps(session.reason)}. Act on it.")
     return "\n".join(lines)
@@ -86,18 +86,6 @@ def _current(session: FormFillSession) -> list[str]:
     if session.rejected:
         said = "; ".join(f"{'.'.join(str(p) for p in error.loc) or 'page'}: {error.msg}" for error in session.rejected)
         lines.append(f"The orchestrator rejected that: {said}")
-    return lines
-
-
-def _found(session: FormFillSession) -> list[str]:
-    if not session.found:
-        return []
-    lines = ["Options found so far:"]
-    for field, options in session.found.items():
-        shown = ", ".join(
-            f"{value} ({label})" if label != value else value for value, label in list(options.items())[:25]
-        )
-        lines.append(f"- {field}: {shown}")
     return lines
 
 

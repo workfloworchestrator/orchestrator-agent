@@ -75,9 +75,8 @@ def test_a_form_with_no_page_left_is_complete_and_an_accepted_page_starts_the_ne
     assert session.status == "confirming" and fs.current(session) is None
     fs.opened(session, _page(0))
     fs.rejected(session, {"a": 1}, [])
-    fs.counted(session)
-    fs.accepted(session, {"a": 1}, _page(1))
-    assert (session.draft, session.rejected, session.calls) == ({}, [], 0)
+    fs.accepted(session, {"a": 1}, {}, _page(1))
+    assert (session.draft, session.rejected) == ({}, [])
     fs.restarted(session, 0, None)  # the form has no page there any more
     assert session.status == "confirming" and session.pages == [] and session.page_inputs == []
 

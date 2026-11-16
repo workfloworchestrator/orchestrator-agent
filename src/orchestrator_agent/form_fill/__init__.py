@@ -22,19 +22,12 @@ completions (LibreChat's ask-user tool) or AG-UI (an interrupt).
 from orchestrator_agent.form_fill.capability import FormFillCapability
 from orchestrator_agent.form_fill.pages import CallTool
 from orchestrator_agent.form_fill.skill import FormFillSkill
-from orchestrator_agent.form_fill.widgets import CoreApi, Fetch, api_base
-from orchestrator_agent.settings import agent_settings
 from orchestrator_agent.state import Approval, FormInput, FormReply, Reply
 
 
-def build_form_fill_skill(*, fetch: Fetch | None = None) -> FormFillSkill:
-    """The skill as configured.
-
-    A field's options are read from the ``optionsSource`` it carries and fetched from core's API, the origin
-    of its MCP endpoint unless configured otherwise, as the person asking.
-    """
-    base = api_base(agent_settings.WFO_CORE_MCP_URL, agent_settings.WFO_CORE_API_URL)
-    return FormFillSkill(fetch=fetch or CoreApi(base, allowed_hosts=agent_settings.WFO_OPTIONS_HOSTS))
+def build_form_fill_skill() -> FormFillSkill:
+    """The skill as configured."""
+    return FormFillSkill()
 
 
 __all__ = [

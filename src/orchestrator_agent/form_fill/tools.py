@@ -11,33 +11,39 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""The page tools: what the model fills the current page of an open form with.
+"""The form's tools: the handoff that opens a form, and the page tools the model fills it with.
 
-The tool set is the state. While a form is gathering, ``submit_page`` takes the current page's fields as its
+Deciding *that* a message asks to start a workflow, and *which* one, is the model's: it calls
+``start_workflow_form`` with a key from ``list_workflows``. One form is open at a time, and the start itself
+is never the model's (``skill``).
+
+The page tool set is the state. While a form is gathering, ``submit_page`` takes the current page's fields as its
 parameters (core's own schema for the page, ``pages.tool_schema``) and ``search_options`` finds a long
 list's values; once a page is accepted ``restart_from_page`` can bring it back; ``cancel_form`` ends the
 form. Without an open form there are no tools. The tools are built anew for every run step from the
 session, so the parameters follow the page. Nothing here validates a value: core judges a page, and a
-searched field only takes a value a search returned (``skill``).
+searched field's value core checks against its options.
 """
 
 from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any
 
-from pydantic_ai import RunContext
+from pydantic_ai import ModelRetry, RunContext
 from pydantic_ai.tools import ToolDefinition
+from pydantic_ai.toolsets import FunctionToolset
 from pydantic_ai.toolsets.abstract import AbstractToolset, ToolsetTool
 from pydantic_ai.ui import StateDeps
 from pydantic_core import SchemaValidator, core_schema
 
 from orchestrator_agent.form_fill import session as fs
 from orchestrator_agent.form_fill.pages import CallTool, tool_schema
-from orchestrator_agent.state import SearchState
+from orchestrator_agent.state import FormPhase, SearchState
 from orchestrator_agent.tool_names import (
     CANCEL_FORM_TOOL,
     RESTART_FROM_PAGE_TOOL,
     SEARCH_OPTIONS_TOOL,
+    START_WORKFLOW_FORM_TOOL,
     SUBMIT_PAGE_TOOL,
 )
 
@@ -48,12 +54,6 @@ FormDeps = StateDeps[SearchState]
 
 # The arguments as the model sent them: core judges a page, nothing here does.
 ANY_OBJECT = SchemaValidator(core_schema.dict_schema())
-
-MAX_CALLS = 12  # tool calls on one page before the model is told to stop and ask the person
-BUDGET_SPENT = (
-    "Too many tool calls on this page without progress. Stop, and ask the person in plain words what to do "
-    "next (or cancel the form if they no longer want it)."
-)
 
 SUBMIT_DESCRIPTION = (
     "Submit the current page of the form. The parameters are the page's fields: fill them from what the person "
@@ -95,6 +95,35 @@ RESTART_SCHEMA: dict[str, Any] = {
 EMPTY_SCHEMA: dict[str, Any] = {"type": "object", "properties": {}, "additionalProperties": False}
 
 
+def build_handoff_toolset(skill: FormFillSkill, call_tool: CallTool) -> FunctionToolset[FormDeps]:
+    """The ``start_workflow_form`` tool, checking the key against core's catalogue (through ``skill``)."""
+    toolset: FunctionToolset[FormDeps] = FunctionToolset()
+
+    @toolset.tool(name=START_WORKFLOW_FORM_TOOL)
+    async def start_workflow_form(
+        ctx: RunContext[FormDeps], workflow_key: str, subscription_id: str | None = None
+    ) -> dict[str, Any]:
+        """Open the input form of a workflow, to fill it with the person.
+
+        Pick ``workflow_key`` from ``list_workflows`` — exactly as listed — by target (create / modify /
+        terminate) and the kind of thing the caller names. For a workflow on an existing subscription pass
+        its ``subscription_id`` (from the request or earlier in the conversation): it fills the form's
+        first page. The result is the first page to fill; from then on fill the form with the page tools
+        (``submit_page``, ``search_options``, ...) as the form's instructions say. One form is open at a
+        time: while one is open this is refused.
+        """
+        if (current := ctx.deps.state.form_fill) is not None and current.status != FormPhase.DONE:
+            raise ModelRetry(
+                f"The form of {current.workflow_key!r} is open: continue it, or cancel_form first when the person "
+                "no longer wants it."
+            )
+        if workflow_key not in await skill.workflows(call_tool):
+            raise ModelRetry(f"Unknown workflow key {workflow_key!r}: pass a key exactly as list_workflows returns it.")
+        return await skill.open(ctx.deps.state, call_tool, workflow_key, subscription_id)
+
+    return toolset
+
+
 class PageToolset(AbstractToolset[FormDeps]):
     """The page tools of the open form, built per run step from the session (``FormFillSession``)."""
 
@@ -116,11 +145,11 @@ class PageToolset(AbstractToolset[FormDeps]):
 
     async def get_tools(self, ctx: RunContext[FormDeps]) -> dict[str, ToolsetTool[FormDeps]]:
         session = ctx.deps.state.form_fill
-        if session is None or session.status == "done":
+        if session is None or session.status == FormPhase.DONE:
             return {}
         tools: dict[str, ToolsetTool[FormDeps]] = {}
         page = fs.current(session)
-        if session.status == "gathering" and page is not None:
+        if session.status == FormPhase.GATHERING and page is not None:
             tools[SUBMIT_PAGE_TOOL] = self._tool(SUBMIT_PAGE_TOOL, SUBMIT_DESCRIPTION, tool_schema(page))
             tools[SEARCH_OPTIONS_TOOL] = self._tool(SEARCH_OPTIONS_TOOL, SEARCH_DESCRIPTION, SEARCH_SCHEMA)
         if session.page_inputs:
@@ -137,9 +166,6 @@ class PageToolset(AbstractToolset[FormDeps]):
             return {"error": "No form is open."}
         if name == CANCEL_FORM_TOOL:
             return self.skill.cancel(state)
-        fs.counted(session)
-        if session.calls > MAX_CALLS:
-            return {"error": BUDGET_SPENT}
         if name == SUBMIT_PAGE_TOOL:
             return await self.skill.submit(session, self.core, tool_args)
         if name == SEARCH_OPTIONS_TOOL:
@@ -151,4 +177,4 @@ class PageToolset(AbstractToolset[FormDeps]):
         return {"error": f"Unknown tool {name}."}
 
 
-__all__ = ["BUDGET_SPENT", "MAX_CALLS", "FormDeps", "PageToolset"]
+__all__ = ["FormDeps", "PageToolset", "build_handoff_toolset"]

@@ -14,6 +14,7 @@ from pydantic_ai.messages import ModelMessage, ModelRequest, ModelResponse, Text
 from pydantic_ai.models.function import AgentInfo, DeltaToolCall, FunctionModel
 from pydantic_ai.ui import StateDeps
 
+from orchestrator_agent.adapters.words import shown
 from orchestrator_agent.form_fill import FormFillCapability, FormFillSkill
 from orchestrator_agent.form_fill import session as fs
 from orchestrator_agent.form_fill.pending import pending_approval
@@ -206,6 +207,16 @@ class TestTheModelFillsTheForm:
         assert state.form_fill is None and state.form_reply is None
         assert script.tools[1] == [START_WORKFLOW_FORM_TOOL]  # the page tools are gone with the form
 
+    async def test_a_handoff_while_a_form_is_open_is_refused_and_the_form_stays(self):
+        core, state = FakeCore(), SearchState()
+        script = Script(
+            _call(START_WORKFLOW_FORM_TOOL, workflow_key=KEY),
+            _call(START_WORKFLOW_FORM_TOOL, workflow_key="create_nsi_light_path"),
+            _text("One form at a time."),
+        )
+        await _run(_agent(core, script), "create a lightpath", state)
+        assert state.form_fill.workflow_key == KEY and "is open" in str(script.requests[-1][-1].parts[0].content)
+
     async def test_a_handoff_to_an_unknown_key_is_a_retry_and_opens_nothing(self):
         script = Script(_call(START_WORKFLOW_FORM_TOOL, workflow_key="create_unicorn"), _text("No such workflow."))
         state = SearchState()
@@ -240,6 +251,19 @@ class TestThePersonDecides:
         assert reply.status == "confirming" and reply.values["speed"] == "1000" and "redundancy" not in reply.values
         assert state.form_reply.approval is not None and state.form_fill.pending is None  # a new approval to show
         assert core.created == []
+
+    async def test_a_question_at_the_approval_is_answered_and_the_start_is_offered_again(self):
+        core = FakeCore()
+        state = await _at_the_approval(core)
+        script = Script(_text("Protected means two paths."))
+        await _run(_agent(core, script), "what does protected mean?", state)
+        reply = state.form_reply
+        assert reply.approval is not None and reply.said == "Protected means two paths."
+        assert shown(reply).startswith("Protected means two paths.\n\n**Start workflow")
+        assert state.form_fill.status == "confirming" and core.created == []
+        fs.paused(state.form_fill, pending_approval("req-2"), unseen=False)
+        result = await _run(_agent(core, script), "[form response]", state, FormInput(decision=Decision.START))
+        assert FormReply.model_validate_json(result.output).status == "started" and len(core.created) == 1
 
     async def test_a_failing_skill_leaves_the_session_as_it_was_and_the_model_answers(self):
         class DownError(Exception):

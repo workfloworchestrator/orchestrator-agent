@@ -110,8 +110,7 @@ development setting.
 | `AGENT_API_KEY` | *(none)* | API key for the LLM provider |
 | `AGENT_API_VERSION` | *(none)* | API version for Azure OpenAI (e.g. `2024-12-01-preview`) |
 | `AGENT_DOMAIN_CONTEXT` | *(empty)* | Optional free-text domain knowledge appended to the agent system prompt (e.g. identifier conventions and their filter fields). Empty disables the section |
-| `WFO_CORE_API_URL` | *(derived)* | Base URL a form field's relative options source (`optionsSource.url`) is fetched from. Unset: the origin of `WFO_CORE_MCP_URL` |
-| `WFO_OPTIONS_HOSTS` | `[]` | Hosts besides core's that a form field's absolute options source may be fetched from, with the person's token |
+| `WFO_CORE_API_URL` | *(derived)* | Base URL of core's REST API, where a chat's export file is fetched from. Unset: the origin of `WFO_CORE_MCP_URL` |
 | `OAUTH2_ACTIVE` | `true` | Enable OIDC authentication on incoming requests (via `oauth2_lib`) |
 | `OAUTH2_OUTBOUND_ACTIVE` | *(unset)* | Enable OAuth2 client-credentials auth on outgoing requests to orchestrator-core. When unset, follows `OAUTH2_ACTIVE`; set to `true`/`false` to control outbound auth independently of incoming auth |
 | `OIDC_BASE_URL` | *(none)* | Base URL of the OIDC provider (required when `OAUTH2_ACTIVE=true`) |
@@ -297,7 +296,7 @@ them as Markdown (`adapters/words.py`); a calling agent gets the JSON.
 **What the model can and cannot do.** Inside a page the model is in the loop, so its quality matters there:
 it may misread a sentence or pick between two options it should have asked about, and the approval is where
 the person sees it. `AGENT_MODEL` should be a gpt-4o class model or better. What it cannot do is structural:
-it has no write tool, it cannot submit a searched value no search returned, it does not see or write the
+it has no write tool, core refuses a searched value its options tool did not offer, it does not see or write the
 approval, and typed words are never a start. One exception in the transports is forced by how a parent
 runtime works: kagent pauses once per tool call, so an approval that answers a response is not shown until
 the parent calls again; it is marked `unseen`, and the parent's next message shows it instead of reopening
@@ -307,8 +306,9 @@ the form.
 each page as one JSON Schema (`schema`): every reference inlined, so a choice or a nested model is read in
 place; `readOnly` on a field that is only shown; a choice's values in `enum` with their labels in `options`;
 the limits a list is validated against; consent as `format: "accept"`; each field's label and help text in
-`title` and `description`; and, for a field whose options live elsewhere, where they come from
-(`optionsSource`, pydantic-forms ≥ 2.10), which `form_fill/widgets/` reads as the person asking. Asked for a
+`title` and `description`. A field whose options live elsewhere (`optionsSource`, pydantic-forms ≥ 2.10)
+is read by core: a short list arrives as a choice, a long one keeps its `optionsSource` and is searched with
+core's `get_workflow_form_options`, and core labels the accepted values for the approval. Asked for a
 verdict (`verdict="result"`), a rejected page comes back as a result with core's errors. `form_fill/model.py`
 reads the schema into one `FieldSpec` per field and `form_fill/pages.py` makes of it what the model's tool
 takes and what the approval shows. No model is rebuilt from the schema. Core's tool results are validated

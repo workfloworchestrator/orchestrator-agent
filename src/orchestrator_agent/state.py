@@ -13,7 +13,7 @@
 
 from dataclasses import dataclass
 from enum import StrEnum
-from typing import Any, Literal
+from typing import Any
 from uuid import UUID
 
 from orchestrator.core.schemas.mcp_tools import WorkflowFormPage
@@ -73,6 +73,25 @@ class SummaryTable(TypedDict, total=False):
     columns: list[list[Any]]
 
 
+class FormPhase(StrEnum):
+    """Where a form stands; the strings are the session's ``status`` as persisted."""
+
+    GATHERING = "gathering"  # the model fills the current page with the person
+    CONFIRMING = "confirming"  # every page accepted: the start is out for approval
+    DONE = "done"  # closed: started, cancelled, prepared or failed; the session is dropped
+
+
+class FormStatus(StrEnum):
+    """What a turn of the form-fill skill came to."""
+
+    GATHERING = "gathering"  # core rejected a page at the start: the person corrects it
+    CONFIRMING = "confirming"  # the start is out for approval
+    STARTED = "started"
+    CANCELLED = "cancelled"
+    FAILED = "failed"
+    PREPARED = "prepared"  # every page validated, nothing started: this caller cannot approve a start
+
+
 class FormReply(BaseModel):
     """What a turn of the form-fill skill came to, as data: the text of its reply, one JSON object.
 
@@ -86,7 +105,7 @@ class FormReply(BaseModel):
     """
 
     workflow_key: str
-    status: Literal["gathering", "confirming", "started", "cancelled", "failed", "prepared"]
+    status: FormStatus
     page: int | None = None
     title: str | None = None
     rejected: list[FormFieldError] = Field(default_factory=list)
@@ -107,27 +126,26 @@ class Reply:
 
     text: str
     approval: Approval | None = None
+    said: str | None = None  # what the model wrote this turn, when the reply comes after it instead of in its place
 
 
 class FormFillSession(BaseModel):
     """The state of one workflow form being filled over turns (persisted with the thread).
 
     Code keeps the machine: ``page_inputs`` are the pages core accepted, exactly what ``create_workflow`` is
-    called with; ``pages`` are the pages seen in order as core described them (with the options their
-    sources gave), the accepted ones first and then the current one while ``gathering``. The model fills the
-    current page: ``draft`` is what it last submitted for it and ``rejected`` core's verdict on that;
-    ``found`` are the options its searches returned, by field, which is where a long list's value must come
-    from and where its label is read; ``calls`` counts its tool calls on the current page.
+    called with, and ``page_labels`` how core shows their searched values; ``pages`` are the pages seen in
+    order as core described them, the accepted ones first and then the current one while ``gathering``. The
+    model fills the current page: ``draft`` is what it last submitted for it and ``rejected`` core's verdict
+    on that.
     """
 
     workflow_key: str
-    status: Literal["gathering", "confirming", "done"] = "gathering"
+    status: FormPhase = FormPhase.GATHERING
     pages: list[WorkflowFormPage] = Field(default_factory=list)
     page_inputs: list[dict[str, Any]] = Field(default_factory=list)
     draft: dict[str, Any] = Field(default_factory=dict)
     rejected: list[FormFieldError] = Field(default_factory=list)
-    found: dict[str, dict[str, str]] = Field(default_factory=dict)  # field -> {value: label}
-    calls: int = 0
+    page_labels: list[dict[str, Any]] = Field(default_factory=list)  # per accepted page: field -> label
     pending: dict[str, Any] | None = None  # the approval the transport sent as a pause, to map the response back
     # The pending stop answered a response rather than a message: a parent runtime that pauses once per call
     # has not shown it yet, and its next message asks for it again.

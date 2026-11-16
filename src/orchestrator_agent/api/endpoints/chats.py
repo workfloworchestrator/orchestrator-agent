@@ -29,7 +29,7 @@ from orchestrator.core.db import db
 from orchestrator_agent.adapters.ag_ui.chats import Chat, ChatSummary, exports_of, pending_stop, title_of, transcript
 from orchestrator_agent.adapters.ag_ui.worker import AGUI_AGENT_TYPES
 from orchestrator_agent.api.dependencies import bearer_token
-from orchestrator_agent.form_fill.widgets.source import CoreApi, SourceError
+from orchestrator_agent.core_api import CoreApi, SourceError
 from orchestrator_agent.mcp_client import bind_outbound_token
 from orchestrator_agent.persistence import StoredThread, delete_thread, list_threads, load_thread
 from orchestrator_agent.security import subject_of

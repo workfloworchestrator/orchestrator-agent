@@ -25,8 +25,8 @@ from orchestrator_agent.adapters import A2AAdapter, ChatCompletionsAdapter, MCPA
 from orchestrator_agent.adapters.ag_ui.contract import openapi_with_the_agui_contract
 from orchestrator_agent.agent import build_agent
 from orchestrator_agent.api.api import api_router
+from orchestrator_agent.core_api import CoreApi, api_base
 from orchestrator_agent.form_fill import build_form_fill_skill
-from orchestrator_agent.form_fill.widgets import CoreApi
 from orchestrator_agent.mcp_client import build_core_toolset, verify_tool_contract
 from orchestrator_agent.observability import configure_langfuse, shutdown_langfuse
 from orchestrator_agent.security import AuthMiddleware, create_auth_manager
@@ -57,7 +57,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     app.state.agent = a2a.agent
     # The chats API serves a chat's export by passing on the CSV file it fetches from core's API, as the person
     # asking.
-    app.state.core_api = form_fill.fetch
+    app.state.core_api = CoreApi(api_base(agent_settings.WFO_CORE_MCP_URL, agent_settings.WFO_CORE_API_URL))
 
     mcp_app = MCPApp(build_agent(agent_settings.create_model()))
     app.mount("/mcp", mcp_app.app)
@@ -67,8 +67,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     stack = AsyncExitStack()
     await stack.__aenter__()
     await stack.enter_async_context(mcp_app)
-    if isinstance(form_fill.fetch, CoreApi):
-        stack.push_async_callback(form_fill.fetch.aclose)
+    stack.push_async_callback(app.state.core_api.aclose)
 
     logger.info(
         "Agent adapters started",

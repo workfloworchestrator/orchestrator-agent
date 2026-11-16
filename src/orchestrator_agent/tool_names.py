@@ -32,6 +32,7 @@ EXPORT_QUERY_TOOL = "export_query"
 # Workflow form-fill: walk a workflow's multi-page input form, then start it.
 LIST_WORKFLOWS_TOOL = "list_workflows"
 GET_WORKFLOW_FORM_TOOL = "get_workflow_form"
+GET_WORKFLOW_FORM_OPTIONS_TOOL = "get_workflow_form_options"
 CREATE_WORKFLOW_TOOL = "create_workflow"
 RESUME_WORKFLOW_PROCESS_TOOL = "resume_workflow_process"
 ABORT_WORKFLOW_PROCESS_TOOL = "abort_workflow_process"
@@ -63,6 +64,7 @@ ALL_TOOL_NAMES = (
     EXPORT_QUERY_TOOL,
     LIST_WORKFLOWS_TOOL,
     GET_WORKFLOW_FORM_TOOL,
+    GET_WORKFLOW_FORM_OPTIONS_TOOL,
     CREATE_WORKFLOW_TOOL,
     RESUME_WORKFLOW_PROCESS_TOOL,
     ABORT_WORKFLOW_PROCESS_TOOL,
@@ -103,6 +105,7 @@ __all__ = [
     "DISCOVER_FILTER_PATHS_TOOL",
     "EXPORT_QUERY_TOOL",
     "GET_VALID_OPERATORS_TOOL",
+    "GET_WORKFLOW_FORM_OPTIONS_TOOL",
     "GET_WORKFLOW_FORM_TOOL",
     "LIST_WORKFLOWS_TOOL",
     "PATH_CONSUMING_PARAMS",

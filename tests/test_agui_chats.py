@@ -31,7 +31,7 @@ from orchestrator_agent.adapters.ag_ui.interrupts import pause
 from orchestrator_agent.adapters.words import shown
 from orchestrator_agent.api.endpoints import chats
 from orchestrator_agent.artifacts import ExportArtifact, QueryArtifact
-from orchestrator_agent.form_fill.widgets import CoreApi
+from orchestrator_agent.core_api import CoreApi
 from orchestrator_agent.persistence import StoredThread, dump_messages
 from orchestrator_agent.state import Approval, FormFillSession, Reply, SearchState
 
