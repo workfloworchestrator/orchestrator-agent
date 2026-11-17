@@ -255,9 +255,9 @@ cases:
   metadata:
     failure_modes:
     - form-fill
-    curation_note: The customer is one of thirty, a list core leaves out of the page, so
-      its id is found with the options search before the page is submitted; a name is
-      never submitted as the value.
+    curation_note: The customer is one of thirty behind a route that searches and never
+      gives its whole list, so its id is found with the options search before the page
+      is submitted; a name is never submitted as the value.
   expected_output: null
   evaluators:
   - TrajectoryMatch:

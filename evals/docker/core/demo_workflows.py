@@ -2,7 +2,7 @@
 
 from typing import Annotated
 
-from fastapi import APIRouter
+from fastapi import APIRouter, HTTPException
 
 from orchestrator.core.forms import FormPage
 from orchestrator.core.targets import Target
@@ -40,16 +40,35 @@ def _customer(n: int) -> dict[str, str]:
     return {"customer_id": f"cust-{n:02d}", "fullname": name}
 
 
+CUSTOMERS = [_customer(n) for n in range(30)]
+
 router = APIRouter(prefix="/api/demo")
 
 
 @router.get("/customers")
-def list_customers() -> list[dict[str, str]]:
-    """Thirty customers: a list too long for a page schema, so it is searched."""
-    return [_customer(n) for n in range(30)]
+def list_customers(q: str = "") -> list[dict[str, str]]:
+    """The customers whose name contains ``q``, five at a time: a list that is searched, never seen whole."""
+    return [customer for customer in CUSTOMERS if q.casefold() in customer["fullname"].casefold()][:5]
 
 
-Customer = Annotated[str, OptionsSource(url="/api/demo/customers", value="customer_id", label="fullname")]
+@router.get("/customers/{customer_id}")
+def get_customer(customer_id: str) -> dict[str, str]:
+    """One customer by id: how a value is checked and labelled when the list is not whole."""
+    if (found := next((c for c in CUSTOMERS if c["customer_id"] == customer_id), None)) is None:
+        raise HTTPException(status_code=404)
+    return found
+
+
+Customer = Annotated[
+    str,
+    OptionsSource(
+        url="/api/demo/customers",
+        search="q",
+        lookup="/api/demo/customers/{value}",
+        value="customer_id",
+        label="fullname",
+    ),
+]
 
 
 class Speed(Choice):

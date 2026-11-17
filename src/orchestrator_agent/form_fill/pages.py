@@ -44,9 +44,6 @@ from orchestrator_agent.form_fill.model import (
 from orchestrator_agent.state import FormFillSession, SummaryTable
 from orchestrator_agent.tool_names import GET_WORKFLOW_FORM_TOOL
 
-# pydantic-forms' display widgets: shown to a person, never filled.
-DISPLAY = frozenset({"label", "divider", "summary", "markdown", "hidden"})
-
 
 class CallTool(Protocol):
     """Call one of core's MCP tools by name (bound to an open MCP session by the adapter)."""
@@ -67,7 +64,7 @@ async def page_of(call_tool: CallTool, workflow_key: str, pages: Sequence[Mappin
 
 def fillable(field: FieldSpec) -> bool:
     """A field the model may fill: not one that is only shown, and not consent, which is code's (``obvious``)."""
-    return askable(field) and field.format not in DISPLAY and field.format != ACCEPT
+    return askable(field) and field.format != ACCEPT
 
 
 def source_of(prop: Mapping[str, Any]) -> Mapping[str, Any] | None:
@@ -231,7 +228,6 @@ def summary_tables(session: FormFillSession) -> list[SummaryTable]:
 
 
 __all__ = [
-    "DISPLAY",
     "CallTool",
     "defaults",
     "describe",

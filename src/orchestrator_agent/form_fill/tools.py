@@ -65,8 +65,9 @@ SUBMIT_DESCRIPTION = (
 )
 SEARCH_DESCRIPTION = (
     "Find the options of a field of the current page that some words fit: for a field whose description says "
-    "to search, and for any option list too long to read. Returns options as value and label; such a field "
-    "only takes a value this tool returned. Empty words give the first options."
+    "to search, and for any option list too long to read. Returns options as value and label: a list that is "
+    "short enough comes whole, so pick the one the person means; such a field only takes a value this tool "
+    "returned. Empty words give the first options."
 )
 RESTART_DESCRIPTION = (
     "Change an answer on an earlier, accepted page: that page becomes the current page again and what came "

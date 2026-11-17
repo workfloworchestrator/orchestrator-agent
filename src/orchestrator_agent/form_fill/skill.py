@@ -77,7 +77,7 @@ logger = structlog.get_logger(__name__)
 _WORKFLOW_LIST: TypeAdapter[list[WorkflowSchema]] = TypeAdapter(list[WorkflowSchema])
 _WORKFLOWS_TTL = 300.0  # seconds the workflow catalogue is cached per skill instance
 
-MAX_FOUND = 25  # options a search answers with
+MAX_FOUND = 50  # options a search answers with; a list that fits comes whole, for the model to pick from
 COMPLETE_NOTE = (
     "Every page is accepted. The person is now shown the values and asked to approve the start: write nothing."
 )
@@ -200,6 +200,12 @@ class FormFillSkill:
             except ModelRetry as exc:  # core says why it has none: a field it depends on, a source it cannot read
                 return {"error": str(exc)}
             found = WorkflowFormOptions.model_validate(answer)
+            if not found.options:
+                return {
+                    "field": field,
+                    "options": [],
+                    "note": "No option contains those words: try fewer or other words.",
+                }
             return {"field": field, "options": _options(found.options), "truncated": found.total > len(found.options)}
         if options := options_of(spec):  # a short list: all of it is in the page's schema already
             return {"field": field, "options": _options(options[:limit]), "total": len(options)}
