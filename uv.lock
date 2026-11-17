@@ -2163,7 +2163,7 @@ wheels = [
 
 [[package]]
 name = "orchestrator-agent"
-version = "0.2.0"
+version = "0.5.0"
 source = { editable = "." }
 dependencies = [
     { name = "a2a-sdk", extra = ["http-server"] },
@@ -2209,7 +2209,7 @@ requires-dist = [
     { name = "langfuse", marker = "extra == 'langfuse'", specifier = ">=3.0.0" },
     { name = "mcp", specifier = ">=1.28.1,<2" },
     { name = "oauth2-lib", specifier = ">=3,<4" },
-    { name = "orchestrator-core", specifier = ">=5.7.0a1" },
+    { name = "orchestrator-core", specifier = ">=5.7.0a3" },
     { name = "pydantic-ai-slim", extras = ["mcp"], specifier = ">=2.0,<3" },
     { name = "pydantic-forms", specifier = ">=2.10.0" },
     { name = "pyyaml", specifier = ">=6.0" },
@@ -2237,7 +2237,7 @@ docs = [
 
 [[package]]
 name = "orchestrator-core"
-version = "5.7.0a2"
+version = "5.7.0a3"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "alembic" },
@@ -2278,9 +2278,9 @@ dependencies = [
     { name = "typer" },
     { name = "uvicorn", extra = ["standard"] },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/58/04/691e382351a0b29376e0866597af60bd23cde4a1f1b575faa7d439690d80/orchestrator_core-5.7.0a2.tar.gz", hash = "sha256:4e83af7665406288025dc6e2ece3c8383557aa9bc8ae5087283e558f995a7118", size = 468343, upload-time = "2026-11-11T17:40:00.979Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/3f/3e/9bd192f7ab933f81481d8d82bf83a308da1a656a49ab2447442ab1a4eec0/orchestrator_core-5.7.0a3.tar.gz", hash = "sha256:1a00a15cba1a49d79d85a7d40abd80e983538b07cd9c6d3c98649dd58c0094fa", size = 468946, upload-time = "2026-11-17T14:27:07.842Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/68/29/07f32ddf3b236351cf2fcc108816bebc281c672a69b305e753a742b69e7c/orchestrator_core-5.7.0a2-py3-none-any.whl", hash = "sha256:c35f492d93eb72e3974c9a256b50b59ce5393ee08b4680cc05557e67f3317e90", size = 763828, upload-time = "2026-11-11T17:39:59.132Z" },
+    { url = "https://files.pythonhosted.org/packages/04/38/d22891215b27739b29998c19f89d72ac7321ba8495ec33198b2c13053561/orchestrator_core-5.7.0a3-py3-none-any.whl", hash = "sha256:d6c1f9b277c6c942923e7f5ed50231f18d0c21e2ec86f842584fa5a2ba5655b3", size = 763867, upload-time = "2026-11-17T14:27:05.889Z" },
 ]
 
 [[package]]
@@ -3270,11 +3270,11 @@ wheels = [
 
 [[package]]
 name = "semver"
-version = "3.1.0"
+version = "3.1.1"
 source = { registry = "https://pypi.org/simple" }
-sdist = { url = "https://files.pythonhosted.org/packages/92/f5/e1dfe8e1d91c54ce212fd93916eb01fd1c590f413be0a0978c39a97aa1bb/semver-3.1.0.tar.gz", hash = "sha256:14bc073439513d7773662a338f4db9829cf16c12b74b9568e2d2689975fbd7fc", size = 304162, upload-time = "2026-09-12T18:38:14.045Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/0e/50/2932d6434608c7d954d0d4f4b71b697260e3b40c802425fc84c1eed12440/semver-3.1.1.tar.gz", hash = "sha256:149b26cabada6f63212f97e94505d21578cb1d280cf714827f328d5e70765fea", size = 292174, upload-time = "2026-11-09T11:38:46.145Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/be/02/bce7a1d70e9d0f6ea8623c16386138c251b5855af6cd3a11433d3fba4e66/semver-3.1.0-py3-none-any.whl", hash = "sha256:6e4998f8b4762acdfea85f9bfd5b4032e0bb50038dc04bf82011b42d5d1145c5", size = 18783, upload-time = "2026-09-12T18:38:12.457Z" },
+    { url = "https://files.pythonhosted.org/packages/57/1d/793b054cbd0a2e0b4694dacc22bad066d6635ce85dd6cdd1f98d95169e9b/semver-3.1.1-py3-none-any.whl", hash = "sha256:c00cf7dac88a352bc6a4a997d6ac0bf95ba835c589bc0c54f7b76f9e2a45123a", size = 18905, upload-time = "2026-11-09T11:38:44.556Z" },
 ]
 
 [[package]]
@@ -3515,17 +3515,18 @@ wheels = [
 
 [[package]]
 name = "typer"
-version = "0.28.0"
+version = "0.29.1"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "annotated-doc" },
     { name = "colorama", marker = "sys_platform == 'win32'" },
+    { name = "pydantic", extra = ["email"] },
     { name = "rich" },
     { name = "shellingham" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/ad/8f/21021859316f44289101638dc74d82e13d722d8533e4b8708a3ab7c8461a/typer-0.28.0.tar.gz", hash = "sha256:69ab84ef79fd601cff071bbd2566d855ecadfd93adbc4b3360b9924359bdd857", size = 205415, upload-time = "2026-11-06T08:37:19.779Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/6c/aa/0de7986aa1fa856adb961c67345189b97d13f6e250b34ba68884df865f07/typer-0.29.1.tar.gz", hash = "sha256:ab6eb3880bf67ce96147734717f9ec333c06f66e361f3ea947d0be43da39f242", size = 205843, upload-time = "2026-11-11T09:18:39.782Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/19/98/8ef60c7cd773dbab9d276a4c7bff505913a25b61acd8a9ef01ceeb70f554/typer-0.28.0-py3-none-any.whl", hash = "sha256:afd18929180b706c5e9a239f53c3c8136903553c0c2d460598bbaa924191d4ab", size = 123253, upload-time = "2026-11-06T08:37:18.611Z" },
+    { url = "https://files.pythonhosted.org/packages/05/ff/51969745f31cea6bcd12151e668febcf979656316e67a7755942267c1273/typer-0.29.1-py3-none-any.whl", hash = "sha256:00dbc549c13428bec1be55fe1f4d0fb8c6637a310e4f178ef14abe9534ee7b58", size = 121064, upload-time = "2026-11-11T09:18:38.671Z" },
 ]
 
 [[package]]
