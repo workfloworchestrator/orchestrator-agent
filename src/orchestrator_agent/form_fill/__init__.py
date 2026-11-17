@@ -37,7 +37,7 @@ def build_form_fill_skill(
     widget field. A field's options are read from the ``optionsSource`` it carries and fetched from core's API,
     the origin of its MCP endpoint unless configured otherwise, as the person asking.
     """
-    reader = ModelInterpreter(model) if model is not None else None
+    reader = ModelInterpreter(model, agent_settings.create_model_settings()) if model is not None else None
     base = api_base(agent_settings.WFO_CORE_MCP_URL, agent_settings.WFO_CORE_API_URL)
     return FormFillSkill(
         interpret=reader,

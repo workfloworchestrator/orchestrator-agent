@@ -26,6 +26,7 @@ See [Run the agent with your Orchestrator Core](../getting-started.md) for setup
 | `AGENT_API_BASE` | *(none)* | Base URL of an OpenAI-compatible provider, or the Azure endpoint |
 | `AGENT_API_KEY` | *(none)* | API key for the provider |
 | `AGENT_API_VERSION` | *(none)* | API version for Azure OpenAI, for example `2024-12-01-preview` |
+| `AGENT_MODEL_SETTINGS` | `{}` | JSON object of [model settings](#model-settings) sent with every model request |
 
 When `AGENT_API_BASE`, `AGENT_API_KEY` and `AGENT_API_VERSION` are all unset, the provider reads its own environment
 variable for the key, such as `OPENAI_API_KEY` or `ANTHROPIC_API_KEY`.
@@ -35,6 +36,24 @@ provider. Otherwise the custom path always constructs an OpenAI chat model, even
 provider. An empty environment value is still set; only unset values select the native provider path.
 
 See [How to change the language model](../guides/own-llm.md) for examples and provider dependencies.
+
+### Model settings
+
+`AGENT_MODEL_SETTINGS` is a JSON object of pydantic-ai model settings. They are sent with every model request: the
+agent's, and the one that reads a person's typed answers for a workflow form. Empty sends none, so the provider's
+defaults apply.
+
+```bash
+AGENT_MODEL_SETTINGS='{"temperature": 0.2, "thinking": "high", "max_tokens": 4096}'
+```
+
+The provider-independent keys are `temperature`, `top_p`, `max_tokens`, `seed`, `timeout`, `parallel_tool_calls`,
+`extra_headers`, `extra_body` and `thinking`. `thinking` is the reasoning effort: `false`, `true`, or one of `minimal`,
+`low`, `medium`, `high`, `xhigh` and `max`. Settings that belong to one provider carry its name as a prefix, such as
+`openai_reasoning_effort` or `anthropic_effort`.
+
+A model ignores a setting it does not support, and the agent does not check the keys, so a misspelled key has no
+effect. Reasoning models can reject `temperature`.
 
 ## Domain context
 

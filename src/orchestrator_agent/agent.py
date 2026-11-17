@@ -37,6 +37,7 @@ from orchestrator_agent.state import SearchState
 
 if TYPE_CHECKING:
     from pydantic_ai.models import KnownModelName, Model
+    from pydantic_ai.settings import ModelSettings
 
     from orchestrator_agent.form_fill import FormFillSkill
 
@@ -45,7 +46,12 @@ logger = structlog.get_logger(__name__)
 WFOAgent = Agent[StateDeps[SearchState], str]
 
 
-def build_agent(model: "Model | KnownModelName | str", *, form_fill: "FormFillSkill | None" = None) -> WFOAgent:
+def build_agent(
+    model: "Model | KnownModelName | str",
+    *,
+    form_fill: "FormFillSkill | None" = None,
+    model_settings: "ModelSettings | None" = None,
+) -> WFOAgent:
     """Build the capabilities-based WFO agent.
 
     Args:
@@ -53,6 +59,8 @@ def build_agent(model: "Model | KnownModelName | str", *, form_fill: "FormFillSk
         form_fill: The workflow form-fill skill to run in front of the model (A2A); it shares the
             agent's core MCP session. Only with it does the model get the handoff to the skill and
             lose core's write tools.
+        model_settings: Settings sent with every model request (temperature, thinking effort, ...); they
+            take precedence over the settings the model itself carries.
 
     Returns:
         A plain ``Agent`` ready to run inside ``async with agent:``.
@@ -64,6 +72,7 @@ def build_agent(model: "Model | KnownModelName | str", *, form_fill: "FormFillSk
     logger.debug("Building WFO agent", model=str(model), capability_count=len(capabilities))
     agent: WFOAgent = Agent(
         model=model,
+        model_settings=model_settings,
         deps_type=StateDeps[SearchState],
         instructions=load_system_prompt(),
         toolsets=[core_toolset],

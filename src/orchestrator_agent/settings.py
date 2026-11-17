@@ -13,13 +13,14 @@
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any, cast
 
 from pydantic import Field, SecretStr
 from pydantic_settings import BaseSettings
 
 if TYPE_CHECKING:
     from pydantic_ai.models import Model
+    from pydantic_ai.settings import ModelSettings
 
 
 class AgentSettings(BaseSettings):
@@ -50,6 +51,14 @@ class AgentSettings(BaseSettings):
     AGENT_API_VERSION: str | None = Field(
         default=None, description="API version for Azure OpenAI (e.g. 2024-12-01-preview)"
     )
+    AGENT_MODEL_SETTINGS: dict[str, Any] = Field(
+        default_factory=dict,
+        description="Settings passed to every model request, as a JSON object (e.g. "
+        '\'{"temperature": 0.2, "thinking": "high", "max_tokens": 4096}\'). Keys are pydantic-ai '
+        "model settings: the provider-independent ones (temperature, top_p, max_tokens, thinking, seed, timeout, ...) "
+        "and provider-specific ones prefixed with the provider (openai_reasoning_effort, anthropic_effort, ...). "
+        "A model ignores a setting it does not support. Empty sends none.",
+    )
     AGENT_DOMAIN_CONTEXT: str = Field(
         default="",
         description="Optional operator-supplied domain knowledge appended to the agent system prompt "
@@ -64,6 +73,14 @@ class AgentSettings(BaseSettings):
         description="Enable Langfuse OpenTelemetry tracing. Requires the 'langfuse' extra and the "
         "LANGFUSE_PUBLIC_KEY / LANGFUSE_SECRET_KEY / LANGFUSE_HOST environment variables.",
     )
+
+    def create_model_settings(self) -> ModelSettings | None:
+        """The pydantic-ai model settings from ``AGENT_MODEL_SETTINGS``; None when none are configured.
+
+        Pass them to the agent (``model_settings=``) rather than the model, so they also apply when the model
+        is the plain model string. The keys are not checked here: the provider-specific ones depend on the model.
+        """
+        return cast("ModelSettings", dict(self.AGENT_MODEL_SETTINGS)) if self.AGENT_MODEL_SETTINGS else None
 
     def create_model(self) -> str | Model:
         """Create a pydantic-ai model from settings.

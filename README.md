@@ -122,6 +122,7 @@ development setting.
 | `AGENT_API_BASE` | *(none)* | Custom base URL for the LLM provider (OpenAI-compatible) or Azure endpoint |
 | `AGENT_API_KEY` | *(none)* | API key for the LLM provider |
 | `AGENT_API_VERSION` | *(none)* | API version for Azure OpenAI (e.g. `2024-12-01-preview`) |
+| `AGENT_MODEL_SETTINGS` | `{}` | JSON object of model settings sent with every request, e.g. `{"temperature": 0.2, "thinking": "high"}`. See [Model settings](docs/reference/configuration.md#model-settings) |
 | `AGENT_DOMAIN_CONTEXT` | *(empty)* | Optional free-text domain knowledge appended to the agent system prompt (e.g. identifier conventions and their filter fields). Empty disables the section |
 | `OAUTH2_ACTIVE` | `true` | Enable OIDC authentication on incoming requests (via `oauth2_lib`) |
 | `OAUTH2_AUTHORIZATION_ACTIVE` | `true` | Enable request authorization through OPA when incoming authentication is on |

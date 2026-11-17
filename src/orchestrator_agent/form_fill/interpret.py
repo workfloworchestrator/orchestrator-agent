@@ -40,6 +40,7 @@ from typing import Any, Protocol
 import structlog
 from pydantic_ai import Agent, ModelRetry, StructuredDict
 from pydantic_ai.models import Model
+from pydantic_ai.settings import ModelSettings
 
 from orchestrator_agent.form_fill.model import FieldSpec, fields_in
 
@@ -128,13 +129,16 @@ class ModelInterpreter:
     """pydantic-ai as the interpreter: one run per reading, with the page schema's partial variant as the output type."""
 
     model: Model | str
+    settings: ModelSettings | None = None
 
     async def answers(self, form: Mapping[str, Any], words: Mapping[str, str]) -> dict[str, Any]:
         asked = fields_schema(form, words)
         if not asked["properties"]:
             return {}
         reading = StructuredDict(reading_schema(asked), name="Reading", description="The values the words meant.")
-        agent: Agent[None, Any] = Agent(self.model, output_type=reading, instructions=INSTRUCTIONS)
+        agent: Agent[None, Any] = Agent(
+            self.model, output_type=reading, instructions=INSTRUCTIONS, model_settings=self.settings
+        )
         prompt = "\n".join(
             [
                 f"Fields (JSON schema): {_schema(asked)}",
@@ -159,7 +163,9 @@ class ModelInterpreter:
             "additionalProperties": False,
         }
         choice = StructuredDict(schema, name="Choice", description="The option values the words fit.")
-        agent: Agent[None, Any] = Agent(self.model, output_type=choice, instructions=CHOOSE_INSTRUCTIONS)
+        agent: Agent[None, Any] = Agent(
+            self.model, output_type=choice, instructions=CHOOSE_INSTRUCTIONS, model_settings=self.settings
+        )
 
         @agent.output_validator
         def among_the_options(output: dict[str, Any]) -> dict[str, Any]:  # an invented value: the model tries again

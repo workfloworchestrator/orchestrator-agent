@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+from typing import Any
 
 os.environ.setdefault("DATABASE_URI", "postgresql://test:test@localhost:5432/test")
 
@@ -156,6 +157,18 @@ def _scripted(values):
 
 
 class TestModelInterpreter:
+    async def test_the_configured_model_settings_ride_on_every_run(self):
+        seen_settings: list[Any] = []
+
+        def model(messages, info: AgentInfo) -> ModelResponse:
+            seen_settings.append(info.model_settings)
+            return ModelResponse(parts=[ToolCallPart(tool_name=info.output_tools[0].name, args={"speed": ["10000"]})])
+
+        interpreter = ModelInterpreter(FunctionModel(model), settings={"temperature": 0.1, "max_tokens": 512})
+        await interpreter.answers(LIGHTPATH, {"speed": "ten gig"})
+        assert seen_settings
+        assert all(s and s["temperature"] == 0.1 and s["max_tokens"] == 512 for s in seen_settings)
+
     async def test_one_run_covers_the_page_and_the_model_sees_the_asked_fields_with_their_answers(self):
         model, seen = _scripted({"speed": ["10000"], "speed_policer": True})
         answers = {"speed": "ten gig please", "speed_policer": "yes please"}

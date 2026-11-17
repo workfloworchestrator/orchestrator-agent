@@ -49,7 +49,8 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     a2a_url = f"{agent_settings.BASE_URL}/"
     model = agent_settings.create_model()
     form_fill = build_form_fill_skill(model)
-    a2a = A2AAdapter(build_agent(model, form_fill=form_fill), url=a2a_url)
+    model_settings = agent_settings.create_model_settings()
+    a2a = A2AAdapter(build_agent(model, form_fill=form_fill, model_settings=model_settings), url=a2a_url)
     a2a.add_routes(app)
     # The same agent as an OpenAI-compatible chat model (LibreChat): forms through its ask-user tool.
     ChatCompletionsAdapter(a2a.agent).add_routes(app)
@@ -61,7 +62,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     app.state.core_toolset = core_toolset
     app.state.core_api = form_fill.fetch
 
-    mcp_app = MCPApp(build_agent(agent_settings.create_model()))
+    mcp_app = MCPApp(build_agent(agent_settings.create_model(), model_settings=model_settings))
     app.mount("/mcp", mcp_app.app)
 
     # Manage adapter lifecycles. The agents open MCP sessions per-run (async with agent),
@@ -79,6 +80,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
         agui_path="/agui/",
         mcp_path="/mcp",
         agent_model=agent_settings.AGENT_MODEL,
+        model_settings=sorted(agent_settings.AGENT_MODEL_SETTINGS),  # the keys only: headers can be secret
         form_fill_skill="literal",
     )
 
