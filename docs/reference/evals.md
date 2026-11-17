@@ -75,8 +75,11 @@ Without gates, failed assertions and low scores do not cause a non-zero exit. Ca
 `--fail-under`, the runner averages the per-score averages together with the assertion pass rate (when present).
 This aggregate is not a task-success percentage, and the floor does not require every assertion to pass.
 
-The report metadata records the model entry, its model settings and the host of its API endpoint. It does not
-record the Core image, the domain context or the git revision; note those yourself next to a saved report.
+The report metadata records the model entry, its model settings and the host of its API endpoint. Only settings that
+cannot carry a credential are recorded with their values (`temperature`, `top_p`, `max_tokens`, `thinking`, `seed`,
+`timeout`, `parallel_tool_calls`); any other key, such as `extra_headers`, is listed by name only, because saved reports
+can be committed as baselines. It does not record the Core image, the domain context or the git revision; note those
+yourself next to a saved report.
 
 ## Settings
 

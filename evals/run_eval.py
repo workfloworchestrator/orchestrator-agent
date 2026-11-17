@@ -73,10 +73,27 @@ def model_settings_for(name: str) -> ModelSettings | None:
     return settings.create_model_settings() if settings else None
 
 
+# Saved reports can be committed as baselines, so only settings that cannot carry a credential are written to them.
+# AGENT_MODEL_SETTINGS also accepts extra_headers, extra_body and provider-specific keys, which can.
+_REPORTABLE_SETTINGS = frozenset(
+    {"temperature", "top_p", "max_tokens", "thinking", "seed", "timeout", "parallel_tool_calls"}
+)
+
+
 def run_metadata(name: str) -> dict[str, object]:
-    """What to record in the report so a result can be tied to the configuration that produced it."""
-    base = settings.AGENT_API_BASE if name.startswith("agent:") and (settings := configured_agent(name)) else None
-    return {"model": name, "model_settings": model_settings_for(name) or {}, "api_host": urlparse(base).hostname}
+    """What to record in the report so a result can be tied to the configuration that produced it.
+
+    Model settings outside the allowlist are recorded by name only, so a report shows that they were set without
+    holding their values.
+    """
+    settings = configured_agent(name) if name.startswith("agent:") else None
+    model_settings = dict(settings.create_model_settings() or {}) if settings else {}
+    return {
+        "model": name,
+        "model_settings": {key: value for key, value in model_settings.items() if key in _REPORTABLE_SETTINGS},
+        "unreported_model_settings": sorted(set(model_settings) - _REPORTABLE_SETTINGS),
+        "api_host": urlparse(settings.AGENT_API_BASE).hostname if settings and settings.AGENT_API_BASE else None,
+    }
 
 
 def build_model(name: str) -> Model | None:
