@@ -280,6 +280,16 @@ TREE = {"type": "object", "properties": {"children": {"type": "array", "items": 
             id="references-in-a-lists-union-items",
         ),
         pytest.param({"type": "integer", "default": 5}, {"type": "integer", "default": 5}, id="no-reference-untouched"),
+        pytest.param(
+            {"type": "array", "items": True},
+            {"type": "array", "items": True},
+            id="boolean-schema-is-not-a-node-to-resolve",
+        ),
+        pytest.param(
+            {"anyOf": [{"anyOf": [{"anyOf": [{"anyOf": [{"anyOf": [{"$ref": "#/$defs/Kind"}]}]}]}]}]},
+            {"anyOf": [{"anyOf": [{"anyOf": [{"anyOf": [{"anyOf": [{"$ref": "#/$defs/Kind"}]}]}]}]}]},
+            id="reference-beyond-the-hop-limit-left-alone",
+        ),
     ],
 )
 def test_inline_argument_refs(argument, expected):
