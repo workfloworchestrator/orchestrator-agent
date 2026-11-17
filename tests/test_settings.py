@@ -128,7 +128,7 @@ def test_create_model_settings(configured, expected):
 
 def test_create_model_settings_returns_a_copy():
     settings = AgentSettings(AGENT_MODEL_SETTINGS={"temperature": 0.2})
-    settings.create_model_settings()["temperature"] = 1.0  # type: ignore[index]
+    settings.create_model_settings()["temperature"] = 1.0
     assert settings.AGENT_MODEL_SETTINGS == {"temperature": 0.2}
 
 

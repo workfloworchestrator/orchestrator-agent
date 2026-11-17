@@ -100,8 +100,8 @@ def build_model(name: str) -> Model | None:
     """The pydantic-ai model for a ``provider:model`` name, or None when the settings hold no key for that provider."""
     provider, _, model_name = name.partition(":")
     if provider == "agent":
-        settings = configured_agent(name)
-        model = settings.create_model() if settings else None
+        configured = configured_agent(name)
+        model = configured.create_model() if configured else None
         return model if isinstance(model, Model) else None  # a custom endpoint always yields a model, never a bare name
     if provider == "openai":
         if not eval_settings.openai_api_key:
