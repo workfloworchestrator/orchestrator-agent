@@ -33,6 +33,12 @@ dev = [
     "types-pyyaml>=6.0.12.20260518",
 ]
 
+docs = [
+    "mkdocs-material>=9.5",
+    "mkdocs-embed-external-markdown>=3.0.2",
+    "mkdocs-redirects==1.2.2",
+]
+
 [build-system]
 requires = ["uv_build"]
 build-backend = "uv_build"

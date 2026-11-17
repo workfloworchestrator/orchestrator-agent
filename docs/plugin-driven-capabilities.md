@@ -16,8 +16,21 @@ A plugin projects to **one capability identity**. With no `artifact:` it loads a
 `Capability` (instructions only); with `artifact: <type>` it loads as a `PluginCapability` carrying
 the matching builder from `ARTIFACT_BUILDERS` (instructions + the result hook, one id). Genuinely
 cross-cutting hooks (`FilterPathGuard`, `WriteToolGate`, `ProcessHistory`) are *not* plugins; they stay in `hooks.py`.
-`WriteToolGate` and the `workflow` plugin (it owns the form-fill handoff tool) are only part of the agent the
-form-fill skill runs in (A2A): `build_capabilities(form_fill=True)`.
+`WriteToolGate` runs on every interface and requires Core tools to declare `readOnlyHint: true`.
+New read tools are discovered automatically; write tools, missing or malformed declarations and frontend
+tools are blocked. The policy trusts the configured Core server and its authors to label tools accurately;
+it does not inspect endpoint implementations. Known workflow write tools stay hidden during discovery even if mislabeled.
+Local orchestration tools remain available without MCP annotations. The `workflow` plugin owns the form-fill
+handoff and is only enabled where the form-fill skill runs: `build_capabilities(form_fill=True)`.
+The deterministic form handler can start workflows after structured approval; conversation and query
+persistence still write operational data.
+
+Trusted Python capabilities may explicitly expose selected local or Core mutations with
+`allow_capability_mutations(toolset, tool_names={...})` returned from `get_toolset()`. The gate requires an
+active framework-registered capability owner as well as this opt-in marker, and the wrapper exposes only the
+selected names. Plain toolsets, Core metadata and frontend tool declarations do not grant this bypass.
+The capability owns approval and authorization; the helper adds no confirmation step. Markdown ownership alone
+does not confer mutation access.
 
 ## On-disk layout
 
