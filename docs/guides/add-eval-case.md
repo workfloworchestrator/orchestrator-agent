@@ -45,8 +45,10 @@ For a product-count request, use:
       match_mode: subset
 ```
 
-Adapt the request and evaluators to your task. Keep the existing dataset-wide `MaxToolCalls` evaluator. If you need to
-verify the final answer automatically, add an evaluator for that requirement as well; see
+Adapt the request and evaluators to your task. Keep the existing dataset-wide `MaxToolCalls` evaluator. Add a
+`ToolResultContains` evaluator naming the tool and the strings its last result must contain (or must not), taken from
+the seed data, so the case also checks that the agent got the right data and not only that it took the expected route.
+If you need to verify the final answer automatically, add an evaluator for that requirement as well; see
 [Tool use, answers and completed tasks](../explanation/evaluation.md#tool-use-answers-and-completed-tasks).
 
 ## 3. Validate and run the case
@@ -54,8 +56,9 @@ verify the final answer automatically, add an evaluator for that requirement as 
 Restore the dataset's canonical serialization and refresh its schema:
 
 ```shell
-uv run python -c "from pydantic_evals import Dataset; \
-  Dataset[str, str].from_file('wfo_search_dataset.yaml').to_file('wfo_search_dataset.yaml')"
+uv run python -c "from evaluators import ToolResultContains; from pydantic_evals import Dataset; \
+  d = Dataset[str, str].from_file('wfo_search_dataset.yaml', custom_evaluator_types=[ToolResultContains]); \
+  d.to_file('wfo_search_dataset.yaml', custom_evaluator_types=[ToolResultContains])"
 ```
 
 Run the case by its name, substituting yours if different:
