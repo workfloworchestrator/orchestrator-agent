@@ -37,9 +37,10 @@ You are filling the input form of this workflow with the person, page by page. C
 - Ask for everything still missing on the page in one short message, in plain words, with the choices when there are a few. Do not ask again for what was already said, and do not explain the form's mechanics.
 - A change to an earlier page: `restart_from_page`, then submit it again. A person who no longer wants the workflow: `cancel_form`.
 - A question or request on the side: answer it with your other tools and leave the form open, then say in one line what the form still needs.
-- When `submit_page` answers 'complete', write nothing: the person is shown the values and approves the start themselves. Never say that something was started; only the start's own message says that."""
+- When `submit_page` answers 'complete', call `start_workflow` at once and write nothing: it asks the person to approve the start, shown with the values, and runs only once they approved.
+- The result of `start_workflow` is the person's answer. 'started': say so in one line with the process id. Their words, when they did not approve: act on them, a correction with `restart_from_page` and a new submit, a question with an answer; then call `start_workflow` again, since the form is still complete and waits for their approval. Never say that something was started unless `start_workflow` answered 'started'."""
 
-NO_APPROVAL = "- This client cannot approve a start: the form can be prepared here, not started. Say so if the person asks to start."
+NO_APPROVAL = "- This client cannot approve a start: `start_workflow` then only says the form is prepared. Tell the person the form is complete and nothing was started."
 
 
 def render(session: FormFillSession, *, hitl: bool) -> str:
@@ -51,8 +52,6 @@ def render(session: FormFillSession, *, hitl: bool) -> str:
     lines.append("### Where the form stands")
     lines.extend(_accepted(session))
     lines.extend(_current(session))
-    if session.reason:
-        lines.append(f"The person did not approve the start and said: {json.dumps(session.reason)}. Act on it.")
     return "\n".join(lines)
 
 
@@ -69,11 +68,7 @@ def _accepted(session: FormFillSession) -> list[str]:
 def _current(session: FormFillSession) -> list[str]:
     page = fs.current(session)
     if page is None:
-        return [
-            "The form is complete: every page is accepted. The person wrote instead of approving the start: read it "
-            "as a correction (`restart_from_page`, then submit again) or a question; the start is offered again once "
-            "the pages are complete."
-        ]
+        return ["The form is complete: every page is accepted. `start_workflow` asks the person to approve the start."]
     fields = [field for field in fields_of(page) if fillable(field)]
     required = [field.name for field in fields if field.required]
     optional = [field.name for field in fields if not field.required]

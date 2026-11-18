@@ -20,7 +20,8 @@ is never the model's (``skill``).
 The page tool set is the state. While a form is gathering, ``submit_page`` takes the current page's fields as its
 parameters (core's own schema for the page, ``pages.tool_schema``) and ``search_options`` finds a long
 list's values; once a page is accepted ``restart_from_page`` can bring it back; ``cancel_form`` ends the
-form. Without an open form there are no tools. The tools are built anew for every run step from the
+form; and once core accepted every page ``start_workflow`` starts it, which stops the run for the person's
+approval first. Without an open form there are no tools. The tools are built anew for every run step from the
 session, so the parameters follow the page. Nothing here validates a value: core judges a page, and a
 searched field's value core checks against its options.
 """
@@ -44,6 +45,7 @@ from orchestrator_agent.tool_names import (
     RESTART_FROM_PAGE_TOOL,
     SEARCH_OPTIONS_TOOL,
     START_WORKFLOW_FORM_TOOL,
+    START_WORKFLOW_TOOL,
     SUBMIT_PAGE_TOOL,
 )
 
@@ -73,6 +75,10 @@ RESTART_DESCRIPTION = (
     "Change an answer on an earlier, accepted page: that page becomes the current page again and what came "
     "after it is dropped (those pages are filled again, since the form may change with the new value). "
     "Pages are numbered from 0; the accepted pages are listed in the instructions."
+)
+START_DESCRIPTION = (
+    "Start the workflow with the values of the completed form. It takes no arguments: the accepted pages are "
+    "what is sent. The person is asked to approve first, and nothing starts without their approval."
 )
 CANCEL_DESCRIPTION = (
     "End the form without starting anything: the person no longer wants the workflow, or asks for something "
@@ -153,6 +159,8 @@ class PageToolset(AbstractToolset[FormDeps]):
         if session.status == FormPhase.GATHERING and page is not None:
             tools[SUBMIT_PAGE_TOOL] = self._tool(SUBMIT_PAGE_TOOL, SUBMIT_DESCRIPTION, tool_schema(page))
             tools[SEARCH_OPTIONS_TOOL] = self._tool(SEARCH_OPTIONS_TOOL, SEARCH_DESCRIPTION, SEARCH_SCHEMA)
+        if session.status == FormPhase.CONFIRMING:
+            tools[START_WORKFLOW_TOOL] = self._tool(START_WORKFLOW_TOOL, START_DESCRIPTION, EMPTY_SCHEMA)
         if session.page_inputs:
             tools[RESTART_FROM_PAGE_TOOL] = self._tool(RESTART_FROM_PAGE_TOOL, RESTART_DESCRIPTION, RESTART_SCHEMA)
         tools[CANCEL_FORM_TOOL] = self._tool(CANCEL_FORM_TOOL, CANCEL_DESCRIPTION, EMPTY_SCHEMA)
@@ -167,6 +175,8 @@ class PageToolset(AbstractToolset[FormDeps]):
             return {"error": "No form is open."}
         if name == CANCEL_FORM_TOOL:
             return self.skill.cancel(state)
+        if name == START_WORKFLOW_TOOL:
+            return await self.skill.start(state, self.core, approved=ctx.tool_call_approved)
         if name == SUBMIT_PAGE_TOOL:
             return await self.skill.submit(session, self.core, tool_args)
         if name == SEARCH_OPTIONS_TOOL:

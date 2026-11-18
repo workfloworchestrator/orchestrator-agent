@@ -44,6 +44,7 @@ SUBMIT_PAGE_TOOL = "submit_page"
 SEARCH_OPTIONS_TOOL = "search_options"
 RESTART_FROM_PAGE_TOOL = "restart_from_page"
 CANCEL_FORM_TOOL = "cancel_form"
+START_WORKFLOW_TOOL = "start_workflow"  # starts the filled form's workflow; runs only once the person approved
 
 # Parameters of the workflow tools above, as their MCP schemas name them.
 # ``create_workflow`` is a path-plus-body endpoint in core with no request model to build its arguments from;

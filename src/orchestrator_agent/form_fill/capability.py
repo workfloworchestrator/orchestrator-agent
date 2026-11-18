@@ -18,45 +18,34 @@ The skill runs *inside* the agent run, through the framework's own seams:
 - ``get_toolset`` contributes the ``start_workflow_form`` handoff and, while a form is open, the page tools
   the model fills it with (``tools``; built per run step, so ``submit_page`` takes the current page).
 - ``get_instructions`` renders, per request, the rules of filling and where the form stands.
-- ``before_run`` carries out the person's decision on a pending approval, before anything is rendered for
-  the model: a start, a cancel, or the form reopened with what they said.
-- ``after_run`` offers the start again when the model's turn left the form complete.
-- ``before_model_request`` answers in the model's place where the skill has the answer — the outcome of
-  that decision, and the approval as soon as core says the form is complete: the model is skipped and the
-  skill's reply is the run's output, recorded in message history like any model answer. The reply is also left on the state (``SearchState.form_reply``, transient): the transport turns
-  it into the client's approval (the only structured stop a form has).
+
+The start is the framework's tool approval, as documented: the model calls ``start_workflow`` when the form
+is complete, the call stops the run until the person approved (``ApprovalRequired``), and their decision
+comes back as that call's result, which the model reads like any tool result.
 
 The skill calls core through the agent's own MCP session, so a turn costs no second session.
 """
 
 from __future__ import annotations
 
-from dataclasses import replace
 from typing import TYPE_CHECKING, Any
 
-import structlog
 from pydantic_ai import RunContext
 from pydantic_ai.capabilities import AbstractCapability
-from pydantic_ai.exceptions import SkipModelRequest
-from pydantic_ai.messages import ModelResponse, TextPart
-from pydantic_ai.models import ModelRequestContext
 from pydantic_ai.toolsets import CombinedToolset
 
 from orchestrator_agent.form_fill.instructions import render
 from orchestrator_agent.form_fill.tools import FormDeps, PageToolset, build_handoff_toolset
-from orchestrator_agent.state import FormPhase, Reply, SearchState
+from orchestrator_agent.state import FormPhase
 
 if TYPE_CHECKING:
     from pydantic_ai.mcp import MCPToolset
-    from pydantic_ai.run import AgentRunResult
 
     from orchestrator_agent.form_fill.skill import FormFillSkill
 
-logger = structlog.get_logger(__name__)
-
 
 class FormFillCapability(AbstractCapability[FormDeps]):
-    """The form's tools and instructions for the model; the approval and the person's decision in front of it."""
+    """The form's tools and instructions for the model."""
 
     def __init__(self, skill: FormFillSkill, core_toolset: MCPToolset[Any]) -> None:
         self.skill = skill
@@ -82,74 +71,6 @@ class FormFillCapability(AbstractCapability[FormDeps]):
         if session is None or session.status == FormPhase.DONE:
             return ""
         return render(session, hitl=ctx.deps.state.hitl)
-
-    async def before_run(self, ctx: RunContext[FormDeps]) -> None:
-        """The person's decision on a pending approval, carried out before the run renders anything.
-
-        The form's instructions and tools are read off the session per request, so a form the decision
-        reopened must be reopened by then. A reply (the start's outcome, a cancel, the approval again) is
-        left on the state for the first model request to answer with.
-        """
-        state = ctx.deps.state
-        state.form_reply = await self._claim(state)
-
-    async def after_run(self, ctx: RunContext[FormDeps], *, result: AgentRunResult[Any]) -> AgentRunResult[Any]:
-        """The start offered again when the model's turn left the form complete.
-
-        The person wrote instead of approving and the model answered without changing a page: the approval
-        they had is gone with their message, so a new one goes out under what the model said.
-        """
-        state = ctx.deps.state
-        session = state.form_fill
-        if state.hitl and state.form_reply is None and session is not None and session.status == FormPhase.CONFIRMING:
-            state.form_reply = replace(self.skill.summary(session), said=str(result.output))
-        return result
-
-    async def before_model_request(
-        self, ctx: RunContext[FormDeps], request_context: ModelRequestContext
-    ) -> ModelRequestContext:
-        state = ctx.deps.state
-        if ctx.run_step == 1 and state.form_reply is not None:
-            return self._answer(state, state.form_reply)
-        if (reply := self._completed(state)) is not None:
-            return self._answer(state, reply)
-        return request_context
-
-    @staticmethod
-    def _answer(state: SearchState, reply: Reply) -> ModelRequestContext:
-        """The skill's reply in place of the model's: the run's output, and the transport's stop."""
-        state.form_reply = reply
-        raise SkipModelRequest(ModelResponse(parts=[TextPart(content=reply.text)]))
-
-    async def _claim(self, state: SearchState) -> Reply | None:
-        """The person's decision on the pending approval, carried out; None when the turn is the model's.
-
-        A failure in the skill leaves the session as it was: the skill is an add-on, and a core (or
-        engine) hiccup must not fail the request.
-        """
-        if state.form_fill is None:
-            return None
-        backup = state.form_fill.model_copy(deep=True)
-        try:
-            return await self.skill.handle(state, self.core_toolset.direct_call_tool)
-        except Exception:
-            logger.exception("Form-fill skill failed; answering with the model instead")
-            state.form_fill = backup
-            return None
-
-    def _completed(self, state: SearchState) -> Reply | None:
-        """The form is complete and no approval is out yet: the start to approve.
-
-        For a caller that cannot approve, every page validated and nothing started instead; the form closes.
-        """
-        session = state.form_fill
-        if session is None or session.status != FormPhase.CONFIRMING or session.pending:
-            return None
-        if state.hitl:
-            return self.skill.summary(session)
-        reply = self.skill.prepared(session)  # closes the form
-        state.form_fill = None
-        return reply
 
 
 __all__ = ["FormFillCapability"]

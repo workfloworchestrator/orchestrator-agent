@@ -41,7 +41,7 @@ from orchestrator_agent.form_fill.model import (
     label_of,
     options_of,
 )
-from orchestrator_agent.state import FormFillSession, SummaryTable
+from orchestrator_agent.state import ApprovalStop, FormFillSession, SummaryTable
 from orchestrator_agent.tool_names import GET_WORKFLOW_FORM_TOOL
 
 
@@ -227,15 +227,23 @@ def summary_tables(session: FormFillSession) -> list[SummaryTable]:
     return [table for table in tables if table.get("labels")]
 
 
+def approval(session: FormFillSession) -> ApprovalStop:
+    """The start as the person approves it: every value as the form shows it, and the defaults that apply.
+
+    A form that ends in the workflow's own summary page (core's summary form) has its tables as well: what
+    the workflow's author wants confirmed, as core made it of these very values.
+    """
+    from orchestrator_agent.form_fill import session as fs
+
+    given = fs.given(session)
+    return ApprovalStop(
+        workflow_key=session.workflow_key,
+        values={**given, **labels(session, given)},
+        defaults=defaults(session),
+        summary=summary_tables(session),
+    )
+
+
 __all__ = [
-    "CallTool",
-    "defaults",
-    "describe",
-    "fillable",
-    "labels",
-    "obvious",
-    "page_of",
-    "searched",
-    "summary_tables",
-    "tool_schema",
+    "approval",
 ]

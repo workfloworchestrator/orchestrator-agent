@@ -1,4 +1,4 @@
-"""The chat-completions adapter: the agent as LibreChat's model, a form's approval through its ask-user tool.
+"""The chat-completions adapter: the agent as the model of an OpenAI-compatible chat client.
 
 The agent's run is mocked (what the form-fill capability would do to the state), as in the A2A executor
 tests: no LLM, no DB — the adapter's own turn logic and wire shapes.
@@ -6,7 +6,6 @@ tests: no LLM, no DB — the adapter's own turn logic and wire shapes.
 
 from __future__ import annotations
 
-import json
 from contextlib import asynccontextmanager
 from typing import Any
 from unittest.mock import AsyncMock, MagicMock, patch
@@ -18,21 +17,13 @@ from fastapi import FastAPI
 from orchestrator_agent.adapters.chat.completions import (
     CLIENT_HEADER,
     CONVERSATION_HEADER,
-    FORM_RESPONSE,
-    NOT_OPEN,
     ChatCompletionsAdapter,
 )
-from orchestrator_agent.adapters.chat.librechat import NOT_SHOWN, approval_card, call_id, pause
-from orchestrator_agent.form_fill.pending import PendingStop, pending_of
-from orchestrator_agent.state import Approval, Decision, FormFillSession, FormInput, Reply, SearchState
+from orchestrator_agent.state import SearchState
 
 from .conftest import make_text_result_event, mock_event_stream, parse_sse_events
 
 ASK_TOOL = {"type": "function", "function": {"name": "ask_user_question", "parameters": {"type": "object"}}}
-APPROVAL = Reply(
-    '{"workflow_key":"w","status":"confirming"}',
-    approval=Approval(hint="Start?", tool_name="create_workflow", args={"workflow_key": "w", "json_data": [{}]}),
-)
 
 
 def _agent_doing(setup, text: str = "model text") -> MagicMock:
@@ -49,33 +40,6 @@ def _agent_doing(setup, text: str = "model text") -> MagicMock:
 
     agent.run_stream_events = MagicMock(side_effect=_run)
     return agent
-
-
-def _stopping(reply: Reply) -> MagicMock:
-    def stopped(state: SearchState) -> None:
-        state.form_fill = state.form_fill or FormFillSession(workflow_key="w", status="confirming")
-        state.form_reply = reply
-
-    return _agent_doing(stopped, text=reply.text)
-
-
-def _open_form(reply: Reply = APPROVAL) -> tuple[SearchState, PendingStop]:
-    """The persisted state of a conversation whose form waits at ``reply``'s approval."""
-    session = FormFillSession(workflow_key="w", status="confirming")
-    pending = pause(reply, session)
-    assert pending is not None
-    return SearchState(form_fill=session), pending
-
-
-def _tool_message(pending: PendingStop, answers: dict[str, str] | str) -> dict[str, Any]:
-    content = answers if isinstance(answers, str) else json.dumps({"answers": answers})
-    return {"role": "tool", "tool_call_id": call_id(pending), "name": "ask_user_question", "content": content}
-
-
-def _option(pending: PendingStop, label: str) -> str:
-    assert APPROVAL.approval is not None
-    (question,) = approval_card(pending, APPROVAL.approval)["questions"]
-    return next(o["value"] for o in question["options"] if o["label"] == label)
 
 
 class _Turn:
@@ -169,17 +133,10 @@ class TestChatTurn:
         assert turn.agent._last_call[0] == ("the real question",)
 
     @pytest.mark.asyncio
-    async def test_the_client_header_is_what_makes_the_caller_one_that_can_show_a_stop(self):
-        librechat = _Turn(_agent_doing(lambda state: None))
-        await librechat.post(_body(_user("create a port")))
-        assert librechat.state.hitl is True
-        # Another client offering a tool of the same name is not LibreChat: no form for it.
-        unnamed = _Turn(_agent_doing(lambda state: None))
-        await unnamed.post(_body(_user("create a port")), client=None)
-        assert unnamed.state.hitl is False
-        other = _Turn(_agent_doing(lambda state: None))
-        await other.post(_body(_user("create a port")), client="some-other-client")
-        assert other.state.hitl is False
+    async def test_this_route_cannot_show_an_approval(self):
+        turn = _Turn(_agent_doing(lambda state: None))
+        await turn.post(_body(_user("create a port")))
+        assert turn.state.hitl is False  # a form can be prepared here, not started
 
     @pytest.mark.asyncio
     async def test_the_bearer_token_is_forwarded_to_core(self):
@@ -200,106 +157,3 @@ class TestChatTurn:
         agent.run_stream_events = MagicMock(side_effect=RuntimeError("model down"))
         response = await _Turn(agent).post(_body(_user("hi")))
         assert response.status_code == 500 and response.json()["error"]["type"] == "server_error"
-
-
-class TestFormStops:
-    @pytest.mark.asyncio
-    async def test_the_approval_is_an_ask_user_call(self):
-        turn = _Turn(_stopping(APPROVAL))
-        response = await turn.post(_body(_user("create a lightpath")))
-        (choice,) = response.json()["choices"]
-        assert choice["finish_reason"] == "tool_calls"
-        assert choice["message"]["content"] == "**Start workflow `w` with these values?**"  # not the skill's JSON
-        (call,) = choice["message"]["tool_calls"]
-        assert call["type"] == "function" and call["function"]["name"] == "ask_user_question"
-        (question,) = json.loads(call["function"]["arguments"])["questions"]
-        assert question["id"] == "q0" and [option["label"] for option in question["options"]] == ["Approve", "Reject"]
-        # The session remembers the stop, keyed by the call, before the state is persisted.
-        assert turn.snapshot is not None and turn.snapshot.form_fill is not None
-        pending = pending_of(turn.snapshot.form_fill)
-        assert pending is not None and call["id"] == call_id(pending)
-        assert turn.snapshot.form_fill.unseen is False
-
-    @pytest.mark.asyncio
-    async def test_a_streamed_stop_ends_in_the_tool_call(self):
-        response = await _Turn(_stopping(APPROVAL)).post(_body(_user("go on"), stream=True))
-        chunks = parse_sse_events([response.content.replace(b"data: [DONE]", b"")])
-        deltas = [chunk["choices"][0]["delta"] for chunk in chunks]
-        assert deltas[1] == {"content": "**Start workflow `w` with these values?**"}
-        (call,) = deltas[2]["tool_calls"]
-        assert call["index"] == 0 and call["function"]["name"] == "ask_user_question"
-        assert [o["label"] for o in json.loads(call["function"]["arguments"])["questions"][0]["options"]] == [
-            "Approve",
-            "Reject",
-        ]
-        assert chunks[-1]["choices"][0]["finish_reason"] == "tool_calls"
-
-    @pytest.mark.asyncio
-    async def test_a_reply_that_ends_the_form_is_text_for_the_person(self):
-        def started(state: SearchState) -> None:
-            state.form_fill = None
-            state.form_reply = Reply('{"workflow_key":"w","status":"started","process_id":"p-1"}')
-
-        response = await _Turn(_agent_doing(started)).post(_body(_user("x")))
-        (choice,) = response.json()["choices"]
-        assert choice["message"] == {"role": "assistant", "content": "Workflow `w` started. Process id: `p-1`"}
-        assert choice["finish_reason"] == "stop"
-
-
-class TestFormResponses:
-    @pytest.mark.asyncio
-    async def test_the_tool_message_is_the_skills_input(self):
-        prior, pending = _open_form()
-        turn = _Turn(_agent_doing(lambda state: None), prior)
-        await turn.post(
-            _body(
-                _user("create a lightpath"),
-                {"role": "assistant", "content": "", "tool_calls": []},
-                _tool_message(pending, {"q0": _option(pending, "Approve")}),
-            )
-        )
-        # The picked option arrives as the decision; no text is the turn's input.
-        assert turn.state.form_input == FormInput(decision=Decision.START)
-        assert turn.agent._last_call[0] == (FORM_RESPONSE,)
-        assert turn.state.form_fill is not None and turn.state.hitl is True
-
-    @pytest.mark.asyncio
-    async def test_words_typed_under_the_approval_are_the_turns_message(self):
-        prior, pending = _open_form()
-        turn = _Turn(_agent_doing(lambda state: None), prior)
-        await turn.post(_body(_user("create"), _tool_message(pending, {"q0": "make it 1G"})))
-        assert turn.state.form_input == FormInput(decision=Decision.CANCEL, reason="make it 1G")
-        assert turn.agent._last_call[0] == ("make it 1G",)  # the model reads them
-
-    @pytest.mark.asyncio
-    async def test_a_message_instead_of_an_answer_is_no_response(self):
-        # LibreChat replaces the paused run: the unanswered call comes back with an empty result, then the
-        # new message. The skill reopens the form and the model reads the message.
-        prior, pending = _open_form()
-        turn = _Turn(_agent_doing(lambda state: None), prior)
-        await turn.post(_body(_user("create"), _tool_message(pending, ""), _user("never mind, how many ports?")))
-        assert turn.state.form_input is None and turn.state.form_fill is not None
-        assert turn.agent._last_call[0] == ("never mind, how many ports?",)
-
-    @pytest.mark.asyncio
-    async def test_an_answer_without_an_open_form_runs_nothing(self):
-        _, pending = _open_form()
-        turn = _Turn(_agent_doing(lambda state: None), prior=None)
-        response = await turn.post(_body(_user("x"), _tool_message(pending, {"q0": "v"})))
-        assert response.json()["choices"][0]["message"]["content"] == NOT_OPEN
-        assert not turn.ran
-        # Nor when the request no longer offers the tool.
-        prior, pending = _open_form()
-        plain = _Turn(_agent_doing(lambda state: None), prior)
-        response = await plain.post(_body(_user("x"), _tool_message(pending, {"q0": "v"}), tools=False))
-        assert response.json()["choices"][0]["message"]["content"] == NOT_OPEN and not plain.ran
-
-    @pytest.mark.asyncio
-    async def test_a_call_librechat_refused_is_not_sent_again(self):
-        prior, pending = _open_form()
-        turn = _Turn(_stopping(APPROVAL), prior)
-        error = "Error: Received tool input did not match expected schema"
-        response = await turn.post(_body(_user("x"), _tool_message(pending, error)))
-        (choice,) = response.json()["choices"]
-        assert choice["finish_reason"] == "stop" and choice["message"]["content"] == f"{NOT_SHOWN}: {error}"
-        assert not turn.ran

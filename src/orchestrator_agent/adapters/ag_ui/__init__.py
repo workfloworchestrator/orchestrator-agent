@@ -11,16 +11,16 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""AG-UI adapter: the agent as the backend of a frontend that speaks AG-UI, forms through AG-UI interrupts."""
+"""AG-UI adapter: the agent as the backend of a frontend that speaks AG-UI, a workflow's start approved through an AG-UI interrupt."""
 
-from orchestrator_agent.adapters.ag_ui.interrupts import AGUIInterrupts
 from orchestrator_agent.adapters.ag_ui.worker import (
     AGENT_TYPE,
     AGUI_AGENT_TYPES,
     NOT_OPEN,
     AGUIEventStream,
-    AGUIHitl,
     AGUIWorker,
+    ApprovalPendingError,
+    EmptyRunError,
     ThreadForbiddenError,
     _AGUIAdapter,
 )
@@ -30,9 +30,9 @@ __all__ = [
     "AGUI_AGENT_TYPES",
     "NOT_OPEN",
     "AGUIEventStream",
-    "AGUIHitl",
-    "AGUIInterrupts",
     "AGUIWorker",
+    "ApprovalPendingError",
+    "EmptyRunError",
     "ThreadForbiddenError",
     "_AGUIAdapter",
 ]

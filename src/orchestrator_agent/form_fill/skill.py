@@ -17,9 +17,9 @@ A form is filled by the model in conversation with the person: it reads their wo
 page and submits it (``submit``), searches a long list (``search``), brings an earlier page back
 (``restart``) or ends the form (``cancel``). Everything that must not be the model's is here, in code:
 which page is current and which pages core accepted (``session``), what a page's schema fills by itself
-(``pages.obvious``), the summary of the start the person approves (``summary``), the start itself
-(``start``), and what their decision does (``handle``). Core's own validation is the only validation: it
-also refuses a searched field's value that its options tool did not offer.
+(``pages.obvious``), what the person is shown to approve (``approval``), and the start itself (``start``),
+which runs only once they approved. Core's own validation is the only validation: it also refuses a
+searched field's value that its options tool did not offer.
 """
 
 from __future__ import annotations
@@ -35,33 +35,13 @@ from orchestrator.core.schemas.mcp_tools import GetWorkflowFormOptionsRequest, W
 from orchestrator.core.schemas.process import ProcessIdSchema
 from orchestrator.core.schemas.workflow import WorkflowSchema
 from pydantic import TypeAdapter, ValidationError
-from pydantic_ai import ModelRetry
+from pydantic_ai import ApprovalRequired, ModelRetry
 from pydantic_forms.core import FormFieldError
 
 from orchestrator_agent.form_fill import session as fs
 from orchestrator_agent.form_fill.model import fields_of, options_of
-from orchestrator_agent.form_fill.pages import (
-    CallTool,
-    defaults,
-    describe,
-    fillable,
-    labels,
-    obvious,
-    page_of,
-    searched,
-    summary_tables,
-)
-from orchestrator_agent.form_fill.session import Action, event_of, transition
-from orchestrator_agent.state import (
-    SUBSCRIPTION_ID,
-    Approval,
-    FormFillSession,
-    FormPhase,
-    FormReply,
-    FormStatus,
-    Reply,
-    SearchState,
-)
+from orchestrator_agent.form_fill.pages import CallTool, approval, describe, fillable, obvious, page_of, searched
+from orchestrator_agent.state import SUBSCRIPTION_ID, FormFillSession, FormPhase, SearchState
 from orchestrator_agent.tool_names import (
     CREATE_WORKFLOW_TOOL,
     GET_WORKFLOW_FORM_OPTIONS_TOOL,
@@ -78,18 +58,8 @@ _WORKFLOW_LIST: TypeAdapter[list[WorkflowSchema]] = TypeAdapter(list[WorkflowSch
 _WORKFLOWS_TTL = 300.0  # seconds the workflow catalogue is cached per skill instance
 
 MAX_FOUND = 50  # options a search answers with; a list that fits comes whole, for the model to pick from
-COMPLETE_NOTE = (
-    "Every page is accepted. The person is now shown the values and asked to approve the start: write nothing."
-)
+COMPLETE_NOTE = "Every page is accepted. Call start_workflow now: it asks the person to approve the start."
 CANNOT_APPROVE = "this client cannot approve a start, so nothing was started"
-
-
-def as_reply(data: FormReply, *, approval: Approval | None = None) -> Reply:
-    return Reply(data.as_text(), approval=approval)
-
-
-def reply_of(session: FormFillSession, status: FormStatus, **data: Any) -> Reply:
-    return as_reply(FormReply(workflow_key=session.workflow_key, status=status, **data))
 
 
 @dataclass
@@ -244,54 +214,30 @@ class FormFillSkill:
         state.form_fill = None
         return {"status": "cancelled", "note": "Nothing was started. Tell the person in one line."}
 
-    # --- the summary, and the start ----------------------------------------------------------------
+    # --- the start, which the person approves --------------------------------------------------------
 
-    @staticmethod
-    def _create_args(session: FormFillSession) -> dict[str, Any]:
-        """The ``create_workflow`` call: what the person approves is exactly what is sent."""
-        return {WORKFLOW_KEY_PARAM: session.workflow_key, JSON_DATA_PARAM: session.page_inputs}
+    async def start(self, state: SearchState, call_tool: CallTool, *, approved: bool) -> dict[str, Any]:
+        """Start the workflow with exactly the accepted pages, once the person approved; what the model is told.
 
-    def _outcome(self, session: FormFillSession, status: FormStatus, **data: Any) -> FormReply:
-        """Every value to be submitted, with its label, and the defaults that apply: what the person approves."""
-        given = fs.given(session)
-        return FormReply(
-            workflow_key=session.workflow_key,
-            status=status,
-            values=given,
-            labels=labels(session, given),
-            defaults=defaults(session),
-            summary=summary_tables(session),
-            **data,
-        )
-
-    def summary(self, session: FormFillSession) -> Reply:
-        """The start to approve: every value as it will be sent, and the create call for the person to approve.
-
-        A form that ends in the workflow's own summary page (core's summary form) has its tables on the
-        reply as well: what the workflow's author wants confirmed, as core made it of these very values.
+        Unapproved, the call stops the run for the person's decision (``ApprovalRequired``, with what a
+        client shows). A caller that cannot show an approval gets the form closed as prepared. When core
+        refuses the start on a page, that page is current again with core's verdict, for the model to fix
+        with the person. After any other failure whether core started the process is unknown, and after
+        an answer the form is done whatever the answer looks like: in both cases it closes.
         """
-        data = self._outcome(session, FormStatus.CONFIRMING)
-        # The call is shown as it will be made; ``labels`` only says what its ids stand for.
-        args = {**self._create_args(session), **({"labels": data.labels} if data.labels else {})}
-        hint = f"Start workflow `{session.workflow_key}` with these values?"
-        return as_reply(data, approval=Approval(hint=hint, tool_name=CREATE_WORKFLOW_TOOL, args=args))
-
-    def prepared(self, session: FormFillSession) -> Reply:
-        """Every page validated, nothing started: this caller cannot approve a start. The form closes."""
-        data = self._outcome(session, FormStatus.PREPARED, reason=CANNOT_APPROVE)
-        fs.close(session)
-        return as_reply(data)
-
-    async def start(self, session: FormFillSession, call_tool: CallTool) -> Reply:
-        """Start the workflow with exactly the validated pages. A start is never sent twice for one approval.
-
-        The form reopens only on core's own verdict on the pages: a refusal is checked against the form
-        tool, and the page it rejects is current again, with the verdict, for the model to fix with the
-        person. After any other failure whether core started the process is unknown, and after an answer
-        the form is done whatever the answer looks like — so in both cases it closes.
-        """
+        session = state.form_fill
+        if session is None or session.status != FormPhase.CONFIRMING:
+            return {"error": "The form is not complete yet: fill and submit its pages first."}
+        if not state.hitl:
+            prepared = approval(session).model_dump(mode="json")
+            fs.close(session)
+            state.form_fill = None
+            return {"status": "prepared", "reason": CANNOT_APPROVE, **prepared}
+        if not approved:
+            raise ApprovalRequired(metadata=approval(session).model_dump(mode="json"))
+        args = {WORKFLOW_KEY_PARAM: session.workflow_key, JSON_DATA_PARAM: session.page_inputs}
         try:
-            result = await call_tool(CREATE_WORKFLOW_TOOL, self._create_args(session))
+            result = await call_tool(CREATE_WORKFLOW_TOOL, args)
         except Exception as exc:
             if isinstance(exc, ModelRetry):  # core refused: if that is its verdict on a page, that page is open again
                 verdict = await page_of(call_tool, session.workflow_key, session.page_inputs)
@@ -299,60 +245,24 @@ class FormFillSkill:
                     return self._refused(session, verdict)
             logger.exception("Form-fill: create_workflow failed", workflow=session.workflow_key)
             fs.close(session)
-            return reply_of(session, FormStatus.FAILED, reason=str(exc) or type(exc).__name__)
+            state.form_fill = None
+            return {"status": "failed", "reason": str(exc) or type(exc).__name__}
         fs.close(session)
+        state.form_fill = None
         try:
-            process_id = str(ProcessIdSchema.model_validate(result).id)
+            return {"status": "started", "process_id": str(ProcessIdSchema.model_validate(result).id)}
         except ValidationError:  # core answered, so it started; what it answered goes back as it came
             logger.error("Form-fill: create_workflow answered without a process id", workflow=session.workflow_key)
-            return reply_of(session, FormStatus.STARTED, reason=str(result))
-        return reply_of(session, FormStatus.STARTED, process_id=process_id)
+            return {"status": "started", "answer": str(result)}
 
-    def _refused(self, session: FormFillSession, verdict: WorkflowFormPage) -> Reply:
-        """Core refused the start on a page: that page is current again with core's verdict; the person reads it."""
+    def _refused(self, session: FormFillSession, verdict: WorkflowFormPage) -> dict[str, Any]:
+        """Core refused the start on a page: that page is current again, with core's verdict on it."""
         index = min(verdict.page, len(session.page_inputs) - 1) if session.page_inputs else 0
-        rejected = session.page_inputs[index] if index < len(session.page_inputs) else {}
+        values = session.page_inputs[index] if index < len(session.page_inputs) else {}
         page = session.pages[index] if index < len(session.pages) else verdict  # as seen, with its options
         fs.restarted(session, index, page)
-        fs.rejected(session, rejected, verdict.errors)
-        data = FormReply(
-            workflow_key=session.workflow_key,
-            status=FormStatus.GATHERING,
-            page=index,
-            title=page.title,
-            rejected=list(verdict.errors),
-            values=fs.given(session),
-        )
-        return as_reply(data)
-
-    # --- the person's decision ---------------------------------------------------------------------
-
-    async def handle(self, state: SearchState, call_tool: CallTool) -> Reply | None:
-        """What the person's response to the pending approval does; None when the turn is the model's.
-
-        The response is one event of the machine (``session.event_of``) and the transition says what the
-        turn does: the start, a cancel, the approval shown again — each a reply in place of the model — or
-        the form reopened for the model to act on what the person said.
-        """
-        session = state.form_fill
-        if session is None or not session.pending:
-            return None  # no approval is out: there is nothing to decide, and nothing is started
-        event = event_of(state.form_input, session.unseen)
-        match transition(session.status, event):
-            case Action.NOTHING:
-                return None
-            case Action.START:
-                reply = await self.start(session, call_tool)
-            case Action.CANCEL:
-                fs.close(session)
-                reply = reply_of(session, FormStatus.CANCELLED)
-            case Action.SUMMARY:
-                reply = self.summary(session)
-            case Action.REOPEN:
-                fs.reopened(session, getattr(event, "reason", None))
-                return None
-        state.form_fill = None if session.status == FormPhase.DONE else session
-        return reply
+        fs.rejected(session, values, verdict.errors)
+        return _rejected(page, verdict.errors, [])
 
 
 def _rejected(page: WorkflowFormPage, errors: Sequence[FormFieldError], ignored: Sequence[str]) -> dict[str, Any]:
@@ -369,4 +279,4 @@ def _options(options: Sequence[Any]) -> list[dict[str, Any]]:
     return [{"value": option.value, "label": option.label} for option in options]
 
 
-__all__ = ["CANNOT_APPROVE", "COMPLETE_NOTE", "MAX_FOUND", "CallTool", "FormFillSkill", "as_reply", "reply_of"]
+__all__ = ["CANNOT_APPROVE", "COMPLETE_NOTE", "MAX_FOUND", "CallTool", "FormFillSkill"]

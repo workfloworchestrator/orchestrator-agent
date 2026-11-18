@@ -39,7 +39,7 @@ from orchestrator_agent.agent import new_deps
 from orchestrator_agent.artifacts import QueryArtifact, ToolArtifact
 from orchestrator_agent.mcp_client import bind_outbound_token
 from orchestrator_agent.persistence import dump_messages, load_messages
-from orchestrator_agent.state import FormInput, SearchState
+from orchestrator_agent.state import SearchState
 
 if TYPE_CHECKING:
     from orchestrator_agent.agent import WFOAgent
@@ -90,17 +90,15 @@ async def run_turn(
     prior_state: SearchState | None,
     user_input: str,
     hitl: bool,
-    form_input: FormInput | None,
     auth_token: str | None,
     on_artifact: OnArtifact | None = None,
 ) -> tuple[SearchState, str]:
     """Run the agent for one turn of ``thread``; the run's state and its answer.
 
     The run is recorded, the conversation's earlier turns are replayed as its message history, and its
-    open form is continued with ``form_input`` (the human's response to the pending stop, if the request
-    carried one). ``hitl`` says the caller can show a person a stop: a form needs it. The answer is the
-    agent's prose plus the deterministically rendered chart/table blocks; a form-fill reply is on the
-    state (``form_reply``). The caller snapshots the state, after recording a stop on it.
+    open form is continued. ``hitl`` says the caller can show a person an approval: a start needs one. The
+    answer is the agent's prose plus the deterministically rendered chart/table blocks. The caller
+    snapshots the state.
     """
     deps = new_deps(user_input=user_input)
     deps.state.run_id = run_id
@@ -109,7 +107,6 @@ async def run_turn(
 
     deps.state.hitl = hitl
     deps.state.form_fill = prior_state.form_fill if prior_state is not None else None
-    deps.state.form_input = form_input
     # Multi-turn memory: the caller only needs to send the latest user turn.
     message_history = load_messages(prior_state.message_history if prior_state else [])
 

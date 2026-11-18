@@ -22,31 +22,29 @@ from pydantic_ai.ui import StateDeps
 from orchestrator_agent.adapters.ag_ui import (
     AGENT_TYPE,
     AGUIEventStream,
-    AGUIInterrupts,
     AGUIWorker,
     ThreadForbiddenError,
 )
 from orchestrator_agent.adapters.ag_ui.chats import UNTITLED, pending_stop, title_of, transcript
-from orchestrator_agent.adapters.ag_ui.interrupts import pause
-from orchestrator_agent.adapters.words import shown
 from orchestrator_agent.api.endpoints import chats
 from orchestrator_agent.artifacts import ExportArtifact, QueryArtifact
 from orchestrator_agent.core_api import CoreApi
 from orchestrator_agent.persistence import StoredThread, dump_messages
-from orchestrator_agent.state import Approval, FormFillSession, Reply, SearchState
+from orchestrator_agent.state import FormFillSession, SearchState
 
 from .conftest import mock_event_stream
 
 RUN_ID = "00000000-0000-0000-0000-000000000042"
-GATHERING = Reply(
-    '{"workflow_key":"w","status":"confirming","values":{"a":1}}',
-    approval=Approval(hint="Start?", tool_name="create_workflow", args={"workflow_key": "w", "json_data": [{"a": 1}]}),
-)
+ASKED = "Which customer is it for?"
+WAITING = [  # a thread whose form is complete: the start waits for the person
+    ModelRequest(parts=[UserPromptPart(content="create a port")]),
+    ModelResponse(parts=[ToolCallPart(tool_name="start_workflow", args={}, tool_call_id="s1")]),
+]
 ARTIFACT = QueryArtifact(description="search returned 2 result(s)", query_id="q1", total_results=2)
 
 
 def _history() -> list[dict[str, Any]]:
-    """A thread's memory: a question, a search with an artifact, an answer, and a form-fill reply."""
+    """A thread's memory: a question, a search with an artifact, an answer, and a second turn."""
     return dump_messages(
         [
             ModelRequest(parts=[UserPromptPart(content="  find  two subscriptions ")]),
@@ -58,7 +56,7 @@ def _history() -> list[dict[str, Any]]:
             ),
             ModelResponse(parts=[TextPart(content="Two found.")]),
             ModelRequest(parts=[UserPromptPart(content="start a workflow")]),
-            ModelResponse(parts=[TextPart(content=GATHERING.text)]),
+            ModelResponse(parts=[TextPart(content=ASKED)]),
         ]
     )
 
@@ -73,13 +71,41 @@ def test_the_title_is_the_first_question_cut_short():
     assert len(title_of(SearchState(message_history=long))) == 80
 
 
+def test_every_form_has_an_activity_message_naming_its_tool_calls():
+    def call(tool, id_, **args):
+        return [
+            ModelResponse(parts=[ToolCallPart(tool_name=tool, args=args, tool_call_id=id_)]),
+            ModelRequest(parts=[ToolReturnPart(tool_name=tool, content={}, tool_call_id=id_)]),
+        ]
+
+    history = dump_messages(
+        [
+            ModelRequest(parts=[UserPromptPart(content="create a node, then a port")]),
+            *call("start_workflow_form", "a1", workflow_key="create_node"),
+            *call("cancel_form", "a2"),
+            *call("start_workflow_form", "b1", workflow_key="nope"),  # refused, then retried: one form
+            *call("start_workflow_form", "b2", workflow_key="create_port"),
+            *call("submit_page", "b3", speed="10G"),
+        ]
+    )
+    session = FormFillSession(workflow_key="create_port", page_inputs=[{"speed": "10G"}])
+    forms = [m for m in transcript(SearchState(message_history=history, form_fill=session)) if m.role == "activity"]
+    assert [(m.id, m.content["workflow_key"], m.content["phase"], m.content["calls"]) for m in forms] == [
+        ("a1", "create_node", "done", ["a1", "a2"]),
+        (session.id, "create_port", "gathering", ["b1", "b2", "b3"]),
+    ]
+    assert forms[1].content["values"] == {"speed": "10G"}
+    closed = [m for m in transcript(SearchState(message_history=history), last=1) if m.role == "activity"]
+    assert [m.content["phase"] for m in closed] == ["done", "done"]  # kept whatever ``last`` cuts
+
+
 def test_the_transcript_is_agui_messages_with_artifact_references_and_the_persons_words():
     messages = transcript(SearchState(message_history=_history()))
     roles = [m.role for m in messages]
     assert roles == ["user", "assistant", "tool", "assistant", "user", "assistant"]
     assert messages[2].content == ARTIFACT.model_dump_json()  # the reference the stream sent, not the raw rows
     assert messages[3].content == "Two found."
-    assert messages[5].content == shown(GATHERING)  # the skill's JSON, as the person read it
+    assert messages[5].content == ASKED
 
 
 def test_a_tools_note_to_the_model_is_not_in_the_transcript_nor_the_title():
@@ -108,15 +134,13 @@ def test_the_transcript_can_be_its_last_messages_only():
     assert [m.role for m in messages] == ["user", "assistant"]
 
 
-def test_the_pending_stop_is_the_interrupt_as_shown_while_the_form_is_open():
+def test_the_pending_stop_is_the_waiting_start_while_the_form_is_open():
     session = FormFillSession(workflow_key="w", status="confirming")
-    interrupt = pause(GATHERING, session)
-    assert interrupt is not None
-    state = SearchState(form_fill=session)
-    assert pending_stop(state) == interrupt.model_dump(mode="json", by_alias=True, exclude_none=True)
+    state = SearchState(form_fill=session, message_history=dump_messages(WAITING))
+    stop = pending_stop(state)
+    assert stop is not None and (stop["id"], stop["metadata"]["workflow_key"]) == ("int-s1", "w")
     session.status = "done"
-    assert pending_stop(state) is None
-    assert pending_stop(SearchState()) is None
+    assert pending_stop(state) is None and pending_stop(SearchState()) is None
 
 
 # --- the worker: owner binding, history in and out -----------------------------------------------------------
@@ -204,7 +228,7 @@ async def test_the_threads_history_is_replayed_and_the_runs_messages_recorded(mo
 @pytest.mark.asyncio
 async def test_the_run_result_becomes_the_threads_memory():
     state = SearchState()
-    stream = AGUIEventStream(_run_input(), ag_ui_version="1.0.0", hitl=AGUIInterrupts(), deps=StateDeps(state))
+    stream = AGUIEventStream(_run_input(), ag_ui_version="1.0.0", deps=StateDeps(state))
     result = MagicMock()
     result.all_messages.return_value = [ModelRequest(parts=[UserPromptPart(content="hello")])]
     _ = [event async for event in stream.handle_run_result(AgentRunResultEvent(result=result))]
@@ -249,13 +273,13 @@ def client():
 
 
 def _threads() -> list[StoredThread]:
-    session = FormFillSession(workflow_key="w")
-    pause(GATHERING, session)
+    session = FormFillSession(workflow_key="w", status="confirming")
+    waiting = SearchState(form_fill=session, message_history=dump_messages(WAITING))
     return [
         StoredThread(
             "t1", AGENT_TYPE, datetime(2026, 10, 20, 12, 0, tzinfo=UTC), SearchState(message_history=_history())
         ),
-        StoredThread("t2", AGENT_TYPE, datetime(2026, 10, 20, 11, 0, tzinfo=UTC), SearchState(form_fill=session)),
+        StoredThread("t2", AGENT_TYPE, datetime(2026, 10, 20, 11, 0, tzinfo=UTC), waiting),
     ]
 
 
@@ -265,7 +289,7 @@ def test_the_list_is_the_callers_chats_of_this_route(client):
     assert response.status_code == 200
     assert [(c["thread_id"], c["title"], c["form_open"]) for c in response.json()] == [
         ("t1", "find two subscriptions", False),
-        ("t2", UNTITLED, True),
+        ("t2", "create a port", True),
     ]
     assert listed.call_args.kwargs["agent_types"] == ("agui", "search")
     assert listed.call_args.kwargs["owner"] is None  # no OAuth2: the unowned chats
@@ -280,7 +304,7 @@ def test_a_chat_is_its_last_messages_and_its_pending_stop(client):
     body = response.json()
     assert body["thread_id"] == "t2" and body["form_open"] is True
     assert body["pending"] == pending_stop(thread.state)
-    assert body["messages"] == []
+    assert [message["role"] for message in body["messages"]] == ["user", "assistant", "activity"]  # with the open form
 
 
 def test_a_chats_messages_come_as_agui_messages(client):
@@ -288,7 +312,7 @@ def test_a_chats_messages_come_as_agui_messages(client):
         response = client.get("/chats/t1?last=2")
     messages = response.json()["messages"]
     assert [m["role"] for m in messages] == ["user", "assistant"]
-    assert messages[1]["content"] == shown(GATHERING)
+    assert messages[1]["content"] == ASKED
 
 
 @pytest.mark.parametrize(

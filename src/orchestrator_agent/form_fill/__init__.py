@@ -14,15 +14,14 @@
 """Workflow form-fill: the model fills core's form page by page with the person; code keeps the machine.
 
 The pages, the options and the start are code's (``skill``, ``pages``, ``session``); the model fills the
-current page through the page tools (``tools``) under the form's instructions (``instructions``). The one
-structured stop — the start to approve — travels over A2A (kagent's human-in-the-loop extension), chat
-completions (LibreChat's ask-user tool) or AG-UI (an interrupt).
+current page through the page tools (``tools``) under the form's instructions (``instructions``). The start
+is the framework's tool approval: ``start_workflow`` stops the run until the person approved, which a
+client shows as it shows any approval (over AG-UI, an interrupt).
 """
 
 from orchestrator_agent.form_fill.capability import FormFillCapability
 from orchestrator_agent.form_fill.pages import CallTool
 from orchestrator_agent.form_fill.skill import FormFillSkill
-from orchestrator_agent.state import Approval, FormInput, FormReply, Reply
 
 
 def build_form_fill_skill() -> FormFillSkill:
@@ -30,13 +29,4 @@ def build_form_fill_skill() -> FormFillSkill:
     return FormFillSkill()
 
 
-__all__ = [
-    "Approval",
-    "CallTool",
-    "FormFillCapability",
-    "FormFillSkill",
-    "FormInput",
-    "FormReply",
-    "Reply",
-    "build_form_fill_skill",
-]
+__all__ = ["CallTool", "FormFillCapability", "FormFillSkill", "build_form_fill_skill"]

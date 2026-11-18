@@ -1,4 +1,4 @@
-"""Tests for the AG-UI interrupt transport: the approval out as an interrupt, the resume entry in as the skill's input."""
+"""The start of a workflow over AG-UI: the waiting approval as an interrupt, and the answer a run carries on."""
 
 from __future__ import annotations
 
@@ -6,29 +6,38 @@ import os
 
 os.environ.setdefault("DATABASE_URI", "postgresql://test:test@localhost:5432/test")
 
-import json
 from datetime import UTC, datetime
 from typing import Any
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
-from ag_ui.core import ResumeEntry, RunAgentInput, RunFinishedEvent, TextMessageContentEvent, UserMessage
-from pydantic_ai.messages import TextPart
+from ag_ui.core import ActivitySnapshotEvent, ResumeEntry, RunAgentInput, UserMessage
+from pydantic_ai.messages import (
+    FunctionToolResultEvent,
+    ModelMessage,
+    ModelRequest,
+    ModelResponse,
+    ToolCallPart,
+    ToolReturnPart,
+    UserPromptPart,
+)
 from pydantic_ai.ui import StateDeps
 
-from orchestrator_agent.adapters.ag_ui import AGENT_TYPE, NOT_OPEN, AGUIEventStream, AGUIInterrupts, AGUIWorker
-from orchestrator_agent.adapters.ag_ui.interrupts import APPROVAL_REASON, human_input, pause, supports_interrupts
-from orchestrator_agent.adapters.words import shown
-from orchestrator_agent.form_fill.pending import PendingStop, pending_approval
-from orchestrator_agent.persistence import StoredThread
-from orchestrator_agent.state import Approval, Decision, FormFillSession, FormInput, Reply, SearchState
+from orchestrator_agent.adapters.ag_ui import AGENT_TYPE, NOT_OPEN, AGUIEventStream, AGUIWorker
+from orchestrator_agent.adapters.ag_ui.interrupts import answers, pending_interrupt, pending_start, supports_interrupts
+from orchestrator_agent.adapters.ag_ui.worker import NOT_APPROVED, REJECTED, ApprovalPendingError, EmptyRunError
+from orchestrator_agent.persistence import StoredThread, dump_messages
+from orchestrator_agent.state import FormFillSession, SearchState
 
 from .conftest import mock_event_stream
 
-APPROVAL = Approval(hint="Start it?", tool_name="create_workflow", args={"workflow_key": "w", "json_data": [{"a": 1}]})
-CONFIRMING = Reply('{"workflow_key":"w","status":"confirming","values":{"a":1}}', approval=APPROVAL)
-ENDED = Reply('{"workflow_key":"w","status":"started","process_id":"p1"}')
 RUN_ID = "00000000-0000-0000-0000-000000000042"
+START = ToolCallPart(tool_name="start_workflow", args={}, tool_call_id="s1")
+WAITING: list[ModelMessage] = [
+    ModelRequest(parts=[UserPromptPart(content="create a port")]),
+    ModelResponse(parts=[START]),
+]
+ANSWERED = [*WAITING, ModelRequest(parts=[ToolReturnPart(tool_name="start_workflow", content={}, tool_call_id="s1")])]
 
 
 def _run_input(
@@ -47,96 +56,38 @@ def _run_input(
     )
 
 
-def _paused() -> tuple[FormFillSession, str]:
-    """A session paused at the approval, and the interrupt's id."""
-    session = FormFillSession(workflow_key="w", status="confirming")
-    interrupt = pause(CONFIRMING, session)
-    assert interrupt is not None
-    return session, interrupt.id
-
-
 def _resolved(interrupt_id: str, payload: Any) -> ResumeEntry:
     return ResumeEntry(interrupt_id=interrupt_id, status="resolved", payload=payload)
 
 
-# --- outbound ----------------------------------------------------------------------------------------------------
+def _confirming() -> SearchState:
+    session = FormFillSession(workflow_key="w", status="confirming", page_inputs=[{"speed": "10G"}])
+    return SearchState(form_fill=session, message_history=dump_messages(WAITING))
 
 
-def test_the_start_is_a_tool_call_interrupt_shown_as_it_will_be_made():
-    session = FormFillSession(workflow_key="w", status="confirming")
-    interrupt = pause(CONFIRMING, session)
+# --- the start that is waiting -----------------------------------------------------------------------------------
+
+
+def test_the_waiting_start_is_the_last_one_without_a_result():
+    assert pending_start(WAITING) is START
+    assert pending_start(ANSWERED) is None and pending_start([]) is None
+
+
+def test_a_reopened_chat_gets_the_waiting_start_as_the_interrupt_it_was_shown():
+    interrupt = pending_interrupt(_confirming(), WAITING)
     assert interrupt is not None
-    assert interrupt.reason == APPROVAL_REASON
-    assert interrupt.tool_call_id == interrupt.id
-    assert interrupt.message == "Start it?"
-    assert (interrupt.metadata or {})["tool"] == {"name": "create_workflow", "args": APPROVAL.args}
-    assert (interrupt.metadata or {})["form"] == json.loads(CONFIRMING.text)
-    assert interrupt.response_schema is not None and set(interrupt.response_schema["properties"]) == {
-        "approved",
-        "reason",
-    }
-    # The stop is remembered as it was shown (for a reopened chat), and is seen at once.
-    remembered = PendingStop.model_validate(session.pending)
-    assert remembered.model_dump(exclude={"shown"}) == pending_approval(interrupt.id).model_dump(exclude={"shown"})
-    assert remembered.shown is not None and remembered.shown["toolCallId"] == interrupt.id
-    assert session.unseen is False
+    assert (interrupt.id, interrupt.reason, interrupt.tool_call_id) == ("int-s1", "tool_call", "s1")
+    assert interrupt.metadata == {"workflow_key": "w", "values": {"speed": "10G"}, "defaults": {}, "summary": []}
+    assert pending_interrupt(SearchState(), WAITING) is None  # no form is open
+    assert pending_interrupt(_confirming(), ANSWERED) is None  # the start was decided
 
 
-def test_a_reply_that_is_no_stop_pauses_nothing():
-    session = FormFillSession(workflow_key="w")
-    assert pause(ENDED, session) is None
-    assert session.pending is None
-    assert pause(CONFIRMING, None) is None
-
-
-# --- inbound -----------------------------------------------------------------------------------------------------
-
-
-def test_an_approval_is_a_start():
-    session, interrupt_id = _paused()
-    assert human_input(session, [_resolved(interrupt_id, {"approved": True})]) == FormInput(decision=Decision.START)
-
-
-@pytest.mark.parametrize(
-    ("reason", "expected"),
-    [
-        pytest.param(None, None, id="no-words"),
-        pytest.param("  ", None, id="blank-words"),
-        pytest.param("make it 1G", "make it 1G", id="what-to-change"),
-    ],
-)
-def test_a_rejection_carries_what_the_person_said(reason, expected):
-    session, interrupt_id = _paused()
-    entry = _resolved(interrupt_id, {"approved": False, "reason": reason})
-    assert human_input(session, [entry]) == FormInput(decision=Decision.CANCEL, reason=expected)
-
-
-def test_a_cancelled_entry_rejects_the_start():
-    session, interrupt_id = _paused()
-    entry = ResumeEntry(interrupt_id=interrupt_id, status="cancelled")
-    assert human_input(session, [entry]) == FormInput(decision=Decision.CANCEL)
-
-
-def test_an_entry_about_another_interrupt_shows_the_stop_again():
-    session, _ = _paused()
-    assert human_input(session, [_resolved("someone-elses", {"approved": True})]) == FormInput()
-
-
-@pytest.mark.parametrize(
-    "payload",
-    [pytest.param({"approved": "yes"}, id="approval-not-a-boolean"), pytest.param(None, id="no-payload")],
-)
-def test_an_unreadable_response_shows_the_stop_again(payload):
-    session, interrupt_id = _paused()
-    assert human_input(session, [_resolved(interrupt_id, payload)]) == FormInput()
-
-
-def test_no_entries_or_no_pending_stop_is_no_response():
-    session, interrupt_id = _paused()
-    assert human_input(session, None) is None
-    assert human_input(session, []) is None
-    assert human_input(FormFillSession(workflow_key="w"), [_resolved(interrupt_id, {"approved": True})]) is None
-    assert human_input(None, [_resolved(interrupt_id, {"approved": True})]) is None
+def test_a_run_carries_on_the_answer_to_the_waiting_start_and_no_other():
+    approved = _resolved("int-s1", {"approved": True})
+    stale = _resolved("int-old", {"approved": True})
+    assert answers(START, [stale, approved]) == [approved]
+    assert answers(None, [approved]) == []  # nothing waits: an answer is stale
+    assert answers(START, None) == []  # no decision came with the run
 
 
 @pytest.mark.parametrize(
@@ -147,83 +98,34 @@ def test_supports_interrupts(version, expected):
     assert supports_interrupts(version) is expected
 
 
-def test_the_transport_claims_a_client_whose_protocol_version_has_interrupts():
-    transport = AGUIInterrupts()
-    assert transport.shows_stops(_run_input(version="1.0.3")) is True
-    assert transport.shows_stops(_run_input(version="0.1.10")) is False
-    assert transport.shows_stops(_run_input(version=None)) is False
-    assert transport.words(CONFIRMING) == shown(CONFIRMING)
+# --- the stream: a form as one activity message ------------------------------------------------------------------
 
 
-# --- the event stream: the run's end and the reply's text ----------------------------------------------------
-
-
-TRANSPORT = AGUIInterrupts()
-
-
-def _stream(state: SearchState, hitl: AGUIInterrupts | None = TRANSPORT) -> AGUIEventStream:
-    return AGUIEventStream(_run_input(), ag_ui_version="1.0.0", hitl=hitl, deps=StateDeps(state))
+def _stream(state: SearchState) -> AGUIEventStream:
+    return AGUIEventStream(_run_input(), ag_ui_version="1.0.0", deps=StateDeps(state))
 
 
 @pytest.mark.asyncio
-async def test_a_stop_ends_the_run_with_an_interrupt_outcome_recorded_on_the_session():
-    state = SearchState(form_fill=FormFillSession(workflow_key="w", status="confirming"), form_reply=CONFIRMING)
-    events = [event async for event in _stream(state).after_stream()]
-    # A skipped model request streams no text, so the reply is said here, in the person's words, before the stop.
-    deltas = [event.delta for event in events if isinstance(event, TextMessageContentEvent)]
-    assert deltas == [shown(CONFIRMING)]
-    assert isinstance(events[-1], RunFinishedEvent)
-    outcome = events[-1].outcome
-    assert outcome is not None and outcome.type == "interrupt"
-    (interrupt,) = outcome.interrupts
-    assert interrupt.reason == APPROVAL_REASON
-    assert state.form_fill is not None and state.form_fill.pending["id"] == interrupt.id
-
-
-@pytest.mark.asyncio
-async def test_a_reply_that_ends_the_form_finishes_the_run_plainly():
-    state = SearchState(form_fill=FormFillSession(workflow_key="w"), form_reply=ENDED)
-    events = [event async for event in _stream(state).after_stream()]
-    deltas = [event.delta for event in events if isinstance(event, TextMessageContentEvent)]
-    assert deltas == [shown(ENDED)]
-    assert isinstance(events[-1], RunFinishedEvent) and events[-1].outcome is not None
-    assert events[-1].outcome.type == "success"
-
-
-@pytest.mark.asyncio
-async def test_without_a_transport_a_stop_finishes_the_run_plainly_and_records_nothing():
-    state = SearchState(form_fill=FormFillSession(workflow_key="w", status="confirming"), form_reply=CONFIRMING)
-    events = [event async for event in _stream(state, hitl=None).after_stream()]
-    assert isinstance(events[-1], RunFinishedEvent) and events[-1].outcome is not None
-    assert events[-1].outcome.type == "success"
-    assert state.form_fill is not None and state.form_fill.pending is None
-
-
-@pytest.mark.asyncio
-async def test_the_skills_reply_is_streamed_in_the_transports_words():
-    state = SearchState(form_reply=CONFIRMING)
-    events = [event async for event in _stream(state).handle_text_start(TextPart(content=CONFIRMING.text))]
-    deltas = [event.delta for event in events if isinstance(event, TextMessageContentEvent)]
-    assert deltas == [shown(CONFIRMING)]
-
-
-@pytest.mark.asyncio
-async def test_the_models_text_is_streamed_as_it_is():
-    events = [event async for event in _stream(SearchState()).handle_text_start(TextPart(content="hello"))]
-    deltas = [event.delta for event in events if isinstance(event, TextMessageContentEvent)]
-    assert deltas == ["hello"]
-
-
-@pytest.mark.asyncio
-async def test_a_reply_already_streamed_as_text_is_not_said_twice():
-    state = SearchState(form_fill=FormFillSession(workflow_key="w"), form_reply=ENDED)
+async def test_a_form_is_one_activity_message_that_names_its_tool_calls():
+    session = FormFillSession(workflow_key="w")
+    state = SearchState(form_fill=session, hitl=True)
     stream = _stream(state)
-    _ = [event async for event in stream.handle_text_start(TextPart(content=ENDED.text))]
-    events = [event async for event in stream.after_stream()]
-    assert not any(isinstance(event, TextMessageContentEvent) for event in events)
+    call = ToolCallPart(tool_name="submit_page", args={"a": 1}, tool_call_id="f1")
+    assert [e async for e in stream.handle_tool_call_start(call)] != []  # the call itself still goes out
+    result = FunctionToolResultEvent(part=ToolReturnPart(tool_name="submit_page", content={}, tool_call_id="f1"))
+    moved = [e async for e in stream.handle_function_tool_result(result) if isinstance(e, ActivitySnapshotEvent)]
+    assert [(e.message_id, e.content["phase"], e.content["calls"]) for e in moved] == [
+        (session.id, "gathering", ["f1"])
+    ]
+    state.form_fill = None  # the form closed in this run
+    (closed,) = [e async for e in stream.after_stream() if isinstance(e, ActivitySnapshotEvent)]
+    assert (closed.message_id, closed.content["phase"], closed.content["calls"]) == (session.id, "done", ["f1"])
+    # A client that cannot be shown an approval gets no form message.
+    plain = _stream(SearchState(form_fill=session))
+    assert [e async for e in plain.after_stream() if isinstance(e, ActivitySnapshotEvent)] == []
 
 
-# --- the worker: the response in, the run's state ----------------------------------------------------------------
+# --- the worker: the answer in, the run's state ------------------------------------------------------------------
 
 
 def _agent() -> MagicMock:
@@ -233,17 +135,14 @@ def _agent() -> MagicMock:
     return agent
 
 
-def _persistence(mock_persistence_cls: MagicMock, state: SearchState | None) -> AsyncMock:
+async def _run(mock_adapter_cls, mock_persistence_cls, state: SearchState | None, run_input: RunAgentInput):
+    """One request through the worker with the adapter and the persistence mocked: what it streamed."""
     mock_persistence = AsyncMock()
-    thread = (
+    mock_persistence.load_thread.return_value = (
         StoredThread(thread_id="t", agent_type=AGENT_TYPE, updated_at=datetime.now(UTC), state=state) if state else None
     )
-    mock_persistence.load_thread.return_value = thread
     mock_persistence_cls.return_value = mock_persistence
-    return mock_persistence
 
-
-def _adapter(mock_adapter_cls: MagicMock) -> MagicMock:
     async def no_events():
         return
         yield  # noqa: F401
@@ -252,88 +151,82 @@ def _adapter(mock_adapter_cls: MagicMock) -> MagicMock:
     mock_adapter.run_stream.return_value = mock_event_stream()
     mock_adapter.encode_stream.return_value = no_events()
     mock_adapter_cls.return_value = mock_adapter
-    return mock_adapter
-
-
-async def _run(mock_adapter_cls, mock_persistence_cls, state: SearchState | None, run_input: RunAgentInput):
-    mock_persistence = _persistence(mock_persistence_cls, state)
-    _adapter(mock_adapter_cls)
     db_session = MagicMock()
     db_session.get.return_value = None
     stream = await AGUIWorker.run_request(_agent(), run_input, db_session)
-    chunks = [chunk async for chunk in stream]
-    return mock_persistence, chunks
+    return [chunk async for chunk in stream]
 
 
 @pytest.mark.asyncio
 @patch("orchestrator_agent.adapters.ag_ui.worker.PostgresStatePersistence")
 @patch("orchestrator_agent.adapters.ag_ui.worker._AGUIAdapter")
-async def test_the_resume_entry_is_the_skills_input_and_the_run_state_is_the_servers(
+async def test_the_answer_to_the_waiting_start_goes_on_and_the_run_state_is_the_servers(
     mock_adapter_cls, mock_persistence_cls
 ):
-    session, interrupt_id = _paused()
-    run_input = _run_input(resume=[_resolved(interrupt_id, {"approved": True})], messages=[])
-    mock_persistence, _ = await _run(mock_adapter_cls, mock_persistence_cls, SearchState(form_fill=session), run_input)
-
-    kwargs = mock_adapter_cls.call_args.kwargs
-    deps = kwargs["deps"]
-    assert deps.state.hitl is True
-    assert deps.state.form_input == FormInput(decision=Decision.START)
-    assert deps.state.user_input == "[form response]"
-    assert kwargs["ag_ui_version"] == "1.0.3"
-    assert isinstance(kwargs["hitl"], AGUIInterrupts)
-    # pydantic-ai rebuilds the run's state from the run input: it carries the server's state, this turn's input included.
-    prepared = kwargs["run_input"]
-    assert prepared.state["form_fill"]["pending"]["id"] == interrupt_id
-    assert prepared.resume is None  # read into the state; pydantic-ai maps entries to its own interrupts only
-    assert prepared.state["hitl"] is True and prepared.state["form_input"] == {"decision": "start", "reason": None}
-    assert prepared.messages == []  # an approval needs no words from the person
-    mock_persistence.snapshot.assert_awaited_once_with(deps.state)
-
-
-@pytest.mark.asyncio
-@patch("orchestrator_agent.adapters.ag_ui.worker.PostgresStatePersistence")
-@patch("orchestrator_agent.adapters.ag_ui.worker._AGUIAdapter")
-async def test_what_the_person_said_when_rejecting_is_the_runs_message(mock_adapter_cls, mock_persistence_cls):
-    session, interrupt_id = _paused()
-    entry = _resolved(interrupt_id, {"approved": False, "reason": "make it 1G"})
-    await _run(
-        mock_adapter_cls, mock_persistence_cls, SearchState(form_fill=session), _run_input(resume=[entry], messages=[])
-    )
+    approved = _resolved("int-s1", {"approved": True})
+    run_input = _run_input(resume=[approved, _resolved("int-old", {"approved": True})], messages=[])
+    await _run(mock_adapter_cls, mock_persistence_cls, _confirming(), run_input)
     prepared = mock_adapter_cls.call_args.kwargs["run_input"]
-    assert [(m.role, m.content) for m in prepared.messages] == [("user", "make it 1G")]
-    assert mock_adapter_cls.call_args.kwargs["deps"].state.form_input == FormInput(
-        decision=Decision.CANCEL, reason="make it 1G"
-    )
+    assert prepared.resume == [approved] and prepared.messages == []
+    assert prepared.state["form_fill"]["workflow_key"] == "w" and prepared.state["hitl"] is True
+    assert mock_adapter_cls.call_args.kwargs["deps"].state.hitl is True
 
 
 @pytest.mark.asyncio
 @patch("orchestrator_agent.adapters.ag_ui.worker.PostgresStatePersistence")
 @patch("orchestrator_agent.adapters.ag_ui.worker._AGUIAdapter")
-async def test_a_response_to_a_form_that_is_not_open_runs_nothing(mock_adapter_cls, mock_persistence_cls):
-    run_input = _run_input(resume=[_resolved("gone", {"approved": True})], messages=[])
-    _, chunks = await _run(mock_adapter_cls, mock_persistence_cls, SearchState(), run_input)
-    mock_adapter_cls.assert_not_called()
-    assert any("RUN_STARTED" in chunk for chunk in chunks)
-    assert any(NOT_OPEN in chunk for chunk in chunks)
-    assert any("RUN_FINISHED" in chunk for chunk in chunks)
+async def test_a_message_without_a_decision_while_the_start_waits_is_refused(mock_adapter_cls, mock_persistence_cls):
+    said = [UserMessage(id="m2", role="user", content="show me subscriptions over time")]
+    with pytest.raises(ApprovalPendingError, match="int-s1"):
+        await _run(mock_adapter_cls, mock_persistence_cls, _confirming(), _run_input(messages=said))
+    assert not mock_adapter_cls.called
 
 
 @pytest.mark.asyncio
 @patch("orchestrator_agent.adapters.ag_ui.worker.PostgresStatePersistence")
 @patch("orchestrator_agent.adapters.ag_ui.worker._AGUIAdapter")
-async def test_a_message_with_a_stale_response_is_still_the_models(mock_adapter_cls, mock_persistence_cls):
-    run_input = _run_input(resume=[_resolved("gone", {"approved": False})])  # and "create a port"
-    await _run(mock_adapter_cls, mock_persistence_cls, SearchState(), run_input)
-    assert mock_adapter_cls.call_args.kwargs["deps"].state.user_input == "create a port"
+async def test_what_the_person_wrote_when_not_approving_reaches_the_model_as_theirs(
+    mock_adapter_cls, mock_persistence_cls
+):
+    state = _confirming()
+    talk = _resolved("int-s1", {"approved": False, "reason": "show me subscriptions over time"})
+    await _run(mock_adapter_cls, mock_persistence_cls, state, _run_input(resume=[talk], messages=[]))
+    (told,) = mock_adapter_cls.call_args.kwargs["run_input"].resume
+    assert told.payload["reason"] == f"{NOT_APPROVED} 'show me subscriptions over time'"
+    assert state.form_fill is not None  # the form stays open: the start can be asked for again
 
 
 @pytest.mark.asyncio
 @patch("orchestrator_agent.adapters.ag_ui.worker.PostgresStatePersistence")
 @patch("orchestrator_agent.adapters.ag_ui.worker._AGUIAdapter")
-async def test_a_client_without_interrupts_cannot_be_shown_a_stop(mock_adapter_cls, mock_persistence_cls):
-    await _run(mock_adapter_cls, mock_persistence_cls, None, _run_input(version="0.1.10"))
+async def test_a_rejection_without_words_closes_the_form_and_the_model_is_told(mock_adapter_cls, mock_persistence_cls):
+    state = _confirming()
+    form = (state.form_fill.id, "w")
+    rejected = _run_input(resume=[_resolved("int-s1", {"approved": False})], messages=[])
+    await _run(mock_adapter_cls, mock_persistence_cls, state, rejected)
     kwargs = mock_adapter_cls.call_args.kwargs
-    assert kwargs["hitl"] is None
-    assert kwargs["deps"].state.hitl is False
-    assert kwargs["deps"].state.user_input == "create a port"
+    assert kwargs["deps"].state.form_fill is None and kwargs["closed"] == form
+    assert kwargs["run_input"].resume[0].payload == {"approved": False, "reason": REJECTED}
+
+
+@pytest.mark.asyncio
+@patch("orchestrator_agent.adapters.ag_ui.worker.PostgresStatePersistence")
+@patch("orchestrator_agent.adapters.ag_ui.worker._AGUIAdapter")
+async def test_an_answer_to_a_start_that_is_not_waiting_runs_nothing(mock_adapter_cls, mock_persistence_cls):
+    stale = _run_input(resume=[_resolved("int-old", {"approved": True})], messages=[])
+    chunks = await _run(mock_adapter_cls, mock_persistence_cls, SearchState(), stale)
+    assert NOT_OPEN in "".join(chunks) and not mock_adapter_cls.called
+
+
+@pytest.mark.asyncio
+async def test_a_request_with_neither_a_message_nor_an_answer_is_refused():
+    with pytest.raises(EmptyRunError):
+        await AGUIWorker.run_request(_agent(), _run_input(messages=[]), MagicMock())
+
+
+@pytest.mark.asyncio
+@patch("orchestrator_agent.adapters.ag_ui.worker.PostgresStatePersistence")
+@patch("orchestrator_agent.adapters.ag_ui.worker._AGUIAdapter")
+async def test_a_client_without_interrupts_cannot_be_shown_an_approval(mock_adapter_cls, mock_persistence_cls):
+    await _run(mock_adapter_cls, mock_persistence_cls, SearchState(), _run_input(version="0.1.10"))
+    assert mock_adapter_cls.call_args.kwargs["deps"].state.hitl is False

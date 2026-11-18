@@ -33,7 +33,7 @@ def test_workflow_plugin_only_lists_and_hands_off():
     assert spec.artifact is None
     assert spec.advertise is True
     assert owned_tool_names(spec) == {LIST_WORKFLOWS_TOOL, START_WORKFLOW_FORM_TOOL}
-    assert "page tools" in spec.instructions and "approves the start" in spec.instructions
+    assert "page tools" in spec.instructions and "asks for their approval" in spec.instructions
 
 
 def test_spec_round_trips_through_json():

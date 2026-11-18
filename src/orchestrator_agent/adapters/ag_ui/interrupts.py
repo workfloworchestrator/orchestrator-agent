@@ -11,184 +11,116 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""AG-UI interrupts, as the human-in-the-loop transport of a client that shows them (the chat popup).
+"""The start of a workflow over AG-UI: the framework's tool approval, shown by the client as an interrupt.
 
 AG-UI (protocol 0.1.19 and later; the JS client from 1.0) lets a run end waiting for a person: ``RUN_FINISHED``
-carries an interrupt outcome with one ``Interrupt`` per thing to answer (an id, a reason, a message, the
-schema of the answer, and metadata), and the client answers by starting the next run with a ``resume``
-entry per interrupt (``ResumeEntry``: the interrupt's id, ``resolved`` with a payload, or ``cancelled``).
-A workflow form has one such stop, the start to approve: it goes out as an interrupt with AG-UI's own
-reason for a gated call, ``tool_call``, showing the call as it will be made, and the resume entry that
-answers it comes back as the skill's input — the decision, and what the person said when they did not
-approve, which the model then acts on. The pages before it are filled in conversation, with no interrupt.
-
-What the stop asked is remembered on the session (``form_fill.pending``); this module keeps nothing of its own.
+carries an interrupt per thing to answer, and the client answers by starting the next run with a ``resume``
+entry for it. pydantic-ai maps its tool approvals onto exactly that: a run that stops on ``start_workflow``
+ends with a ``tool_call`` interrupt, and the entry that answers it becomes the call's result, an approval
+or a denial with what the person said. This module only adds what that mapping does not know: which call
+is waiting when a chat is reopened or a person writes instead of deciding.
 """
 
 from __future__ import annotations
 
-import json
 import re
-import uuid
 from collections.abc import Sequence
-from typing import Any
 
-import structlog
-from ag_ui.core import Interrupt, ResumeEntry, RunAgentInput
-from pydantic import BaseModel, StrictBool, ValidationError
+from ag_ui.core import Interrupt, ResumeEntry
+from pydantic import BaseModel, StrictBool
+from pydantic_ai.messages import ModelMessage, ModelRequest, ModelResponse, ToolCallPart, ToolReturnPart
+from pydantic_ai.ui.ag_ui._interrupt import approval_to_interrupt
+from pydantic_ai.ui.ag_ui._utils import INTERRUPT_ID_PREFIX
 
-from orchestrator_agent.adapters.words import shown
-from orchestrator_agent.form_fill.pending import PendingStop, pending_approval, pending_of
-from orchestrator_agent.form_fill.session import paused
-from orchestrator_agent.state import Approval, Decision, FormFillSession, FormInput, Reply
+from orchestrator_agent.form_fill.pages import approval
+from orchestrator_agent.state import FormPhase, SearchState
+from orchestrator_agent.tool_names import START_WORKFLOW_TOOL
 
-logger = structlog.get_logger(__name__)
-
-APPROVAL_REASON = "tool_call"  # an interrupt that carries the start to approve: AG-UI's reason for a gated call
 INTERRUPTS_VERSION = (0, 1, 19)  # the AG-UI release that added the interrupt lifecycle
 _VERSION = re.compile(r"^\s*v?(\d+(?:\.\d+)*)")
 
 
 class ApprovalAnswer(BaseModel):
-    """The payload that resolves a ``tool_call`` interrupt: the decision on the start, as AG-UI shapes an approval.
+    """The payload that resolves the interrupt: the decision on the start, as AG-UI shapes an approval.
 
-    A rejection may say why, or what to change: the form reopens and the model acts on it.
+    A rejection may say why, or what to change: the model reads it and acts on it.
     """
 
-    approved: StrictBool  # a real JSON boolean, as pydantic-ai reads an AG-UI approval; "yes" is no decision
+    approved: StrictBool  # a real JSON boolean; "yes" is no decision
     reason: str | None = None
 
 
-class ToolCall(BaseModel):
-    """The call the agent wants approved, as it will be made."""
-
-    name: str
-    args: dict[str, Any]
-
-
-class ApprovalStop(BaseModel):
-    """The metadata of a ``tool_call`` interrupt: the workflow start to approve."""
-
-    workflow_key: str
-    tool: ToolCall
-    form: dict[str, Any] | None  # the skill's reply as data (``FormReply``), for a client that renders it
-
-
 def supports_interrupts(version: str | None) -> bool:
-    """Whether a client that says it speaks this AG-UI version gets interrupts (and so can be shown a stop)."""
+    """Whether a client that says it speaks this AG-UI version gets interrupts (and so can be shown an approval)."""
     match = _VERSION.match(version or "")
     return match is not None and tuple(int(part) for part in match.group(1).split(".")) >= INTERRUPTS_VERSION
 
 
-# --- outbound: the skill's stop -> the interrupt it is shown as -------------------------------------------
+def pending_start(history: Sequence[ModelMessage]) -> ToolCallPart | None:
+    """The ``start_workflow`` call the thread waits on: the last one, while it has no result yet."""
+    answered = {
+        part.tool_call_id
+        for message in history
+        if isinstance(message, ModelRequest)
+        for part in message.parts
+        if isinstance(part, ToolReturnPart)
+    }
+    calls = [
+        part
+        for message in history
+        if isinstance(message, ModelResponse)
+        for part in message.parts
+        if isinstance(part, ToolCallPart) and part.tool_name == START_WORKFLOW_TOOL
+    ]
+    return calls[-1] if calls and calls[-1].tool_call_id not in answered else None
 
 
-def _form(reply: Reply) -> dict[str, Any] | None:
-    """The skill's reply as data (``FormReply``), for a client that renders it; None when the text is not one."""
-    try:
-        data = json.loads(reply.text)
-    except ValueError:
+def pending_interrupt(state: SearchState, history: Sequence[ModelMessage]) -> Interrupt | None:
+    """The approval the thread waits on, as the client was shown it; None when it waits on none."""
+    call = pending_start(history)
+    session = state.form_fill
+    if call is None or session is None or session.status != FormPhase.CONFIRMING:
         return None
-    return data if isinstance(data, dict) else None
+    return approval_to_interrupt(call, {call.tool_call_id: approval(session).model_dump(mode="json")})
 
 
-def approval_interrupt(
-    request_id: str, reply: Reply, approval: Approval, session: FormFillSession
-) -> tuple[Interrupt, PendingStop]:
-    """A ``tool_call`` interrupt for the workflow start the skill wants confirmed, shown as it will be made."""
-    interrupt = Interrupt(
-        id=request_id,
-        reason=APPROVAL_REASON,
-        tool_call_id=request_id,
-        message=approval.hint,
-        response_schema=ApprovalAnswer.model_json_schema(),
-        metadata=ApprovalStop(
-            workflow_key=session.workflow_key,
-            tool=ToolCall(name=approval.tool_name, args=dict(approval.args)),
-            form=_form(reply),
-        ).model_dump(mode="json"),
-    )
-    return interrupt, pending_approval(request_id)
+def answers(call: ToolCallPart | None, resume: Sequence[ResumeEntry] | None) -> list[ResumeEntry]:
+    """The resume entries a run carries on to the framework: the answer to the pending start, and no other.
 
-
-def pause(reply: Reply, session: FormFillSession | None) -> Interrupt | None:
-    """The reply's stop as the interrupt that shows it, remembered on the session; None when the reply is no stop.
-
-    It records on the session, so it must run before the state is persisted. The client shows the interrupt
-    as soon as the run ends, so the stop is never ``unseen``.
+    An entry about anything else is stale (its form is over).
     """
-    if session is None or reply.approval is None:
-        return None
-    request_id = uuid.uuid4().hex
-    interrupt, pending = approval_interrupt(request_id, reply, reply.approval, session)
-    pending.shown = interrupt.model_dump(mode="json", by_alias=True, exclude_none=True)  # for a reopened chat
-    paused(session, pending, unseen=False)
-    return interrupt
+    if call is None:
+        return []
+    interrupt_id = f"{INTERRUPT_ID_PREFIX}{call.tool_call_id}"
+    return [entry for entry in resume or [] if entry.interrupt_id == interrupt_id]
 
 
-# --- inbound: the run's resume entries -> the skill's input ---------------------------------------------------
+def words(entry: ResumeEntry) -> str | None:
+    """What the person wrote when they did not approve the start; None when they approved or wrote nothing."""
+    payload = entry.payload if isinstance(entry.payload, dict) else {}
+    reason = payload.get("reason")
+    return reason if payload.get("approved") is False and isinstance(reason, str) and reason.strip() else None
 
 
-def human_input(session: FormFillSession | None, resume: Sequence[ResumeEntry] | None) -> FormInput | None:
-    """The person's response to the pending stop among the run's resume entries, as the skill's input.
-
-    None when the run carries no response, or no stop is pending: the message is the model's. A cancelled
-    entry is a cancel decision; a resolved approval a start, or a cancel with what the person said. A
-    response that is not about the pending stop, or cannot be read, still means the person is with the
-    form: an empty input shows the stop again.
-    """
-    pending = pending_of(session)
-    if pending is None or not resume:
-        return None
-    entry = next((entry for entry in resume if entry.interrupt_id == pending.id), None)
-    if entry is None:
-        logger.warning("No resume entry answers the pending stop; showing it again", pending_id=pending.id)
-        return FormInput()
-    if entry.status == "cancelled":
-        return FormInput(decision=Decision.CANCEL)
-    return _decision(entry.payload)
+def denial(call: ToolCallPart, reason: str) -> ResumeEntry:
+    """The entry that declines the waiting start, with what the model is told about it."""
+    interrupt_id = f"{INTERRUPT_ID_PREFIX}{call.tool_call_id}"
+    return ResumeEntry(interrupt_id=interrupt_id, status="resolved", payload={"approved": False, "reason": reason})
 
 
-def _decision(payload: Any) -> FormInput:
-    try:
-        answer = ApprovalAnswer.model_validate(payload)
-    except ValidationError:
-        logger.warning("The approval's resume payload cannot be read; showing the approval again")
-        return FormInput()
-    if answer.approved:
-        return FormInput(decision=Decision.START)
-    return FormInput(decision=Decision.CANCEL, reason=(answer.reason or "").strip() or None)
-
-
-# --- the transport ---------------------------------------------------------------------------------------------
-
-
-class AGUIInterrupts:
-    """An AG-UI client that shows interrupts (the chat popup): a human-in-the-loop transport over AG-UI."""
-
-    def shows_stops(self, request: RunAgentInput) -> bool:
-        """The client speaks an AG-UI with interrupts: the protocol version it sends says so."""
-        return supports_interrupts(request.protocol_version)
-
-    def read(self, session: FormFillSession | None, request: RunAgentInput) -> FormInput | None:
-        return human_input(session, request.resume)
-
-    def pause(self, reply: Reply, session: FormFillSession | None, request: RunAgentInput) -> Interrupt | None:
-        return pause(reply, session)
-
-    def words(self, reply: Reply) -> str:
-        """The reply as a person reads it in the chat; the interrupt carries the data."""
-        return shown(reply)
+def rejected(entry: ResumeEntry) -> bool:
+    """Whether the person rejected the start outright: no approval, and not a word about what to change."""
+    payload = entry.payload if isinstance(entry.payload, dict) else {}
+    return entry.status == "cancelled" or (payload.get("approved") is False and not payload.get("reason"))
 
 
 __all__ = [
-    "APPROVAL_REASON",
-    "AGUIInterrupts",
     "ApprovalAnswer",
-    "ApprovalStop",
-    "ToolCall",
-    "approval_interrupt",
-    "human_input",
-    "pause",
+    "answers",
+    "denial",
+    "pending_interrupt",
+    "pending_start",
+    "rejected",
     "supports_interrupts",
+    "words",
 ]

@@ -26,7 +26,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 import structlog
-from pydantic_ai import Agent
+from pydantic_ai import Agent, DeferredToolRequests
 from pydantic_ai.ui import StateDeps
 
 from orchestrator_agent.capabilities.hooks import build_capabilities
@@ -42,7 +42,8 @@ if TYPE_CHECKING:
 
 logger = structlog.get_logger(__name__)
 
-WFOAgent = Agent[StateDeps[SearchState], str]
+# A run answers in words, or stops on a tool call the person has to approve (the start of a workflow).
+WFOAgent = Agent[StateDeps[SearchState], str | DeferredToolRequests]
 
 
 def build_agent(model: "Model | KnownModelName | str", *, form_fill: "FormFillSkill | None" = None) -> WFOAgent:
@@ -65,6 +66,7 @@ def build_agent(model: "Model | KnownModelName | str", *, form_fill: "FormFillSk
     agent: WFOAgent = Agent(
         model=model,
         deps_type=StateDeps[SearchState],
+        output_type=[str, DeferredToolRequests],
         instructions=load_system_prompt(),
         toolsets=[core_toolset],
         capabilities=capabilities,

@@ -11,95 +11,24 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""The form-fill state machine: its phases, what a turn's response is, and every write to a session.
+"""A form's state, and every write to it.
 
-A form is filled over turns that arrive as separate requests, so the machine's position is data on the
-session (``FormFillSession.status``). While ``gathering`` the model fills the current page through its
-tools (``tools``), and every tool call is a write here. At ``confirming`` the start is out for the
-person's approval, and their response is one event (``event_of``) that the transition says what to do
-with. Nothing else writes a session.
+A form is filled over turns that arrive as separate requests, so where it stands is data on the session
+(``FormFillSession.status``): ``gathering`` while the model fills the current page through its tools
+(``tools``), ``confirming`` once core accepted every page and the start waits for the person's approval,
+``done`` when it is closed. Every tool call is a write here; nothing else writes a session.
 """
 
 from __future__ import annotations
 
 from collections.abc import Sequence
-from dataclasses import dataclass
-from enum import StrEnum
 from typing import Any
 
 from orchestrator.core.schemas.mcp_tools import WorkflowFormPage
 from pydantic_forms.core import FormFieldError
 
 from orchestrator_agent.form_fill.model import FieldSpec, fields_of
-from orchestrator_agent.form_fill.pending import PendingStop
-from orchestrator_agent.state import Decision, FormFillSession, FormInput, FormPhase
-
-# --- events: what one turn brings, as the transport made of the person's response ---------------------------
-
-
-@dataclass(frozen=True)
-class Approved:
-    """The person approved the start."""
-
-
-@dataclass(frozen=True)
-class Rejected:
-    """The person did not approve the start; with a ``reason`` they said what to change."""
-
-    reason: str | None = None
-
-
-@dataclass(frozen=True)
-class Shown:
-    """The pending stop is shown (again): it had not been shown yet, or the response carried nothing to read."""
-
-
-@dataclass(frozen=True)
-class Message:
-    """A message that is no response: the person wrote instead of answering (or no stop is pending)."""
-
-
-Event = Approved | Rejected | Shown | Message
-
-
-def event_of(given: FormInput | None, unseen: bool) -> Event:
-    """The event a turn's input is: a message, a decision, or nothing readable (which shows the stop again)."""
-    if given is None:
-        return Shown() if unseen else Message()
-    if given.decision is Decision.CANCEL:
-        return Rejected((given.reason or "").strip() or None)
-    if given.decision is Decision.START:
-        return Approved()
-    return Shown()
-
-
-class Action(StrEnum):
-    """What a turn does with the person's response before the model, if anything."""
-
-    START = "start"  # send ``create_workflow`` with the validated pages
-    CANCEL = "cancel"  # close the form as cancelled
-    SUMMARY = "summary"  # show the start to approve again
-    REOPEN = "reopen"  # the model acts on what the person said; the start is offered again after it
-    NOTHING = "nothing"  # not the form's turn: the model's
-
-
-def transition(phase: FormPhase, event: Event) -> Action:
-    """What the turn does in this phase on this event."""
-    if phase is not FormPhase.CONFIRMING:
-        return Action.NOTHING  # gathering: every message is the model's; done: the session is gone
-    match event:
-        case Approved():
-            return Action.START
-        case Rejected(reason=None):
-            return Action.CANCEL
-        case Rejected():
-            return Action.REOPEN
-        case Shown():
-            return Action.SUMMARY
-        case Message():
-            return Action.REOPEN
-    raise ValueError(f"no transition for {event!r}")  # pragma: no cover
-
+from orchestrator_agent.state import FormFillSession, FormPhase
 
 # --- the session's writes: every change to a form's state, by name --------------------------------------------
 
@@ -129,7 +58,6 @@ def accepted(
     _fresh_page(session)
     if next_page is None:
         session.status = FormPhase.CONFIRMING
-        session.reason = None
         return
     session.pages.append(next_page)
     session.status = FormPhase.GATHERING
@@ -150,29 +78,12 @@ def restarted(session: FormFillSession, index: int, page: WorkflowFormPage | Non
     session.page_inputs = session.page_inputs[:index]
     session.page_labels = session.page_labels[:index]
     session.pages = session.pages[:index]
-    session.pending = None
-    session.reason = None
     _fresh_page(session)
     if page is None:
         session.status = FormPhase.CONFIRMING
         return
     session.pages.append(page)
     session.status = FormPhase.GATHERING
-
-
-def reopened(session: FormFillSession, reason: str | None) -> None:
-    """The person did not approve the start and said why (or wrote instead): this turn is the model's.
-
-    The form stays complete; the start is offered again after the model, unless it restarted a page.
-    """
-    session.reason = reason
-
-
-def paused(session: FormFillSession, pending: PendingStop, *, unseen: bool) -> None:
-    """The stop a transport sent as a pause, to map the response back; ``unseen`` when the person has not seen it yet."""
-    session.pending = pending.model_dump(mode="json", exclude_none=True)
-    session.reason = None
-    session.unseen = unseen
 
 
 def close(session: FormFillSession) -> None:
@@ -200,23 +111,13 @@ def given(session: FormFillSession) -> dict[str, Any]:
 
 
 __all__ = [
-    "Action",
-    "Approved",
-    "Event",
     "FormPhase",
-    "Message",
-    "Rejected",
-    "Shown",
     "accepted",
     "close",
     "current",
-    "event_of",
     "fields",
     "given",
     "opened",
-    "paused",
     "rejected",
-    "reopened",
     "restarted",
-    "transition",
 ]

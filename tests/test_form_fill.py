@@ -7,15 +7,16 @@ from typing import Literal
 
 os.environ.setdefault("DATABASE_URI", "postgresql://test:test@localhost:5432/test")
 
+import pytest
 from orchestrator.core.schemas.mcp_tools import WorkflowFormPage
-from pydantic_ai import ModelRetry
+from pydantic_ai import ApprovalRequired, ModelRetry
 from pydantic_forms.core import FormFieldError
 
 from orchestrator_agent.form_fill import session as fs
 from orchestrator_agent.form_fill.model import ACCEPTED, FieldSpec, askable, fields_in
-from orchestrator_agent.form_fill.pages import describe, obvious, tool_schema
+from orchestrator_agent.form_fill.pages import approval, describe, obvious, tool_schema
 from orchestrator_agent.form_fill.skill import COMPLETE_NOTE, FormFillSkill
-from orchestrator_agent.state import Decision, FormFillSession, FormInput, FormReply, Reply, SearchState
+from orchestrator_agent.state import FormFillSession, SearchState
 
 PRODUCT = "a19904e6-fa9f-4dd3-90c1-08dbd6d0821e"
 
@@ -278,50 +279,12 @@ class FakeCore:
         return self.walk(self.pages(inputs), inputs)
 
 
-APPROVE, REJECT = Decision.START, Decision.CANCEL  # the person's decision on the start, as the transport hands it over
-
-
-class Stop:
-    """A skill reply as the tests read it: the ``FormReply`` data, plus the approval it stops at."""
-
-    def __init__(self, reply: Reply) -> None:
-        self.reply, self.data = reply, FormReply.model_validate_json(reply.text)
-
-    def __getattr__(self, name):
-        return getattr(self.data, name)
-
-    @property
-    def approval(self):
-        return self.reply.approval
-
-
-def data(reply: Reply | None) -> Stop | None:
-    return None if reply is None else Stop(reply)
-
-
-def verdict(reply: Stop) -> list[tuple]:
-    """Core's errors on the reply as ``(field, message, type)``."""
-    return [(str(error.loc[0]) if error.loc else "", error.msg, error.type) for error in reply.rejected]
-
-
 async def opened(core, key, skill=None, **kwargs) -> tuple[SearchState, FormFillSession, dict]:
     """What follows the model's ``start_workflow_form``: the state with its open form, and what the model was told."""
     state = SearchState(hitl=True)
     result = await (skill or FormFillSkill()).open(state, core, key, **kwargs)
     assert state.form_fill is not None
     return state, state.form_fill, result
-
-
-async def decide(skill, core, state, given: Decision | str | None, *, hitl=True) -> Stop | None:
-    """One turn at the approval: the person's decision (``str``: a rejection with those words), or a plain message."""
-    state.hitl = hitl
-    if given is None:
-        state.form_input = None
-    elif isinstance(given, Decision):
-        state.form_input = FormInput(decision=given)
-    else:
-        state.form_input = FormInput(decision=REJECT, reason=given)
-    return data(await skill.handle(state, core))
 
 
 FILLED = {"customer_name": "UA", "speed": "10000", "speed_policer": True}
@@ -535,7 +498,7 @@ class TestSubmit:
         }
         accepted = await skill.submit(session, core, {"customer_id": "c-1"})
         assert accepted["status"] == "complete"
-        assert Stop(skill.summary(session)).labels == {"customer_id": "Alder (UA)"}  # as core labelled it
+        assert approval(session).values == {"customer_id": "Alder (UA)"}  # as core labelled it
 
     async def test_a_refusal_that_is_no_verdict_is_said_and_the_form_stays(self):
         core = FakeCore(reject=(1, "core is having a moment"))
@@ -630,49 +593,42 @@ async def completed(core=None, **core_kwargs) -> tuple[FakeCore, SearchState, Fo
     return core, state, session, skill
 
 
-class TestSummaryAndStart:
-    async def test_the_summary_carries_the_values_with_their_labels_and_the_defaults(self):
-        _, _, session, skill = await completed()
-        summary = Stop(skill.summary(session))
-        assert summary.status == "confirming"
-        assert summary.values == {"product": PRODUCT, **FILLED, "redundancy": "protected"}
-        assert summary.labels == {"product": "Demo Lightpath", "speed": "10 Gbit/s", "redundancy": "Protected"}
-        assert summary.defaults == {"ticket_id": ""}
-        assert summary.approval.tool_name == "create_workflow"
-        assert (
-            summary.approval.args["json_data"] == session.page_inputs
-            and summary.approval.args["labels"] == summary.labels
-        )
+class TestApprovalAndStart:
+    async def test_the_approval_shows_the_values_as_the_form_does_and_the_defaults(self):
+        _, _, session, _ = await completed()
+        shown = approval(session)
+        assert shown.workflow_key == "create_demo_lightpath"
+        assert shown.values == {**FILLED, "product": "Demo Lightpath", "speed": "10 Gbit/s", "redundancy": "Protected"}
+        assert shown.defaults == {"ticket_id": ""}
 
     async def test_the_workflows_own_summary_page_is_carried_to_the_approval(self):
-        _, _, session, skill = await completed(summary_page=True)
-        assert Stop(skill.summary(session)).summary == [SUMMARY_TABLE]
+        _, _, session, _ = await completed(summary_page=True)
+        assert approval(session).summary == [SUMMARY_TABLE]
 
-    async def test_the_start_sends_exactly_the_accepted_pages_once(self):
+    async def test_the_start_waits_for_the_persons_approval_and_then_sends_exactly_the_accepted_pages(self):
         core, state, session, skill = await completed()
-        started = await decide(skill, core, state, APPROVE)
-        assert started is None  # no approval is pending: the transport has not shown one yet
-        fs.paused(session, pending_approval("req-1"), unseen=False)
-        started = await decide(skill, core, state, APPROVE)
-        assert started.status == "started" and started.process_id == FakeCore.PROCESS_ID
+        with pytest.raises(ApprovalRequired) as stopped:
+            await skill.start(state, core, approved=False)
+        assert stopped.value.metadata["workflow_key"] == "create_demo_lightpath" and core.created == []
+        started = await skill.start(state, core, approved=True)
+        assert started == {"status": "started", "process_id": FakeCore.PROCESS_ID}
         assert core.created == [{"workflow_key": "create_demo_lightpath", "json_data": session.page_inputs}]
         assert state.form_fill is None
 
-    async def test_a_rejection_without_words_cancels_the_form(self):
-        core, state, session, skill = await completed()
-        fs.paused(session, pending_approval("req-1"), unseen=False)
-        assert (await decide(skill, core, state, REJECT)).status == "cancelled" and state.form_fill is None
+    async def test_a_caller_that_cannot_approve_gets_the_form_prepared_and_nothing_started(self):
+        core, state, _, skill = await completed()
+        state.hitl = False
+        prepared = await skill.start(state, core, approved=False)
+        assert prepared["status"] == "prepared" and prepared["values"]["speed"] == "10 Gbit/s"
+        assert state.form_fill is None and core.created == []
 
-    async def test_an_unreadable_response_shows_the_approval_again(self):
-        core, state, session, skill = await completed()
-        fs.paused(session, pending_approval("req-1"), unseen=False)
-        state.form_input = FormInput()
-        again = data(await skill.handle(state, core))
-        assert again.status == "confirming" and again.approval is not None
+    async def test_a_form_that_is_not_complete_cannot_be_started(self):
+        core = FakeCore()
+        state, _, _ = await opened(core, "create_demo_lightpath")
+        assert "error" in await FormFillSkill().start(state, core, approved=True) and core.created == []
 
     async def test_a_start_core_refuses_reopens_the_page_it_rejects_with_its_words(self):
         core, state, session, skill = await completed()
-        fs.paused(session, pending_approval("req-1"), unseen=False)
 
         async def refusing(name, args):
             if name == "create_workflow":
@@ -681,34 +637,31 @@ class TestSummaryAndStart:
                 return page(1, "Demo Lightpath", LIGHTPATH_FIELDS, errors({"speed": "Speed no longer offered"}))
             return await core(name, args)
 
-        reopened = await decide(skill, refusing, state, APPROVE)
-        assert reopened.status == "gathering" and reopened.page == 1 and reopened.title == "Demo Lightpath"
-        assert verdict(reopened) == [("speed", "Speed no longer offered", "value_error")]
+        told = await skill.start(state, refusing, approved=True)
+        assert (told["status"], told["page"]) == ("rejected", 1)
+        assert told["errors"] == [{"field": "speed", "message": "Speed no longer offered"}]
         assert session.status == "gathering" and session.page_inputs == [{"product": PRODUCT}]
         assert session.draft == FILLED and fs.current(session).title == "Demo Lightpath"
 
     async def test_a_start_that_fails_without_a_verdict_closes_the_form(self):
-        core, state, session, skill = await completed()
-        fs.paused(session, pending_approval("req-1"), unseen=False)
+        core, state, _, skill = await completed()
 
         async def failing(name, args):
             if name == "create_workflow":
                 raise RuntimeError("core unreachable")
             return await core(name, args)
 
-        failed = await decide(skill, failing, state, APPROVE)
-        assert failed.status == "failed" and failed.reason == "core unreachable" and state.form_fill is None
+        failed = await skill.start(state, failing, approved=True)
+        assert failed == {"status": "failed", "reason": "core unreachable"} and state.form_fill is None
 
     async def test_a_start_core_answered_is_never_sent_again_whatever_the_answer_looks_like(self):
-        core, state, session, skill = await completed()
-        fs.paused(session, pending_approval("req-1"), unseen=False)
+        core, state, _, skill = await completed()
 
         async def odd(name, args):
             return {"weird": True} if name == "create_workflow" else await core(name, args)
 
-        started = await decide(skill, odd, state, APPROVE)
-        assert started.status == "started" and started.process_id is None and "weird" in started.reason
-        assert state.form_fill is None
+        started = await skill.start(state, odd, approved=True)
+        assert started["status"] == "started" and "weird" in started["answer"] and state.form_fill is None
 
     async def test_session_survives_a_json_round_trip(self):
         _, _, session, _ = await completed()
@@ -747,6 +700,3 @@ class SourcedCore:
         if (value := inputs[0][self.sourced]) not in self.options:
             return raw_page(0, self._schema(), errors({self.sourced: "not among the field's options"}), title="Sourced")
         return {**complete(1), "labels": {self.sourced: self.options[value]}}
-
-
-from orchestrator_agent.form_fill.pending import pending_approval  # noqa: E402

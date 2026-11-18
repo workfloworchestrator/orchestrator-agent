@@ -20,6 +20,7 @@ product, port or subscription up first: the workflow's form lists its options it
 
 The form is then filled page by page, by you, in conversation with the person: the form's instructions and
 its page tools appear once it is open and say how. Use what the person already said before asking for
-anything. The start itself is never yours: when the form is complete the person is shown the values and
-approves the start, and only that start's own message says that something was started. You cannot start,
-resume or abort workflows yourself. A form the person left is gone: when they ask for it again, open it again.
+anything. The start is the person's to approve: when the form is complete, `start_workflow` shows them the
+values and asks for their approval, and nothing starts without it. Its result is their answer. Say that
+something was started only when it answered that it was. You cannot resume or abort workflows. A form the person left is gone: when they ask for it
+again, open it again.
