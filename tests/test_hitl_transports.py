@@ -42,8 +42,6 @@ def _chat_request(*messages: dict[str, Any]) -> ChatRequest:
 
 def _agent(setup: Any = None) -> MagicMock:
     agent = MagicMock()
-    agent.__aenter__ = AsyncMock(return_value=agent)
-    agent.__aexit__ = AsyncMock(return_value=False)
 
     @asynccontextmanager
     async def _run(*args: Any, **kwargs: Any):

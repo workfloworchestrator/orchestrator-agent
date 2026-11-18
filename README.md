@@ -211,8 +211,8 @@ On A2A, chat completions and AG-UI, `WriteToolGate` also hides Core's three work
 
 Search tables and grouped charts are rendered in code. A2A and chat completions append them to the answer; AG-UI
 carries rendered blocks and optional `ChartData` in artifact metadata, so a frontend can draw its own charts,
-while MCP returns raw JSON. MCP sessions are opened per run with
-`async with agent:`. See [Endpoints and protocols](docs/reference/endpoints.md) for protocol-specific behavior.
+while MCP returns raw JSON. Each run opens an MCP session of its own to Core, as the person it runs for.
+See [Endpoints and protocols](docs/reference/endpoints.md) for protocol-specific behavior.
 
 Export downloads are delivered through AG-UI's artifact metadata and authenticated chats API. The export plugin
 removes Core's standard link fields from model-visible results; chat completions, A2A and MCP currently do not

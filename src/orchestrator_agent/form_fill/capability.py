@@ -39,12 +39,13 @@ from pydantic_ai.models import ModelRequestContext
 from pydantic_ai.toolsets import FunctionToolset
 
 from orchestrator_agent.form_fill.handoff import FormDeps, build_handoff_toolset
+from orchestrator_agent.mcp_client import run_copy
 from orchestrator_agent.state import FormFillSession, FormReply, Reply, SearchState
 
 if TYPE_CHECKING:
     from pydantic_ai.mcp import MCPToolset
 
-    from orchestrator_agent.form_fill.skill import FormFillSkill
+    from orchestrator_agent.form_fill.skill import CallTool, FormFillSkill
 
 logger = structlog.get_logger(__name__)
 
@@ -55,7 +56,11 @@ class FormFillCapability(AbstractCapability[FormDeps]):
     def __init__(self, skill: FormFillSkill, core_toolset: MCPToolset[Any]) -> None:
         self.skill = skill
         self.core_toolset = core_toolset
-        self.handoff_toolset = build_handoff_toolset(skill, core_toolset.direct_call_tool)
+        self.handoff_toolset = build_handoff_toolset(skill, self._call_core)
+
+    def _call_core(self, ctx: RunContext[Any]) -> CallTool:
+        """Call core over the run's own MCP session: through the shared toolset, every call would open one."""
+        return run_copy(self.core_toolset, ctx).direct_call_tool
 
     @classmethod
     def get_serialization_name(cls) -> str | None:
@@ -70,9 +75,9 @@ class FormFillCapability(AbstractCapability[FormDeps]):
         state = ctx.deps.state
         if ctx.run_step == 1:
             state.form_reply = None
-            reply = await self._claim(state)
+            reply = await self._claim(state, self._call_core(ctx))
         elif state.form_fill is not None and state.form_fill.status == "opening":
-            reply = await self._open(state, state.form_fill)
+            reply = await self._open(state, state.form_fill, self._call_core(ctx))
         else:
             return request_context
         if reply is None:
@@ -80,7 +85,7 @@ class FormFillCapability(AbstractCapability[FormDeps]):
         state.form_reply = reply
         raise SkipModelRequest(ModelResponse(parts=[TextPart(content=reply.text)]))
 
-    async def _claim(self, state: SearchState) -> Reply | None:
+    async def _claim(self, state: SearchState, call_tool: CallTool) -> Reply | None:
         """Offer the turn to the skill; its reply, or None to let the model answer.
 
         A failure in the skill leaves the session as it was: the skill is an add-on, and a core (or
@@ -90,19 +95,19 @@ class FormFillCapability(AbstractCapability[FormDeps]):
             return None
         backup = state.form_fill.model_copy(deep=True)
         try:
-            return await self.skill.handle(state, self.core_toolset.direct_call_tool)
+            return await self.skill.handle(state, call_tool)
         except Exception:
             logger.exception("Form-fill skill failed; answering with the model instead")
             state.form_fill = backup
             return None
 
-    async def _open(self, state: SearchState, session: FormFillSession) -> Reply | None:
+    async def _open(self, state: SearchState, session: FormFillSession, call_tool: CallTool) -> Reply | None:
         """Walk the form the model just handed off.
 
         A failure closes the form and is the reply: the model's own line would say a form was opened.
         """
         try:
-            return await self.skill.open(state, self.core_toolset.direct_call_tool)
+            return await self.skill.open(state, call_tool)
         except Exception as exc:
             logger.exception("Form-fill handoff failed; the form is closed")
             state.form_fill = None

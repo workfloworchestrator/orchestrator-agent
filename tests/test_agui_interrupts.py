@@ -266,10 +266,7 @@ async def test_a_reply_already_streamed_as_text_is_not_said_twice():
 
 
 def _agent() -> MagicMock:
-    agent = MagicMock()
-    agent.__aenter__ = AsyncMock(return_value=agent)
-    agent.__aexit__ = AsyncMock(return_value=False)
-    return agent
+    return MagicMock()
 
 
 def _persistence(mock_persistence_cls: MagicMock, state: SearchState | None) -> AsyncMock:

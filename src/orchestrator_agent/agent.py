@@ -17,8 +17,8 @@ Domain behaviour lives entirely in capabilities (see ``capabilities.py``): each
 wraps a slice of orchestrator-core's MCP toolset plus its instructions, and is
 loaded on demand by the model via the framework ``load_capability`` tool.
 
-MCP tools require an open session, so every run must happen inside
-``async with agent:``.
+Each run connects to core with an MCP session of its own, as the person it
+runs for (see ``mcp_client``).
 """
 
 from __future__ import annotations
@@ -56,14 +56,14 @@ def build_agent(
 
     Args:
         model: A pydantic-ai model or model name/string.
-        form_fill: The workflow form-fill skill to run in front of the model (A2A); it shares the
-            agent's core MCP session. Only with it does the model get the handoff to the skill and
+        form_fill: The workflow form-fill skill to run in front of the model (A2A); it calls core over
+            the run's own MCP session. Only with it does the model get the handoff to the skill and
             lose core's write tools.
         model_settings: Settings sent with every model request (temperature, thinking effort, ...); they
             take precedence over the settings the model itself carries.
 
     Returns:
-        A plain ``Agent`` ready to run inside ``async with agent:``.
+        A plain ``Agent``; each of its runs opens its own MCP session to core.
     """
     core_toolset = build_core_toolset()
     capabilities = build_capabilities(form_fill=form_fill is not None)

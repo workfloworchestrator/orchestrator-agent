@@ -65,7 +65,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     mcp_app = MCPApp(build_agent(agent_settings.create_model(), model_settings=model_settings))
     app.mount("/mcp", mcp_app.app)
 
-    # Manage adapter lifecycles. The agents open MCP sessions per-run (async with agent),
+    # Manage adapter lifecycles. Each agent run opens (and closes) an MCP session of its own to core,
     # so only the MCP server's session manager needs lifespan management here.
     stack = AsyncExitStack()
     await stack.__aenter__()

@@ -52,7 +52,7 @@ _MAX_PAGES = 50  # a form that keeps producing pages is broken, not long
 
 
 class CallTool(Protocol):
-    """Call one of core's MCP tools by name (bound to an open MCP session by the adapter)."""
+    """Call one of core's MCP tools by name, as the person bound to the call (in a run, over the run's own session)."""
 
     async def __call__(self, name: str, args: dict[str, Any]) -> Any: ...
 

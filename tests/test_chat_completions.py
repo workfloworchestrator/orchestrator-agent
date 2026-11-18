@@ -45,8 +45,6 @@ APPROVAL = Reply(
 def _agent_doing(setup, text: str = "model text") -> MagicMock:
     """An agent mock whose run applies ``setup(state)`` (what the form-fill capability would do) and answers ``text``."""
     agent = MagicMock()
-    agent.__aenter__ = AsyncMock(return_value=agent)
-    agent.__aexit__ = AsyncMock(return_value=False)
 
     @asynccontextmanager
     async def _run(*args, **kwargs):
