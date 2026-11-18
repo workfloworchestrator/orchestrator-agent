@@ -68,6 +68,9 @@ There are two answers.
 - **A service account.** When there is no user token, the agent signs in as itself with the OAuth2
   client-credentials grant when outbound authentication is enabled. Orchestrator Core then sees the agent, not the person.
 
+Each run talks to Orchestrator Core over an MCP session of its own, opened with the token chosen for that run. Runs
+for different people that overlap never share a session, so none of them reaches Core with another person's token.
+
 With outbound authentication disabled and no forwarded token, the call carries no bearer token. Core must allow
 that unauthenticated request for it to succeed. The table below describes authenticated calls.
 

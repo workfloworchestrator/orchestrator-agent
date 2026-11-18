@@ -256,13 +256,12 @@ class AGUIWorker:
         history = load_messages(state.message_history)
 
         async def _stream_with_persistence() -> AsyncIterator[str]:
-            """Open the MCP session, stream AG-UI events, persist, and commit on completion."""
+            """Stream AG-UI events, persist, and commit on completion."""
             try:
                 with bind_outbound_token(auth_token):
-                    async with agent:
-                        event_stream = adapter.encode_stream(adapter.run_stream(deps=deps, message_history=history))
-                        async for event_str in event_stream:
-                            yield event_str
+                    event_stream = adapter.encode_stream(adapter.run_stream(deps=deps, message_history=history))
+                    async for event_str in event_stream:
+                        yield event_str
                 # The state the run used (pydantic-ai rebuilds it from the run input); a stop is on it.
                 await persistence.snapshot(deps.state)
                 db_session.commit()

@@ -7,7 +7,7 @@ import os
 os.environ.setdefault("DATABASE_URI", "postgresql://test:test@localhost:5432/test")
 
 import json
-from types import SimpleNamespace
+from typing import Any, cast
 from unittest.mock import AsyncMock
 
 import httpx
@@ -136,11 +136,22 @@ def test_decode_stringified_json(args, expected):
     assert decode_stringified_json(args, PROPERTIES) == expected
 
 
+def _tool(name: str, schema: dict) -> ToolsetTool:
+    """A real tool object, as the base toolset returns it: get_tools rebuilds it with dataclasses.replace."""
+    return ToolsetTool(
+        toolset=cast("Any", None),
+        tool_def=ToolDefinition(name=name, parameters_json_schema=schema),
+        max_retries=1,
+        args_validator=SchemaValidator(core_schema.any_schema()),
+    )
+
+
 async def test_core_toolset_decodes_arguments_before_calling_core(monkeypatch):
     toolset = build_core_toolset()
     schema = {"properties": PROPERTIES}
-    tools = {"search": SimpleNamespace(tool_def=SimpleNamespace(parameters_json_schema=schema))}
-    monkeypatch.setattr(toolset, "get_tools", AsyncMock(return_value=tools))
+    tools = {"search": _tool("search", schema)}
+    monkeypatch.setattr(MCPToolset, "get_tools", AsyncMock(return_value=tools))
+    await toolset.get_tools(None)  # what a run does before the model can call a tool
     call_tool = AsyncMock(return_value="result")
 
     result = await toolset.process_tool_call(
@@ -153,7 +164,8 @@ async def test_core_toolset_decodes_arguments_before_calling_core(monkeypatch):
 
 async def test_core_toolset_passes_unknown_tool_arguments_through(monkeypatch):
     toolset = build_core_toolset()
-    monkeypatch.setattr(toolset, "get_tools", AsyncMock(return_value={}))
+    monkeypatch.setattr(MCPToolset, "get_tools", AsyncMock(return_value={}))
+    await toolset.get_tools(None)
     call_tool = AsyncMock(return_value="result")
 
     await toolset.process_tool_call(None, call_tool, "mystery", {"filters": json.dumps(FILTERS)})
@@ -238,8 +250,9 @@ def test_explain_core_rejection_leaves_other_errors_alone(error):
 async def test_core_toolset_rewords_a_validation_rejection_for_the_model(monkeypatch):
     toolset = build_core_toolset()
     schema = {"properties": {"filters": {"type": "string"}}}  # a plain string: the decoder leaves it for core to reject
-    tools = {"search": SimpleNamespace(tool_def=SimpleNamespace(parameters_json_schema=schema))}
-    monkeypatch.setattr(toolset, "get_tools", AsyncMock(return_value=tools))
+    tools = {"search": _tool("search", schema)}
+    monkeypatch.setattr(MCPToolset, "get_tools", AsyncMock(return_value=tools))
+    await toolset.get_tools(None)  # what a run does before the model can call a tool
     call_tool = AsyncMock(side_effect=ModelRetry(_rejection(STRING_FOR_OBJECT)))
 
     with pytest.raises(ModelRetry, match="you sent filters as a string"):
@@ -309,12 +322,7 @@ def test_inline_argument_refs_leaves_a_schema_without_arguments_alone():
 
 async def test_core_toolset_sends_schemas_without_argument_level_references(monkeypatch):
     schema = {"type": "object", "properties": {"filters": {"$ref": "#/$defs/Tree"}}, "$defs": DEFS}
-    tool = ToolsetTool(
-        toolset=None,
-        tool_def=ToolDefinition(name="search", parameters_json_schema=schema),
-        max_retries=1,
-        args_validator=SchemaValidator(core_schema.any_schema()),
-    )
+    tool = _tool("search", schema)
     monkeypatch.setattr(MCPToolset, "get_tools", AsyncMock(return_value={"search": tool}))
 
     tools = await build_core_toolset().get_tools(None)

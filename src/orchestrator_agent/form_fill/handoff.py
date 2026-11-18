@@ -27,6 +27,8 @@ so, for the model to relay.
 
 from __future__ import annotations
 
+from collections.abc import Callable
+
 from pydantic_ai import ModelRetry, RunContext
 from pydantic_ai.toolsets import FunctionToolset
 from pydantic_ai.ui import StateDeps
@@ -45,8 +47,13 @@ NO_HITL = (
 )
 
 
-def build_handoff_toolset(skill: FormFillSkill, call_tool: CallTool) -> FunctionToolset[FormDeps]:
-    """The ``start_workflow_form`` tool, checking the key against core's catalogue (through ``skill``)."""
+def build_handoff_toolset(
+    skill: FormFillSkill, call_core: Callable[[RunContext[FormDeps]], CallTool]
+) -> FunctionToolset[FormDeps]:
+    """The ``start_workflow_form`` tool, checking the key against core's catalogue (through ``skill``).
+
+    ``call_core`` gives how to call core in a run: over that run's own MCP session.
+    """
     toolset: FunctionToolset[FormDeps] = FunctionToolset()
 
     @toolset.tool(name=START_WORKFLOW_FORM_TOOL)
@@ -65,7 +72,7 @@ def build_handoff_toolset(skill: FormFillSkill, call_tool: CallTool) -> Function
         state = ctx.deps.state
         if not state.hitl:
             return NO_HITL
-        if workflow_key not in await skill.workflows(call_tool):
+        if workflow_key not in await skill.workflows(call_core(ctx)):
             raise ModelRetry(f"Unknown workflow key {workflow_key!r}: pass a key exactly as list_workflows returns it.")
         state.form_fill = FormFillSession(
             workflow_key=workflow_key,

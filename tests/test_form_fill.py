@@ -789,7 +789,8 @@ async def handoff(state, key, subscription_id=None, core=None, hitl=True):
     from orchestrator_agent.tool_names import START_WORKFLOW_FORM_TOOL
 
     state.hitl = hitl
-    tool = build_handoff_toolset(make_skill(), core or FakeCore()).tools[START_WORKFLOW_FORM_TOOL].function
+    call_tool = core or FakeCore()
+    tool = build_handoff_toolset(make_skill(), lambda _ctx: call_tool).tools[START_WORKFLOW_FORM_TOOL].function
     return await tool(SimpleNamespace(deps=SimpleNamespace(state=state)), key, subscription_id=subscription_id)
 
 
