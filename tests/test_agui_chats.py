@@ -165,10 +165,7 @@ def _stored(state: SearchState, agent_type: str = AGENT_TYPE) -> StoredThread:
 
 
 def _agent() -> MagicMock:
-    agent = MagicMock()
-    agent.__aenter__ = AsyncMock(return_value=agent)
-    agent.__aexit__ = AsyncMock(return_value=False)
-    return agent
+    return MagicMock()
 
 
 def _persistence(mock_persistence_cls: MagicMock, thread: StoredThread | None) -> AsyncMock:

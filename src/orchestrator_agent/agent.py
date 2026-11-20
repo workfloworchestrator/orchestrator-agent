@@ -17,8 +17,8 @@ Domain behaviour lives entirely in capabilities (see ``capabilities.py``): each
 wraps a slice of orchestrator-core's MCP toolset plus its instructions, and is
 loaded on demand by the model via the framework ``load_capability`` tool.
 
-MCP tools require an open session, so every run must happen inside
-``async with agent:``.
+Each run connects to core with an MCP session of its own, as the person it
+runs for (see ``mcp_client``).
 """
 
 from __future__ import annotations
@@ -37,6 +37,7 @@ from orchestrator_agent.state import SearchState
 
 if TYPE_CHECKING:
     from pydantic_ai.models import KnownModelName, Model
+    from pydantic_ai.settings import ModelSettings
 
     from orchestrator_agent.form_fill import FormFillSkill
 
@@ -46,17 +47,24 @@ logger = structlog.get_logger(__name__)
 WFOAgent = Agent[StateDeps[SearchState], str | DeferredToolRequests]
 
 
-def build_agent(model: "Model | KnownModelName | str", *, form_fill: "FormFillSkill | None" = None) -> WFOAgent:
+def build_agent(
+    model: "Model | KnownModelName | str",
+    *,
+    form_fill: "FormFillSkill | None" = None,
+    model_settings: "ModelSettings | None" = None,
+) -> WFOAgent:
     """Build the capabilities-based WFO agent.
 
     Args:
         model: A pydantic-ai model or model name/string.
-        form_fill: The workflow form-fill skill to run in front of the model (A2A); it shares the
-            agent's core MCP session. Only with it does the model get the handoff to the skill and
+        form_fill: The workflow form-fill skill to run in front of the model (A2A); it calls core over
+            the run's own MCP session. Only with it does the model get the handoff to the skill and
             lose core's write tools.
+        model_settings: Settings sent with every model request (temperature, thinking effort, ...); they
+            take precedence over the settings the model itself carries.
 
     Returns:
-        A plain ``Agent`` ready to run inside ``async with agent:``.
+        A plain ``Agent``; each of its runs opens its own MCP session to core.
     """
     core_toolset = build_core_toolset()
     capabilities = build_capabilities(form_fill=form_fill is not None)
@@ -65,6 +73,7 @@ def build_agent(model: "Model | KnownModelName | str", *, form_fill: "FormFillSk
     logger.debug("Building WFO agent", model=str(model), capability_count=len(capabilities))
     agent: WFOAgent = Agent(
         model=model,
+        model_settings=model_settings,
         deps_type=StateDeps[SearchState],
         output_type=[str, DeferredToolRequests],
         instructions=load_system_prompt(),

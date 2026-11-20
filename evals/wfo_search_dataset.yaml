@@ -18,6 +18,11 @@ cases:
       tool_name: search
       expected_arguments:
         entity_type: SUBSCRIPTION
+  - ToolResultContains:
+      tool_name: search
+      contains:
+      - node asd001 (active)
+      - node ams002 (active)
 - name: filtered-search-active
   inputs: find all active subscriptions
   metadata:
@@ -35,6 +40,15 @@ cases:
       tool_name: discover_filter_paths
       expected_arguments:
         entity_type: SUBSCRIPTION
+  - ToolResultContains:
+      tool_name: search
+      contains:
+      - node asd001 (active)
+      - node ams002 (active)
+      - core link 10G asd001 <-> ams002
+      excludes:
+      - node rtd003 (terminated)
+      - node utr004 (provisioning)
 - name: count-subscriptions
   inputs: how many subscriptions are there in total?
   metadata:
@@ -52,6 +66,10 @@ cases:
       tool_name: aggregate
       expected_arguments:
         entity_type: SUBSCRIPTION
+  - ToolResultContains:
+      tool_name: aggregate
+      contains:
+      - '"total_count":5'
 - name: count-by-status
   inputs: how many subscriptions are there per status?
   metadata:
@@ -68,6 +86,13 @@ cases:
       tool_name: aggregate
       expected_arguments:
         entity_type: SUBSCRIPTION
+  - ToolResultContains:
+      tool_name: aggregate
+      contains:
+      - '"subscription_status":"active"'
+      - '"subscription_status":"terminated"'
+      - '"subscription_status":"provisioning"'
+      - '"count":3'
 - name: filtered-count-active
   inputs: show me how many active subscriptions there are
   metadata:
@@ -87,6 +112,10 @@ cases:
       expected_arguments:
         entity_type: SUBSCRIPTION
         operation: count
+  - ToolResultContains:
+      tool_name: aggregate
+      contains:
+      - '"total_count":3'
 - name: resolve-by-prefix
   inputs: show details for subscription aa1b2c3d
   metadata:
@@ -104,6 +133,10 @@ cases:
       expected_arguments:
         entity_type: SUBSCRIPTION
         id_or_prefix: aa1b2c3d
+  - ToolResultContains:
+      tool_name: resolve_entity
+      contains:
+      - '"status":"candidates"'
 - name: fetch-by-full-uuid
   inputs: look up subscription aa1b2c3d-0000-4000-8000-000000000003 and give me its
     details
@@ -124,6 +157,11 @@ cases:
       expected_arguments:
         id_or_prefix: aa1b2c3d-0000-4000-8000-000000000003
         entity_type: SUBSCRIPTION
+  - ToolResultContains:
+      tool_name: resolve_entity
+      contains:
+      - '"status":"unique"'
+      - core link 10G asd001 <-> ams002
 - name: search-workflows
   inputs: search for workflows containing 'validate'
   metadata:
@@ -143,6 +181,10 @@ cases:
       expected_arguments:
         entity_type: WORKFLOW
         query_text: validate
+  - ToolResultContains:
+      tool_name: search
+      contains:
+      - Validate subscriptions
 - name: export-after-search
   inputs: find core link subscriptions and export them as CSV
   metadata:
@@ -161,6 +203,10 @@ cases:
       tool_name: search
       expected_arguments:
         entity_type: SUBSCRIPTION
+  - ToolResultContains:
+      tool_name: search
+      contains:
+      - core link 10G asd001 <-> ams002
 - name: export-named-alone
   inputs: export active subscriptions
   metadata:
@@ -183,6 +229,15 @@ cases:
       tool_name: search
       expected_arguments:
         entity_type: SUBSCRIPTION
+  - ToolResultContains:
+      tool_name: search
+      contains:
+      - node asd001 (active)
+      - node ams002 (active)
+      - core link 10G asd001 <-> ams002
+      excludes:
+      - node rtd003 (terminated)
+      - node utr004 (provisioning)
 - name: negative-offtopic
   inputs: what is the weather in Amsterdam today?
   metadata:
@@ -209,14 +264,24 @@ cases:
   - TrajectoryMatch:
     - discover_filter_paths
     - search
+  - ToolResultContains:
+      tool_name: search
+      contains:
+      - node asd001 (active)
+      - node ams002 (active)
+      - core link 10G asd001 <-> ams002
+      excludes:
+      - node rtd003 (terminated)
+      - node utr004 (provisioning)
 - name: form-fill-create-node
   inputs: create a new Cisco node named ams005
   metadata:
     failure_modes:
     - form-fill
     curation_note: A create request is a workflow start, and it names every required
-      field of the one-page form, so the route is list, open, submit with no question
-      in between. Nothing starts; the eval caller cannot approve.
+      field of the one-page form, so the route is list, open, submit, start with no
+      question in between. Nothing starts; the eval caller cannot approve, so the start
+      call only reports the form as prepared.
   expected_output: null
   evaluators:
   - TrajectoryMatch:
@@ -224,6 +289,7 @@ cases:
       - list_workflows
       - start_workflow_form
       - submit_page
+      - start_workflow
       order: exact
   - ArgumentCorrectness:
       tool_name: submit_page
@@ -246,6 +312,7 @@ cases:
     - list_workflows
     - start_workflow_form
     - submit_page
+    - start_workflow
   - ArgumentCorrectness:
       tool_name: start_workflow_form
       expected_arguments:
@@ -265,6 +332,7 @@ cases:
     - start_workflow_form
     - search_options
     - submit_page
+    - start_workflow
   - ArgumentCorrectness:
       tool_name: submit_page
       expected_arguments:

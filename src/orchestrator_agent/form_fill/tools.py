@@ -28,6 +28,7 @@ searched field's value core checks against its options.
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from typing import TYPE_CHECKING, Any
 
 from pydantic_ai import ModelRetry, RunContext
@@ -53,6 +54,8 @@ if TYPE_CHECKING:
     from orchestrator_agent.form_fill.skill import FormFillSkill
 
 FormDeps = StateDeps[SearchState]
+# How to call core in a run: over that run's own MCP session.
+CallCore = Callable[[RunContext[FormDeps]], CallTool]
 
 # The arguments as the model sent them: core judges a page, nothing here does.
 ANY_OBJECT = SchemaValidator(core_schema.dict_schema())
@@ -102,7 +105,7 @@ RESTART_SCHEMA: dict[str, Any] = {
 EMPTY_SCHEMA: dict[str, Any] = {"type": "object", "properties": {}, "additionalProperties": False}
 
 
-def build_handoff_toolset(skill: FormFillSkill, call_tool: CallTool) -> FunctionToolset[FormDeps]:
+def build_handoff_toolset(skill: FormFillSkill, call_core: CallCore) -> FunctionToolset[FormDeps]:
     """The ``start_workflow_form`` tool, checking the key against core's catalogue (through ``skill``)."""
     toolset: FunctionToolset[FormDeps] = FunctionToolset()
 
@@ -124,6 +127,7 @@ def build_handoff_toolset(skill: FormFillSkill, call_tool: CallTool) -> Function
                 f"The form of {current.workflow_key!r} is open: continue it, or cancel_form first when the person "
                 "no longer wants it."
             )
+        call_tool = call_core(ctx)
         if workflow_key not in await skill.workflows(call_tool):
             raise ModelRetry(f"Unknown workflow key {workflow_key!r}: pass a key exactly as list_workflows returns it.")
         return await skill.open(ctx.deps.state, call_tool, workflow_key, subscription_id)
@@ -134,9 +138,9 @@ def build_handoff_toolset(skill: FormFillSkill, call_tool: CallTool) -> Function
 class PageToolset(AbstractToolset[FormDeps]):
     """The page tools of the open form, built per run step from the session (``FormFillSession``)."""
 
-    def __init__(self, skill: FormFillSkill, call_tool: CallTool) -> None:
+    def __init__(self, skill: FormFillSkill, call_core: CallCore) -> None:
         self.skill = skill
-        self.core = call_tool  # core's MCP tools, as the skill calls them
+        self.call_core = call_core
 
     @property
     def id(self) -> str:
@@ -173,18 +177,19 @@ class PageToolset(AbstractToolset[FormDeps]):
         session = state.form_fill
         if session is None:
             return {"error": "No form is open."}
+        core = self.call_core(ctx)
         if name == CANCEL_FORM_TOOL:
             return self.skill.cancel(state)
         if name == START_WORKFLOW_TOOL:
-            return await self.skill.start(state, self.core, approved=ctx.tool_call_approved)
+            return await self.skill.start(state, core, approved=ctx.tool_call_approved)
         if name == SUBMIT_PAGE_TOOL:
-            return await self.skill.submit(session, self.core, tool_args)
+            return await self.skill.submit(session, core, tool_args)
         if name == SEARCH_OPTIONS_TOOL:
             return await self.skill.search(
-                session, self.core, str(tool_args.get("field", "")), str(tool_args.get("words", ""))
+                session, core, str(tool_args.get("field", "")), str(tool_args.get("words", ""))
             )
         if name == RESTART_FROM_PAGE_TOOL:
-            return await self.skill.restart(session, self.core, tool_args.get("page"))
+            return await self.skill.restart(session, core, tool_args.get("page"))
         return {"error": f"Unknown tool {name}."}
 
 

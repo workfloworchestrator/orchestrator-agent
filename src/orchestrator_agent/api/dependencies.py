@@ -21,8 +21,8 @@ def get_agent(request: Request) -> WFOAgent:
 
     The app builds one agent at startup and shares it across its protocols (A2A, chat completions,
     AG-UI): the agent with the workflow form-fill skill, so a form is filled the same way on every
-    route. Without that (an app started without the lifespan), it is built here once. MCP sessions are
-    opened per-run via ``async with agent:`` in the adapters.
+    route. Without that (an app started without the lifespan), it is built here once. Each run opens an
+    MCP session of its own to core.
     """
     agent: WFOAgent | None = getattr(request.app.state, "agent", None)
     if agent is None:
@@ -30,7 +30,9 @@ def get_agent(request: Request) -> WFOAgent:
         from orchestrator_agent.settings import agent_settings
 
         model = agent_settings.create_model()
-        agent = build_agent(model, form_fill=build_form_fill_skill())
+        agent = build_agent(
+            model, form_fill=build_form_fill_skill(), model_settings=agent_settings.create_model_settings()
+        )
         request.app.state.agent = agent
     return agent
 

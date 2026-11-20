@@ -49,7 +49,8 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     a2a_url = f"{agent_settings.BASE_URL}/"
     model = agent_settings.create_model()
     form_fill = build_form_fill_skill()
-    a2a = A2AAdapter(build_agent(model, form_fill=form_fill), url=a2a_url)
+    model_settings = agent_settings.create_model_settings()
+    a2a = A2AAdapter(build_agent(model, form_fill=form_fill, model_settings=model_settings), url=a2a_url)
     a2a.add_routes(app)
     # The same agent as an OpenAI-compatible chat model (LibreChat): a form's approval through its ask-user tool.
     ChatCompletionsAdapter(a2a.agent).add_routes(app)
@@ -59,10 +60,10 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     # asking.
     app.state.core_api = CoreApi(api_base(agent_settings.WFO_CORE_MCP_URL, agent_settings.WFO_CORE_API_URL))
 
-    mcp_app = MCPApp(build_agent(agent_settings.create_model()))
+    mcp_app = MCPApp(build_agent(agent_settings.create_model(), model_settings=model_settings))
     app.mount("/mcp", mcp_app.app)
 
-    # Manage adapter lifecycles. The agents open MCP sessions per-run (async with agent),
+    # Manage adapter lifecycles. Each agent run opens (and closes) an MCP session of its own to core,
     # so only the MCP server's session manager needs lifespan management here.
     stack = AsyncExitStack()
     await stack.__aenter__()
@@ -76,6 +77,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
         agui_path="/agui/",
         mcp_path="/mcp",
         agent_model=agent_settings.AGENT_MODEL,
+        model_settings=sorted(agent_settings.AGENT_MODEL_SETTINGS),  # the keys only: headers can be secret
         form_fill_skill="hybrid",
     )
 

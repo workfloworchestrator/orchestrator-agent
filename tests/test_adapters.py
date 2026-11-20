@@ -58,8 +58,6 @@ SAMPLE_ARTIFACT = QueryArtifact(
 def _agent_doing(setup, text="model text") -> MagicMock:
     """An agent mock whose run applies ``setup(state)`` (what the form-fill capability would do) and answers ``text``."""
     agent = MagicMock()
-    agent.__aenter__ = AsyncMock(return_value=agent)
-    agent.__aexit__ = AsyncMock(return_value=False)
 
     @asynccontextmanager
     async def _run(*args, **kwargs):
@@ -72,14 +70,12 @@ def _agent_doing(setup, text="model text") -> MagicMock:
 
 
 def _agent_mock(event_stream_factory) -> MagicMock:
-    """Build an agent mock that is an async context manager and streams the given events.
+    """Build an agent mock that streams the given events.
 
     `run_stream_events(...)` must return an async context manager (matching pydantic-ai),
     so we wrap the event iterator in an async CM.
     """
     agent = MagicMock()
-    agent.__aenter__ = AsyncMock(return_value=agent)
-    agent.__aexit__ = AsyncMock(return_value=False)
 
     @asynccontextmanager
     async def _run_stream_events(*args, **kwargs):
@@ -503,11 +499,9 @@ class TestA2AEndpoint:
 def _run_agent_mock(output: str = "", messages: list | None = None) -> MagicMock:
     """An agent mock whose `run(...)` returns a result with the given output and `all_messages()`.
 
-    It's also an async context manager. The MCP worker uses `agent.run`, not the streaming path.
+    The MCP worker uses `agent.run`, not the streaming path.
     """
     agent = MagicMock()
-    agent.__aenter__ = AsyncMock(return_value=agent)
-    agent.__aexit__ = AsyncMock(return_value=False)
     result = MagicMock(output=output)
     result.all_messages.return_value = messages or []
     agent.run = AsyncMock(return_value=result)
@@ -679,10 +673,7 @@ class TestAGUIWorkerRunRequest:
         )
 
     def _agent(self) -> MagicMock:
-        agent = MagicMock()
-        agent.__aenter__ = AsyncMock(return_value=agent)
-        agent.__aexit__ = AsyncMock(return_value=False)
-        return agent
+        return MagicMock()
 
     @pytest.mark.asyncio
     @patch("orchestrator_agent.adapters.ag_ui.worker.PostgresStatePersistence")

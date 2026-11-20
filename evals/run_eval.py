@@ -3,10 +3,16 @@
 The agent runs in-process — built by the same ``build_agent`` assembly the
 server adapters use — against the live orchestrator-core MCP server from
 docker-compose.yml, once per model in ../eval-models.json whose provider key
-is set. The built-in span-based evaluators (TrajectoryMatch,
-ArgumentCorrectness, MaxToolCalls) read the tool calls from the OpenTelemetry
-spans pydantic-ai emits, so this measures agent behavior only: which tools,
-in what order, with which arguments.
+is set. The span-based evaluators read the tool calls from the OpenTelemetry
+spans pydantic-ai emits: TrajectoryMatch and ArgumentCorrectness judge the
+route (which tools, in what order, with which arguments), ToolResultContains
+(evaluators.py) judges what the last call returned, so a different route to the
+right data is visible as such.
+
+A ``agent:<model>`` entry runs the model the way the server would be configured
+for an OpenAI-compatible endpoint, from the agent's own environment:
+AGENT_API_BASE and AGENT_API_KEY (both required, else the entry shows "no key")
+and AGENT_MODEL_SETTINGS, e.g. for an open-weight model behind a LiteLLM proxy.
 
     uv run python run_eval.py [--models openai:gpt-4o-mini] [--cases name1,name2] [--repeat 5] [--fail-under 0.8]
 """
@@ -18,7 +24,10 @@ from collections import Counter, defaultdict
 from collections.abc import Awaitable, Callable
 from pathlib import Path
 from statistics import fmean
+from typing import NamedTuple
+from urllib.parse import urlparse
 
+from evaluators import ToolResultContains
 from settings import eval_settings
 
 # The agent's AgentSettings reads the process environment at import time, so
@@ -37,6 +46,7 @@ from pydantic_ai import Agent
 Agent.instrument_all()
 
 from pydantic_ai.models import Model
+from pydantic_ai.settings import ModelSettings
 from pydantic_evals import Dataset
 from pydantic_evals.reporting import EvaluationReport, EvaluationReportAdapter
 from rich.align import Align
@@ -45,11 +55,55 @@ from rich.table import Table
 
 from orchestrator_agent.agent import WFOAgent, build_agent, new_deps
 from orchestrator_agent.form_fill import build_form_fill_skill
+from orchestrator_agent.settings import AgentSettings
+
+
+def configured_agent(name: str) -> AgentSettings | None:
+    """The agent settings behind an ``agent:<model>`` entry, or None when no endpoint and key are configured.
+
+    The endpoint, key and model settings are the ones the agent itself reads from AGENT_API_BASE, AGENT_API_KEY and
+    AGENT_MODEL_SETTINGS; only the model is replaced, so one environment can be evaluated against several models.
+    """
+    settings = AgentSettings(AGENT_MODEL=name.partition(":")[2])
+    return settings if settings.AGENT_API_BASE and settings.AGENT_API_KEY else None
+
+
+def model_settings_for(name: str) -> ModelSettings | None:
+    """The model settings an entry runs with: the configured ones for ``agent:`` entries, none for the others."""
+    settings = configured_agent(name) if name.startswith("agent:") else None
+    return settings.create_model_settings() if settings else None
+
+
+# Saved reports can be committed as baselines, so only settings that cannot carry a credential are written to them.
+# AGENT_MODEL_SETTINGS also accepts extra_headers, extra_body and provider-specific keys, which can.
+_REPORTABLE_SETTINGS = frozenset(
+    {"temperature", "top_p", "max_tokens", "thinking", "seed", "timeout", "parallel_tool_calls"}
+)
+
+
+def run_metadata(name: str) -> dict[str, object]:
+    """What to record in the report so a result can be tied to the configuration that produced it.
+
+    Model settings outside the allowlist are recorded by name only, so a report shows that they were set without
+    holding their values.
+    """
+    settings = configured_agent(name) if name.startswith("agent:") else None
+    model_settings = dict(settings.create_model_settings() or {}) if settings else {}
+    return {
+        "model": name,
+        "model_settings": {key: value for key, value in model_settings.items() if key in _REPORTABLE_SETTINGS},
+        "unreported_model_settings": sorted(set(model_settings) - _REPORTABLE_SETTINGS),
+        "api_host": urlparse(settings.AGENT_API_BASE).hostname if settings and settings.AGENT_API_BASE else None,
+    }
 
 
 def build_model(name: str) -> Model | None:
     """The pydantic-ai model for a ``provider:model`` name, or None when the settings hold no key for that provider."""
     provider, _, model_name = name.partition(":")
+    if provider == "agent":
+        configured = configured_agent(name)
+        model = configured.create_model() if configured else None
+        return model if isinstance(model, Model) else None  # a custom endpoint always yields a model, never a bare name
     if provider == "openai":
         if not eval_settings.openai_api_key:
             return None
@@ -113,25 +167,39 @@ def case_means(report: EvaluationReport) -> dict[str, dict[str, float]]:
     }
 
 
-def route_and_arguments(report: EvaluationReport) -> dict[str, tuple[float, float | None]]:
-    """Per case over its runs: the route score average and the argument-correctness pass rate.
+class CaseScores(NamedTuple):
+    route: float
+    arguments: float | None
+    outcome: float | None
 
-    A run that crashed counts as 0 on both; a case without an argument assertion has no pass rate.
+
+def _pass_rate(results: list[float | None], crashed: int) -> float | None:
+    """The mean of the runs that have this measure, crashed runs counting as 0; None when no run has it."""
+    present = [value for value in results if value is not None]
+    return sum(present) / (len(present) + crashed) if present else None
+
+
+def case_scores(report: EvaluationReport) -> dict[str, CaseScores]:
+    """Per case over its runs: the route score average, the argument-correctness pass rate and the outcome pass rate.
+
+    A run that crashed counts as 0 on all three; a case without an argument or outcome assertion has no rate for it.
     """
     crashed = crashes(report)
-    runs: dict[str, list[tuple[float, float | None]]] = defaultdict(list)
+    runs: dict[str, list[CaseScores]] = defaultdict(list)
     for case in report.cases:
-        arguments = case.assertions.get("ArgumentCorrectness")
-        route = case.scores["TrajectoryMatch"].value
+        arguments, outcome = case.assertions.get("ArgumentCorrectness"), case.assertions.get("ToolResultContains")
         runs[case.source_case_name or case.name].append(
-            (float(route), None if arguments is None else float(arguments.value))
+            CaseScores(
+                float(case.scores["TrajectoryMatch"].value),
+                None if arguments is None else float(arguments.value),
+                None if outcome is None else float(outcome.value),
+            )
         )
     return {
-        name: (
-            sum(route for route, _ in runs[name]) / (len(runs[name]) + crashed[name]),
-            sum(rates) / (len(rates) + crashed[name])
-            if (rates := [a for _, a in runs[name] if a is not None])
-            else None,
+        name: CaseScores(
+            sum(run.route for run in runs[name]) / (len(runs[name]) + crashed[name]),
+            _pass_rate([run.arguments for run in runs[name]], crashed[name]),
+            _pass_rate([run.outcome for run in runs[name]], crashed[name]),
         )
         for name in runs.keys() | crashed.keys()
     }
@@ -142,12 +210,13 @@ def _percent(value: float | None) -> str:
 
 
 def print_table(reports: dict[str, EvaluationReport | None], cases: list[str], repeat: int) -> None:
-    """One table: a column per model holding two sub-columns, route match and argument correctness, a row per case.
+    """One table: a column per model holding three sub-columns, route match, argument correctness and outcome.
 
-    rich tables cannot span a header over two columns, so each model's cell holds a two-column grid; every grid has
+    The route is how the agent got there, the outcome is whether the last call returned the expected data. Rich
+    tables cannot span a header over several columns, so each model's cell holds a three-column grid; every grid has
     the same rows (a header line, the cases, the averages), so the rows line up across the models.
     """
-    scores = {model: route_and_arguments(report) for model, report in reports.items() if report is not None}
+    scores = {model: case_scores(report) for model, report in reports.items() if report is not None}
 
     def column(model: str) -> Table:
         grid = Table.grid(padding=(0, 2))
@@ -157,17 +226,26 @@ def print_table(reports: dict[str, EvaluationReport | None], cases: list[str], r
             return grid
         grid.add_column(justify="right")
         grid.add_column(justify="right")
-        grid.add_row("route", "arguments")
+        grid.add_column(justify="right")
+        grid.add_row("route", "arguments", "outcome")
         for case in cases:
             grid.add_row(*(_percent(value) for value in scores[model][case]))
-        routes = [route for route, _ in scores[model].values()]
-        arguments = [a for _, a in scores[model].values() if a is not None]
-        grid.add_row(_percent(fmean(routes)), _percent(fmean(arguments) if arguments else None), style="bold")
+        everything = list(scores[model].values())
+        averages = (
+            fmean(case.route for case in everything),
+            *(
+                fmean(values)
+                if (values := [v for case in everything if (v := getattr(case, field)) is not None])
+                else None
+                for field in ("arguments", "outcome")
+            ),
+        )
+        grid.add_row(*(_percent(average) for average in averages), style="bold")
         return grid
 
     names = Table.grid()
     names.add_column(no_wrap=True)
-    names.add_row("")  # level with the route / arguments line
+    names.add_row("")  # level with the route / arguments / outcome line
     for case in cases:
         names.add_row(case)
     names.add_row("Averages", style="bold")
@@ -178,7 +256,7 @@ def print_table(reports: dict[str, EvaluationReport | None], cases: list[str], r
         table.add_column(model, justify="center")
     table.add_row(names, *(Align.center(column(model)) for model in reports))
     # Wide enough for every column, so a narrow terminal or a CI log wraps rather than truncates.
-    Console(width=max(Console().width, 28 + 30 * len(reports))).print(table)
+    Console(width=max(Console().width, 28 + 36 * len(reports))).print(table)
 
 
 def compare_to_baseline(report: EvaluationReport, baseline: EvaluationReport, tolerance: float) -> list[str]:
@@ -205,6 +283,60 @@ def compare_to_baseline(report: EvaluationReport, baseline: EvaluationReport, to
             if name in base and value - base[name] < -tolerance:
                 regressions.append(f"{case_name} :: {name} {base[name]:.2f} -> {value:.2f}")
     return regressions
+
+
+def evaluate_model(
+    model_name: str, dataset: Dataset[str, str], args: argparse.Namespace
+) -> tuple[EvaluationReport | None, list[str]]:
+    """Run the dataset against one model, print its report notes, and return the report with its gate failures.
+
+    The report is None when the settings hold no key for the model's provider.
+    """
+    model = build_model(model_name)
+    if model is None:
+        return None, []
+    agent = build_agent(model, form_fill=build_form_fill_skill(), model_settings=model_settings_for(model_name))
+    report = dataset.evaluate_sync(
+        task_for(agent),
+        name=model_name,
+        max_concurrency=args.concurrency,
+        repeat=args.repeat,
+        metadata=run_metadata(model_name),
+    )
+    failures: list[str] = []
+
+    if args.save_report:
+        path = for_model(args.save_report, model_name)
+        path.write_bytes(EvaluationReportAdapter.dump_json(report, indent=2))
+        print(f"{model_name}: report written to {path}")
+
+    if report.failures:
+        print(f"{model_name}: {len(report.failures)} run(s) failed to execute, counted as 0")
+
+    if args.baseline:
+        path = for_model(args.baseline, model_name)
+        if not path.exists():
+            print(f"{model_name}: no baseline at {path.name}, nothing to compare against")
+        else:
+            baseline = EvaluationReportAdapter.validate_json(path.read_bytes())
+            regressions = compare_to_baseline(report, baseline, args.tolerance)
+            print("\n".join(f"REGRESSION vs {path.name}: {line}" for line in regressions))
+            if regressions:
+                failures.append(f"{model_name}: {len(regressions)} regression(s) vs baseline {path.name}")
+            else:
+                print(f"{model_name}: no regressions vs baseline {path.name} (tolerance {args.tolerance})")
+
+    if args.fail_under is not None:
+        averages = report.averages()
+        values = list(averages.scores.values())
+        if averages.assertions is not None:
+            values.append(averages.assertions)
+        mean = sum(values) / len(values) if values else 0.0
+        mean *= len(report.cases) / ((len(report.cases) + len(report.failures)) or 1)  # a crashed run is 0
+        print(f"{model_name}: overall mean (score averages + assertion pass rate): {mean:.3f}")
+        if mean < args.fail_under:
+            failures.append(f"{model_name}: overall mean {mean:.3f} below --fail-under {args.fail_under}")
+    return report, failures
 
 
 def main() -> None:
@@ -252,7 +384,7 @@ def main() -> None:
     )
     args = parser.parse_args()
 
-    dataset = Dataset[str, str].from_file(eval_settings.dataset_file)
+    dataset = Dataset[str, str].from_file(eval_settings.dataset_file, custom_evaluator_types=[ToolResultContains])
     if args.cases:
         wanted = {name.strip() for name in args.cases.split(",")}
         dataset = Dataset[str, str](
@@ -268,51 +400,9 @@ def main() -> None:
             sys.exit(f"not in {eval_settings.models_file.name}: {', '.join(unknown)}")
         models = selected
 
-    failures: list[str] = []
-    reports: dict[str, EvaluationReport | None] = {}
-    for model_name in models:
-        model = build_model(model_name)
-        if model is None:
-            reports[model_name] = None  # shown as "no key"
-            continue
-        agent = build_agent(model, form_fill=build_form_fill_skill())
-        report = dataset.evaluate_sync(
-            task_for(agent), name=model_name, max_concurrency=args.concurrency, repeat=args.repeat
-        )
-        reports[model_name] = report
-
-        if args.save_report:
-            path = for_model(args.save_report, model_name)
-            path.write_bytes(EvaluationReportAdapter.dump_json(report, indent=2))
-            print(f"{model_name}: report written to {path}")
-
-        if report.failures:
-            print(f"{model_name}: {len(report.failures)} run(s) failed to execute, counted as 0")
-
-        if args.baseline:
-            path = for_model(args.baseline, model_name)
-            if not path.exists():
-                print(f"{model_name}: no baseline at {path.name}, nothing to compare against")
-            else:
-                baseline = EvaluationReportAdapter.validate_json(path.read_bytes())
-                regressions = compare_to_baseline(report, baseline, args.tolerance)
-                for line in regressions:
-                    print(f"REGRESSION vs {path.name}: {line}")
-                if regressions:
-                    failures.append(f"{model_name}: {len(regressions)} regression(s) vs baseline {path.name}")
-                else:
-                    print(f"{model_name}: no regressions vs baseline {path.name} (tolerance {args.tolerance})")
-
-        if args.fail_under is not None:
-            averages = report.averages()
-            values = list(averages.scores.values())
-            if averages.assertions is not None:
-                values.append(averages.assertions)
-            mean = sum(values) / len(values) if values else 0.0
-            mean *= len(report.cases) / ((len(report.cases) + len(report.failures)) or 1)  # a crashed run is 0
-            print(f"{model_name}: overall mean (score averages + assertion pass rate): {mean:.3f}")
-            if mean < args.fail_under:
-                failures.append(f"{model_name}: overall mean {mean:.3f} below --fail-under {args.fail_under}")
+    outcomes = {model_name: evaluate_model(model_name, dataset, args) for model_name in models}
+    reports = {model_name: report for model_name, (report, _) in outcomes.items()}
+    failures = [failure for _, found in outcomes.values() for failure in found]
 
     print_table(reports, [case.name for case in dataset.cases], args.repeat)
     if not any(reports.values()):

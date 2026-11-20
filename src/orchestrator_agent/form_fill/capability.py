@@ -23,7 +23,7 @@ The start is the framework's tool approval, as documented: the model calls ``sta
 is complete, the call stops the run until the person approved (``ApprovalRequired``), and their decision
 comes back as that call's result, which the model reads like any tool result.
 
-The skill calls core through the agent's own MCP session, so a turn costs no second session.
+The skill calls core over the run's own MCP session, so a turn costs no second session.
 """
 
 from __future__ import annotations
@@ -36,12 +36,13 @@ from pydantic_ai.toolsets import CombinedToolset
 
 from orchestrator_agent.form_fill.instructions import render
 from orchestrator_agent.form_fill.tools import FormDeps, PageToolset, build_handoff_toolset
+from orchestrator_agent.mcp_client import run_copy
 from orchestrator_agent.state import FormPhase
 
 if TYPE_CHECKING:
     from pydantic_ai.mcp import MCPToolset
 
-    from orchestrator_agent.form_fill.skill import FormFillSkill
+    from orchestrator_agent.form_fill.skill import CallTool, FormFillSkill
 
 
 class FormFillCapability(AbstractCapability[FormDeps]):
@@ -50,10 +51,13 @@ class FormFillCapability(AbstractCapability[FormDeps]):
     def __init__(self, skill: FormFillSkill, core_toolset: MCPToolset[Any]) -> None:
         self.skill = skill
         self.core_toolset = core_toolset
-        call_tool = core_toolset.direct_call_tool
         self.toolset: CombinedToolset[FormDeps] = CombinedToolset(
-            [build_handoff_toolset(skill, call_tool), PageToolset(skill, call_tool)]
+            [build_handoff_toolset(skill, self._call_core), PageToolset(skill, self._call_core)]
         )
+
+    def _call_core(self, ctx: RunContext[Any]) -> CallTool:
+        """Call core over the run's own MCP session: through the shared toolset, every call would open one."""
+        return run_copy(self.core_toolset, ctx).direct_call_tool
 
     @classmethod
     def get_serialization_name(cls) -> str | None:

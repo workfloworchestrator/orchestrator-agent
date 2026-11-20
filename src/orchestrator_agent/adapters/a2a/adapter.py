@@ -14,8 +14,8 @@
 """A2A adapter — exposes the orchestrator agent via the A2A protocol (v1.0).
 
 Uses the ``a2a-sdk`` 1.x server primitives (``AgentExecutor``, ``DefaultRequestHandler`` and the route
-factories). The executor drives the plain capabilities-based agent inside ``async with agent:`` (MCP
-session) and collects artifact results + final text.
+factories). The executor drives the plain capabilities-based agent (each run with an MCP session of its
+own to core) and collects artifact results + final text.
 
 The endpoint serves A2A 1.0 and, through the SDK's compatibility layer, A2A 0.3.
 

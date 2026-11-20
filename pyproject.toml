@@ -1,13 +1,13 @@
 [project]
 name = "orchestrator-agent"
-version = "0.2.0"
+version = "0.5.1"
 description = "Standalone WFO search agent for Kagent deployment"
 license = "Apache-2.0"
 requires-python = ">=3.11,<3.14"
 dependencies = [
-    "orchestrator-core>=5.7.0a1",
+    "orchestrator-core>=5.7.0a3",
     "pydantic-forms>=2.10.0",  # core's form types the skill reads, and the option sources its fields declare
-    "pydantic-ai-slim[mcp]>=2.0,<3",
+    "pydantic-ai-slim[mcp]>=2.60,<3",  # 2.60: MCPToolset `auth` as a function of the run, so each run gets its own session
     "ag-ui-protocol>=1.0.0,<2",  # interrupts (``RunFinishedEvent.outcome``, ``RunAgentInput.resume``): the AG-UI human-in-the-loop
     "a2a-sdk[http-server]>=1.1.5,<2",
     "mcp>=1.28.1,<2",
@@ -31,6 +31,12 @@ dev = [
     "httpx>=0.27",
     "ruff>=0.12.0",
     "types-pyyaml>=6.0.12.20260518",
+]
+
+docs = [
+    "mkdocs-material>=9.5",
+    "mkdocs-embed-external-markdown>=3.0.2",
+    "mkdocs-redirects==1.2.2",
 ]
 
 [build-system]

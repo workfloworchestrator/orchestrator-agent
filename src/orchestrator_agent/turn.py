@@ -111,8 +111,7 @@ async def run_turn(
     message_history = load_messages(prior_state.message_history if prior_state else [])
 
     with bind_outbound_token(auth_token):
-        async with agent:
-            output = await _run_model(agent, user_input, deps, message_history, on_artifact)
+        output = await _run_model(agent, user_input, deps, message_history, on_artifact)
     return deps.state, output
 
 

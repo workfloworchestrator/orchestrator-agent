@@ -82,7 +82,7 @@ class MCPWorker:
         self.agent = agent
 
     async def run(self, query: str, *, auth_token: str | None = None) -> str:
-        """Run the agent (MCP session open) and return its final answer plus the structured data."""
+        """Run the agent and return its final answer plus the structured data."""
         deps = new_deps(user_input=query)
 
         deps.state.run_id = uuid.uuid4()
@@ -94,8 +94,7 @@ class MCPWorker:
 
         try:
             with bind_outbound_token(auth_token):
-                async with self.agent:
-                    result = await self.agent.run(query, deps=deps)
+                result = await self.agent.run(query, deps=deps)
             return _result_with_data(result)
         except Exception:
             logger.exception("MCPWorker: run failed", query=query[:100])

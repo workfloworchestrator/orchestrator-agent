@@ -129,10 +129,7 @@ async def test_a_form_is_one_activity_message_that_names_its_tool_calls():
 
 
 def _agent() -> MagicMock:
-    agent = MagicMock()
-    agent.__aenter__ = AsyncMock(return_value=agent)
-    agent.__aexit__ = AsyncMock(return_value=False)
-    return agent
+    return MagicMock()
 
 
 async def _run(mock_adapter_cls, mock_persistence_cls, state: SearchState | None, run_input: RunAgentInput):

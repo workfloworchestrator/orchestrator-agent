@@ -111,6 +111,27 @@ def test_create_model_openai_provider_when_no_azure():
     assert isinstance(result._provider, OpenAIProvider)
 
 
+@pytest.mark.parametrize(
+    "configured, expected",
+    [
+        pytest.param({}, None, id="none-configured"),
+        pytest.param(
+            {"temperature": 0.2, "thinking": "high", "openai_reasoning_effort": "low"},
+            {"temperature": 0.2, "thinking": "high", "openai_reasoning_effort": "low"},
+            id="passed-through",
+        ),
+    ],
+)
+def test_create_model_settings(configured, expected):
+    assert AgentSettings(AGENT_MODEL_SETTINGS=configured).create_model_settings() == expected
+
+
+def test_create_model_settings_returns_a_copy():
+    settings = AgentSettings(AGENT_MODEL_SETTINGS={"temperature": 0.2})
+    settings.create_model_settings()["temperature"] = 1.0
+    assert settings.AGENT_MODEL_SETTINGS == {"temperature": 0.2}
+
+
 def test_oauth2_outbound_active_defaults_to_none():
     settings = AgentSettings()
     assert settings.OAUTH2_OUTBOUND_ACTIVE is None
