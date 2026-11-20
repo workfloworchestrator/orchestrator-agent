@@ -77,9 +77,12 @@ turns a one-off failure into a check that runs on every later change. See
 
 - **Complete workflow auditing.** The built-in integration instruments Pydantic AI; it does not add spans around all
   direct Core calls made by the form-fill skill, conversation persistence or the HTTP request lifecycle.
-- **One trace across services.** The agent does not take over a `traceparent` header from its caller and does not
-  pass one on to Orchestrator Core. The chat UI, the agent and Orchestrator Core each record their part on their own,
-  and you link them by time and user. A gateway in front of the agents is one place to tie them together, see
+- **One trace across services.** The agent does not add a `traceparent` header to its HTTP requests, including
+  the MCP requests themselves and the direct Core calls of the form-fill skill. MCP request metadata can carry
+  trace context separately from HTTP headers, but that alone does not establish an end-to-end trace.
+  Orchestrator Core records no traces by default, and joining its spans to the agent's trace has not been tested.
+  The chat UI, the agent and Orchestrator Core therefore each record their part on their own, and you link
+  them by time and user. A gateway in front of the agents is one place to tie them together, see
   [Gateways](https://workfloworchestrator.org/learn/orchestrator-agent/production/#gateways).
 - **Eval results in the tracing backend.** Langfuse can store scores and datasets, but the evals keep their results
   in the repository instead.
