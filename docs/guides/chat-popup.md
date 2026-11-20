@@ -2,12 +2,6 @@
 description: "Add the Orchestrator Agent chat popup to the WFO UI or to your own React portal over AG-UI."
 ---
 
-<!-- Remaining follow-ups:
-- Publish the chat README proxy links: https://github.com/workfloworchestrator/orchestrator-agent-chat/pull/7
-- Publish the UI configuration guide: https://github.com/workfloworchestrator/orchestrator-ui-library/pull/2848
-- The generic portal setup below still needs its own end-to-end check.
-Remove each publication item once its PR merges. -->
-
 # How to add the agent chat to the WFO UI or your own portal
 
 This guide shows you how to add the Orchestrator Agent as a chat popup in the bottom-right corner of the WFO UI, or of
@@ -76,13 +70,13 @@ serves the page to the agent.
         proxy_read_timeout 300s;
     }
 
-    location /chats {
+    location /chats/ {
         proxy_pass http://agent.internal:8080;
     }
     ```
 
     Replace `http://agent.internal:8080` with the address where the proxy reaches the agent. Keep `proxy_pass`
-    without a path, so the proxy passes `/agui/` and `/chats` on unchanged. Turn off response buffering for
+    without a path, so the proxy passes `/agui/` and `/chats/` on unchanged. Turn off response buffering for
     `/agui/`: without that, the answer appears all at once at the end instead of while the agent works.
 
 ### 2. Add the popup
@@ -147,8 +141,10 @@ serves the page to the agent.
         ```
 
         The popup keeps its state in the browser and draws itself in a shadow root, so render it on the client
-        only. In Next.js, load it with `dynamic(..., { ssr: false })`. It brings its own styles: there is no
-        stylesheet to import, and your page's styles do not change it.
+        only. In the Next.js App Router, layouts are Server Components, which cannot use `ssr: false`. Load the
+        popup with `dynamic(..., { ssr: false })` in a separate component that starts with `"use client"`, and
+        render that component from the layout. It brings its own styles: there is no stylesheet to import, and your
+        page's styles do not change it.
 
     3. Optional: pass what the page shows with `context`, so the agent can use it without the person typing it:
 
@@ -200,7 +196,10 @@ If something does not work:
 - **CORS errors in the browser console.** `agentUrl` points at another origin. Point it at the route on the page's
   own origin and forward it to the agent (step 1).
 - **401.** The token is missing, has expired, or the agent does not accept it (step 3).
-- **403.** The chat belongs to another person, or was started over another protocol such as LibreChat.
+- **403.** The chat belongs to another person. Continuing a chat that was started over another protocol, such as
+  LibreChat, also returns 403 from `/agui/`.
+- **404 when opening a chat.** The chat no longer exists, or was started over another protocol. `/chats` lists and
+  opens only popup chats (see the [Chats API reference](../reference/endpoints.md#chats-api)).
 
 ## Next steps
 
