@@ -7,7 +7,7 @@
     "dev": "vite"
   },
   "dependencies": {
-    "@workfloworchestrator/wfo-chat": "git+https://github.com/workfloworchestrator/orchestrator-agent-chat.git#main",
+    "@orchestrator-ui/orchestrator-agent-chat": "git+https://github.com/workfloworchestrator/orchestrator-agent-chat.git#main",
     "react": "^19.3.1",
     "react-dom": "^19.3.1"
   },

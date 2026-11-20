@@ -73,14 +73,18 @@ data the agent attaches to an aggregate result, shows the tools as they run, kee
 of the tab, and sends what the host page knows (the subscription on screen) as AG-UI context. Its props and
 theming are in that repository's README.
 
-`demos/web/` is a page with nothing on it but the popup, installed from that repository:
+`demos/web/` is a page with nothing on it but the popup. It installs
+`@orchestrator-ui/orchestrator-agent-chat` from that repository's `main` branch:
 
 ```bash
 cd demos/web && npm install && AGENT_URL=http://127.0.0.1:8080 npm run dev     # http://localhost:5173
 ```
 
 The page needs no CORS on the agent: its dev server forwards `/agui/` and `/chats` to it, so the browser sees
-one origin. With OAuth2 on, the popup's `token` prop is the bearer the agent forwards to core.
+one origin. See the [Vite configuration](demos/web/vite.config.js) and the
+[chat setup guide](docs/guides/chat-popup.md#proxy-setup) for proxy settings, including nginx.
+The demo does not provide a sign-in flow. With OAuth2 on, pass a valid access token through the popup's
+`token` prop; the agent forwards it to Core.
 
 **The contract.** The popup's types come from this agent's OpenAPI document, which also names what travels
 inside AG-UI messages (`adapters/ag_ui/contract.py`): the artifact reference a tool result carries with its

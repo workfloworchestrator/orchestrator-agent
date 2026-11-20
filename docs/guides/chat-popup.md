@@ -2,11 +2,11 @@
 description: "Add the Orchestrator Agent chat popup to the WFO UI or to your own React portal over AG-UI."
 ---
 
-<!-- TODO before this guide can be followed from public material alone:
-- demos/web imports the old package name @workfloworchestrator/wfo-chat.
-- The orchestrator-agent-chat README mentions "the demo's nginx config", which does not exist.
-- The orchestrator-ui-library docs do not describe orchestratorAgentUrl.
-- The generic portal setup below still needs its own end-to-end check. -->
+<!-- Remaining follow-ups:
+- Publish the chat README proxy links: https://github.com/workfloworchestrator/orchestrator-agent-chat/pull/7
+- Publish the UI configuration guide: https://github.com/workfloworchestrator/orchestrator-ui-library/pull/2848
+- The generic portal setup below still needs its own end-to-end check.
+Remove each publication item once its PR merges. -->
 
 # How to add the agent chat to the WFO UI or your own portal
 
@@ -32,6 +32,8 @@ form options and downloads. The steps below cover a different WFO deployment or 
   the agent on the page's own origin.
 
 ## Steps
+
+<a id="proxy-setup"></a>
 
 ### 1. Forward `/agui/` and `/chats` to the agent
 
