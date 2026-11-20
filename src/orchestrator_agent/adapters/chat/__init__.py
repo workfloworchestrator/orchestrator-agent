@@ -16,7 +16,7 @@
 ``completions`` is the endpoint (``/v1/chat/completions``), ``request`` the request as it is read.
 """
 
-from orchestrator_agent.adapters.chat.completions import CLIENT_HEADER, CONVERSATION_HEADER, ChatCompletionsAdapter
+from orchestrator_agent.adapters.chat.completions import CONVERSATION_HEADER, ChatCompletionsAdapter
 from orchestrator_agent.adapters.chat.request import ChatRequest
 
-__all__ = ["CLIENT_HEADER", "CONVERSATION_HEADER", "ChatCompletionsAdapter", "ChatRequest"]
+__all__ = ["CONVERSATION_HEADER", "ChatCompletionsAdapter", "ChatRequest"]

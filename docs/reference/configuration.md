@@ -94,4 +94,5 @@ repository, and [Connect LibreChat](../guides/librechat.md) walks through it.
 | `endpoints.custom[].models.default` | `['wfo']` | The one model id the agent serves |
 | `endpoints.custom[].titleConvo` | `false` | Otherwise LibreChat asks the agent for a chat title before the first answer |
 | `endpoints.custom[].headers.X-Conversation-Id` | `'{% raw %}{{LIBRECHAT_BODY_CONVERSATIONID}}{% endraw %}'` | The agent keeps a conversation's memory and its open form under this id |
+| `modelSpecs.list[].askUserQuestion` | `true` | Offers the ask-user tool to the agent, which shows the approval of a workflow start. Without it a form is prepared, not started. Needs LibreChat 0.8.8 or later |
 | `endpoints.custom[].headers.Authorization` | `'Bearer {% raw %}{{LIBRECHAT_OPENID_ACCESS_TOKEN}}{% endraw %}'` | Forwards the signed-in user's token to Core, independently of the inbound and service-account authentication toggles. Required to pass the agent's inbound check when `OAUTH2_ACTIVE=true` |

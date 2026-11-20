@@ -28,13 +28,13 @@ from collections.abc import Sequence
 
 from ag_ui.core import Interrupt, ResumeEntry
 from pydantic import BaseModel, StrictBool
-from pydantic_ai.messages import ModelMessage, ModelRequest, ModelResponse, ToolCallPart, ToolReturnPart
+from pydantic_ai.messages import ModelMessage, ToolCallPart
 from pydantic_ai.ui.ag_ui._interrupt import approval_to_interrupt
 from pydantic_ai.ui.ag_ui._utils import INTERRUPT_ID_PREFIX
 
 from orchestrator_agent.form_fill.pages import approval
+from orchestrator_agent.form_fill.start import pending_start
 from orchestrator_agent.state import FormPhase, SearchState
-from orchestrator_agent.tool_names import START_WORKFLOW_TOOL
 
 INTERRUPTS_VERSION = (0, 1, 19)  # the AG-UI release that added the interrupt lifecycle
 _VERSION = re.compile(r"^\s*v?(\d+(?:\.\d+)*)")
@@ -54,25 +54,6 @@ def supports_interrupts(version: str | None) -> bool:
     """Whether a client that says it speaks this AG-UI version gets interrupts (and so can be shown an approval)."""
     match = _VERSION.match(version or "")
     return match is not None and tuple(int(part) for part in match.group(1).split(".")) >= INTERRUPTS_VERSION
-
-
-def pending_start(history: Sequence[ModelMessage]) -> ToolCallPart | None:
-    """The ``start_workflow`` call the thread waits on: the last one, while it has no result yet."""
-    answered = {
-        part.tool_call_id
-        for message in history
-        if isinstance(message, ModelRequest)
-        for part in message.parts
-        if isinstance(part, ToolReturnPart)
-    }
-    calls = [
-        part
-        for message in history
-        if isinstance(message, ModelResponse)
-        for part in message.parts
-        if isinstance(part, ToolCallPart) and part.tool_name == START_WORKFLOW_TOOL
-    ]
-    return calls[-1] if calls and calls[-1].tool_call_id not in answered else None
 
 
 def pending_interrupt(state: SearchState, history: Sequence[ModelMessage]) -> Interrupt | None:
@@ -119,7 +100,6 @@ __all__ = [
     "answers",
     "denial",
     "pending_interrupt",
-    "pending_start",
     "rejected",
     "supports_interrupts",
     "words",

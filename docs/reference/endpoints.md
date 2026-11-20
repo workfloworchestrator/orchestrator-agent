@@ -14,7 +14,7 @@ conversation handling differ as described below.
 ## OpenAI chat completions
 
 `POST /v1/chat/completions` serves the agent as a chat model. `GET /v1/models` lists a single model id, `wfo`.
-A workflow form can be filled here, but not started: this endpoint has no way to show an approval. See
+The start of a workflow is approved through the client's ask-user tool, which LibreChat provides. See
 [Workflow forms](runtime.md#workflow-forms), and [Connect LibreChat](../guides/librechat.md) for the headers the
 agent expects.
 
@@ -24,15 +24,20 @@ implements it itself, not pydantic-ai.
 - Only `POST /v1/chat/completions` and `GET /v1/models` exist. Other OpenAI endpoints, such as embeddings, are not
   available.
 - Of the request body the agent uses little, because it keeps its own memory of a conversation:
-    - `messages`: only the text of the last `user` message. Earlier, `system`, `assistant` and `tool` messages are
-      not read, and neither are non-text parts such as images.
+    - `messages`: only the text of the last `user` message, plus the `tool` message that answers a waiting
+      approval. Earlier, `system` and `assistant` messages are not read, and neither are non-text parts such as
+      images.
     - `stream`: with `true` the answer comes back as server-sent chunks, but it is computed in full first, so it does
       not arrive token by token.
-    - `tools` is ignored: the client's tools are never called.
+    - `tools`: only whether it offers `ask_user_question` is read. With it, a workflow start that waits for approval
+      is answered with a call of that tool: one question with the options Approve and Reject, under the id of the
+      waiting call. The next request answers it with a `tool` message, `{"answers": {"q0": "<option value>"}}`.
+      Typed text instead of an option, or a new message, declines the start for now and goes to the model as what
+      the person wants changed. No other client tool is called.
     - `model` is echoed back in the response. The model is always the agent's own.
     - All other fields, such as `temperature`, `max_tokens` and `tool_choice`, are ignored.
 - The `X-Conversation-Id` header selects the conversation. See [Connect LibreChat](../guides/librechat.md).
-- A response has one choice, which ends with `stop`, and has no `usage`.
+- A response has one choice, which ends with `stop` or `tool_calls`, and has no `usage`.
 - Export preparation can succeed, but this response does not carry the export's download metadata. See
   [Export delivery](#export-delivery).
 

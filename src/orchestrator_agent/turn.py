@@ -31,6 +31,7 @@ from uuid import UUID
 
 import structlog
 from orchestrator.core.db.models import AgentRunTable
+from pydantic_ai import DeferredToolResults
 from pydantic_ai.messages import FunctionToolResultEvent, ModelMessage, PartDeltaEvent, ToolReturnPart
 from pydantic_ai.run import AgentRunResultEvent
 from sqlalchemy.orm import Session
@@ -92,13 +93,15 @@ async def run_turn(
     hitl: bool,
     auth_token: str | None,
     on_artifact: OnArtifact | None = None,
+    approval: DeferredToolResults | None = None,
 ) -> tuple[SearchState, str]:
     """Run the agent for one turn of ``thread``; the run's state and its answer.
 
     The run is recorded, the conversation's earlier turns are replayed as its message history, and its
-    open form is continued. ``hitl`` says the caller can show a person an approval: a start needs one. The
-    answer is the agent's prose plus the deterministically rendered chart/table blocks. The caller
-    snapshots the state.
+    open form is continued. ``hitl`` says the caller can show a person an approval: a start needs one, and the
+    caller shows it when the run stops for it. ``approval`` is the person's decision on the start the thread
+    waits on: the run then goes on from that call, without a new message. The answer is the agent's prose
+    plus the deterministically rendered chart/table blocks. The caller snapshots the state.
     """
     deps = new_deps(user_input=user_input)
     deps.state.run_id = run_id
@@ -111,7 +114,7 @@ async def run_turn(
     message_history = load_messages(prior_state.message_history if prior_state else [])
 
     with bind_outbound_token(auth_token):
-        output = await _run_model(agent, user_input, deps, message_history, on_artifact)
+        output = await _run_model(agent, user_input, deps, message_history, on_artifact, approval)
     return deps.state, output
 
 
@@ -121,11 +124,15 @@ async def _run_model(
     deps: Any,
     message_history: list[ModelMessage] | None,
     on_artifact: OnArtifact | None,
+    approval: DeferredToolResults | None = None,
 ) -> str:
     """Stream one model run: artifacts go out as they happen; the prose plus rendered blocks is returned."""
     final_output = ""
     injected_blocks: list[str] = []
-    async with agent.run_stream_events(user_input, deps=deps, message_history=message_history) as events:
+    prompt = None if approval is not None else user_input
+    async with agent.run_stream_events(
+        prompt, deps=deps, message_history=message_history, deferred_tool_results=approval
+    ) as events:
         async for event in events:
             if isinstance(event, FunctionToolResultEvent):
                 result = event.part

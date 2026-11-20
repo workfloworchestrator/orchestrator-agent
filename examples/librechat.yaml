@@ -1,7 +1,8 @@
 # Example LibreChat configuration for talking to the orchestrator-agent directly.
 #
-# LibreChat calls the agent as an OpenAI-compatible chat model (POST /v1/chat/completions). A workflow
-# form can be filled in such a chat but not started: this endpoint cannot show the approval a start needs.
+# LibreChat calls the agent as an OpenAI-compatible chat model (POST /v1/chat/completions). The start of
+# a workflow is approved through LibreChat's ask-user tool, which needs LibreChat >= v0.8.8 and a model
+# spec with `askUserQuestion: true`.
 #
 # Merge the `endpoints.custom` entry and the `modelSpecs` entry into your own librechat.yaml.
 version: 1.3.17
@@ -29,6 +30,8 @@ modelSpecs:
   list:
     - name: 'wfo'
       label: 'WFO'
+      # Offers the ask-user tool to the agent. Without it a workflow form is prepared, not started.
+      askUserQuestion: true
       preset:
         endpoint: 'WFO agent'
         model: 'wfo'

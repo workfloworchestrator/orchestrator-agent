@@ -53,7 +53,7 @@ workflow logic. See [How the agent fits on top of Orchestrator Core](explanation
 - **Search and analyse WFO data**: find records, count and group results, look up an entity by id and export results
   as CSV through AG-UI. Tables and charts are built in code from tool results. See the [plugins reference](reference/plugins.md).
 - **Start workflows with approval**: collect and validate form inputs, then ask the person to approve the start
-  through an AG-UI frontend with interrupts. See
+  through an AG-UI frontend with interrupts or LibreChat's ask-user tool. See
   [Start workflows from chat](https://workfloworchestrator.org/learn/orchestrator-agent/use-cases/workflows-from-chat/).
 - **Connect your clients**: use the agent from [LibreChat](guides/librechat.md),
   [MCP clients](guides/mcp-clients.md) or [other agents over A2A](guides/a2a-planner.md).
@@ -80,7 +80,8 @@ and can also be run from source. One service exposes the agent over several prot
 
 Search, aggregation, entity lookup and export preparation are available through all four interfaces; built-in
 [export downloads](reference/endpoints.md#export-delivery) currently require AG-UI. Starting a workflow requires an AG-UI frontend
-that supports interrupts: on A2A and `/v1` a form can be filled but not started. MCP does not offer these forms. See [Endpoints and protocols](reference/endpoints.md) for client support and
+that supports interrupts, or a chat client with an ask-user tool such as LibreChat: on A2A a form can be filled but
+not started. MCP does not offer these forms. See [Endpoints and protocols](reference/endpoints.md) for client support and
 [Read tools and write tools](reference/runtime.md#read-tools-and-write-tools) for the write-tool policy on each
 interface.
 

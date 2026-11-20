@@ -4,8 +4,8 @@ render_macros: false
 
 # How to connect LibreChat
 
-This guide shows you how to run [LibreChat](https://www.librechat.ai/) with the Orchestrator Agent as a chat model.
-It sets up the smallest setup that works: LibreChat and its database, with the agent as the
+This guide shows you how to run [LibreChat](https://www.librechat.ai/) with the Orchestrator Agent as a chat model,
+including the approval of a workflow start. It sets up the smallest setup that works: LibreChat and its database, with the agent as the
 only model. For file uploads, search, other models and production settings, see the
 [LibreChat documentation](https://www.librechat.ai/docs/local).
 
@@ -80,12 +80,14 @@ modelSpecs:
   list:
     - name: 'wfo'
       label: 'WFO'
+      askUserQuestion: true
       preset:
         endpoint: 'WFO agent'
         model: 'wfo'
 ```
 
-Keep `X-Conversation-Id` and `titleConvo` as shown. For what each key does, see
+Use LibreChat 0.8.8 or later: older versions have no ask-user tool, so they cannot show the approval of a workflow
+start. Keep `X-Conversation-Id`, `askUserQuestion` and `titleConvo` as shown. For what each key does, see
 [Configuration: LibreChat](../reference/configuration.md#librechat), or the commented copy in
 `examples/librechat.yaml` of the agent repository.
 
@@ -164,8 +166,8 @@ answer with a chart. Then ask *Find all active subscriptions* to get a table.
 - **The agent cannot be reached.** Check `baseURL` (step 2) and look for the error in `docker compose logs librechat`.
 - **The agent answers 401.** The `Authorization` header is missing, or the agent does not accept the token. Check
   step 3.
-- **A workflow is not started.** That is expected: a form can be filled in LibreChat, but the start needs an
-  approval this endpoint cannot show. See [Workflow forms](../reference/runtime.md#workflow-forms).
+- **No approval card is shown and the form is only "prepared".** Check the LibreChat version and
+  `askUserQuestion: true`. See [Workflow forms](../reference/runtime.md#workflow-forms).
 
 ## Next steps
 

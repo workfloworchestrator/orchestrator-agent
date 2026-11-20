@@ -29,7 +29,7 @@ another port. The source launch explicitly loads `.env` with `uv run --env-file 
 | `/chats/` | REST | AG-UI chat history, the approval a chat waits on and export downloads; see [Endpoints and protocols](docs/reference/endpoints.md#chats-api) |
 | `POST /` | A2A | Agent-to-agent JSON-RPC, protocol v1.0 (`SendMessage`, `SendStreamingMessage`) |
 | `GET /.well-known/agent-card.json` | A2A | Agent card discovery |
-| `POST /v1/chat/completions` | OpenAI chat completions | The agent as a chat model for LibreChat; a workflow form can be filled here, not started |
+| `POST /v1/chat/completions` | OpenAI chat completions | The agent as a chat model for LibreChat; a workflow start's approval through the client's ask-user tool |
 | `GET /v1/models` | OpenAI | Lists the one model id (`wfo`) |
 | `/mcp` | MCP | Model Context Protocol tools |
 | `GET /health/` | REST | Database health check; `/health` redirects here |
@@ -294,8 +294,8 @@ Starting a workflow is a conversation with a hard edge. The model fills the work
 person, page by page; the form's state, its option lists and the start itself are code (`form_fill/`), and
 nothing starts without a person's structured approval. The approval is pydantic-ai's own tool approval, which
 AG-UI carries as an interrupt (the chat popup). No client needs a component per form field: the questions are
-the model's own words. A2A and chat completions cannot show an approval yet, so there a form is prepared, not
-started.
+the model's own words. Chat completions carries it through the client's ask-user tool (LibreChat). A2A cannot show an
+approval yet, so there a form is prepared, not started.
 
 1. **Opens** — deciding *that* a request starts a workflow and *which* one is a judgment call, so the model
    makes it: it reads `list_workflows` and calls `start_workflow_form(workflow_key, subscription_id?)` (any

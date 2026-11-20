@@ -120,8 +120,10 @@ A person who does not approve can reject, which closes the form, or write what t
 the model as the result of the `start_workflow` call: it corrects the form or answers the question, and asks for
 approval again. Chat text is never an approval: a person who types *yes* has not approved anything.
 
-Only AG-UI carries the approval, as an [interrupt](endpoints.md#workflow-interrupts). On A2A and `/v1` a form can be
-filled and validated, but `start_workflow` then only reports that the form is prepared and nothing starts.
+AG-UI carries the approval as an [interrupt](endpoints.md#workflow-interrupts). `/v1` carries it through the
+client's ask-user tool, when the chat offers one; see
+[OpenAI chat completions](endpoints.md#openai-chat-completions). On A2A, and on `/v1` without that tool, a form can
+be filled and validated, but `start_workflow` then only reports that the form is prepared and nothing starts.
 
 Core supplies each page as a self-contained JSON Schema with structured validation verdicts. A field whose options
 come from elsewhere (`optionsSource`) is read by Core: a short list arrives as choices in the schema, a long one is

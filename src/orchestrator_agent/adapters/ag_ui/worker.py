@@ -68,13 +68,13 @@ from orchestrator_agent.adapters.ag_ui.contract import carried
 from orchestrator_agent.adapters.ag_ui.interrupts import (
     answers,
     denial,
-    pending_start,
     rejected,
     supports_interrupts,
     words,
 )
 from orchestrator_agent.artifacts import ToolArtifact
 from orchestrator_agent.form_fill import session as fs
+from orchestrator_agent.form_fill.start import NOT_APPROVED, REJECTED, pending_start
 from orchestrator_agent.mcp_client import bind_outbound_token
 from orchestrator_agent.persistence import PostgresStatePersistence, StoredThread, dump_messages, load_messages
 from orchestrator_agent.state import SearchState
@@ -85,9 +85,6 @@ if TYPE_CHECKING:
 logger = get_logger(__name__)
 
 NOT_OPEN = "That form is no longer open. Ask again to start it."
-# What the model is told, as the result of the start that was waiting, when the person did not approve it.
-REJECTED = "The person rejected the start. The form is closed and nothing was started."
-NOT_APPROVED = "Not approved: nothing was started. The person wants to talk about it first and wrote:"
 AGENT_TYPE = "agui"  # how this route's runs are recorded
 AGUI_AGENT_TYPES = (AGENT_TYPE, "search")  # the threads that are this route's ("search": before the chats API)
 

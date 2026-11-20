@@ -20,7 +20,9 @@ from the state persisted under the ``X-Conversation-Id`` header (LibreChat sends
 there when the endpoint is configured to), and the answer is one assistant message.
 
 A workflow form is filled by the model in the conversation. Its start needs a person's approval, which
-this route cannot show yet: a form can be prepared here, not started (the AG-UI route approves starts).
+is shown through the client's ask-user tool (``approval``): the run stops on ``start_workflow``, the reply
+calls the tool, and the next request's tool message is the decision. A chat that offers no such tool can
+have a form prepared, not started.
 
 The reply is computed before the response starts, so a streamed response is the finished message in a few
 chunks; the client shows it at once. The request is read with ``request``'s models; what goes back
@@ -49,8 +51,13 @@ from openai.types.chat.chat_completion_chunk import ChoiceDelta, ChoiceDeltaTool
 from openai.types.shared import ErrorObject
 from starlette.responses import JSONResponse, Response, StreamingResponse
 
+from orchestrator_agent.adapters.chat.approval import can_ask, card, decision
 from orchestrator_agent.adapters.chat.request import CHAT_MODEL, ChatRequest
-from orchestrator_agent.persistence import PostgresStatePersistence
+from orchestrator_agent.form_fill import session as fs
+from orchestrator_agent.form_fill.pages import approval
+from orchestrator_agent.form_fill.start import pending_start
+from orchestrator_agent.persistence import PostgresStatePersistence, load_messages
+from orchestrator_agent.state import FormPhase
 from orchestrator_agent.turn import NO_RESULTS, ConversationLocks, run_turn
 
 if TYPE_CHECKING:
@@ -59,9 +66,6 @@ if TYPE_CHECKING:
 logger = structlog.get_logger(__name__)
 
 CONVERSATION_HEADER = "x-conversation-id"
-# A chat client says who it is in a header its endpoint is configured to send (LibreChat: ``headers:`` of
-# the custom endpoint in librechat.yaml). On its own it only sends the user agent of its HTTP library.
-CLIENT_HEADER = "x-agent-client"
 _bearer = HTTPBearer(auto_error=False)
 
 
@@ -90,14 +94,12 @@ class ChatCompletionsAdapter:
         self,
         body: ChatRequest,
         conversation: Annotated[str | None, Header(alias=CONVERSATION_HEADER)] = None,
-        client: Annotated[str | None, Header(alias=CLIENT_HEADER)] = None,
         credentials: Annotated[HTTPAuthorizationCredentials | None, Depends(_bearer)] = None,
     ) -> Response:
         try:
             message = await self.complete(
                 body,
                 conversation=conversation,
-                client=client,
                 auth_token=credentials.credentials if credentials else None,
             )
         except Exception:
@@ -110,20 +112,17 @@ class ChatCompletionsAdapter:
         return Response(completion.model_dump_json(exclude_unset=True), media_type="application/json")
 
     async def complete(
-        self, body: ChatRequest, *, conversation: str | None, client: str | None = None, auth_token: str | None = None
+        self, body: ChatRequest, *, conversation: str | None, auth_token: str | None = None
     ) -> ChatCompletionMessage:
         """One turn of a conversation, as the assistant message that answers it.
 
-        Without a conversation id the request is a conversation of its own. ``client`` is who the caller
-        says it is (the ``X-Agent-Client`` header): it picks the transport a form is shown through.
+        Without a conversation id the request is a conversation of its own.
         """
         thread = conversation or uuid.uuid4().hex
         async with self._locks.turn(thread):
-            return await self._complete(body, thread, client, auth_token)
+            return await self._complete(body, thread, auth_token)
 
-    async def _complete(
-        self, body: ChatRequest, thread: str, client: str | None, auth_token: str | None
-    ) -> ChatCompletionMessage:
+    async def _complete(self, body: ChatRequest, thread: str, auth_token: str | None) -> ChatCompletionMessage:
         from orchestrator.core.db import db
 
         run_id = uuid.uuid4()
@@ -131,6 +130,16 @@ class ChatCompletionsAdapter:
             persistence = PostgresStatePersistence(thread_id=thread, run_id=run_id, session=db.session)
             prior_state = await persistence.load_state()
             user_input = body.user_text
+            # A start that waits for approval goes on with the person's decision, and with nothing else.
+            waiting = pending_start(load_messages(prior_state.message_history) or []) if prior_state else None
+            answer = None
+            if waiting is not None and prior_state is not None and (session := prior_state.form_fill) is not None:
+                answer, rejected = decision(waiting, body)
+                if answer is None:
+                    return card(waiting, approval(session))  # no decision: the card again
+                if rejected:
+                    fs.close(session)
+                    prior_state.form_fill = None
 
             state, output = await run_turn(
                 self.agent,
@@ -140,10 +149,15 @@ class ChatCompletionsAdapter:
                 agent_type="chat",
                 prior_state=prior_state,
                 user_input=user_input,
-                hitl=False,
+                hitl=can_ask(body),
                 auth_token=auth_token,
+                approval=answer,
             )
-            message = _says(output or NO_RESULTS)
+            stopped = pending_start(load_messages(state.message_history) or [])
+            if stopped is not None and state.form_fill is not None and state.form_fill.status == FormPhase.CONFIRMING:
+                message = card(stopped, approval(state.form_fill))
+            else:
+                message = _says(output or NO_RESULTS)
             await persistence.snapshot(state)
             db.session.commit()
             return message
@@ -199,4 +213,4 @@ def _chunks(model: str, message: ChatCompletionMessage) -> Iterator[str]:
     yield "data: [DONE]\n\n"
 
 
-__all__ = ["CLIENT_HEADER", "CONVERSATION_HEADER", "ChatCompletionsAdapter"]
+__all__ = ["CONVERSATION_HEADER", "ChatCompletionsAdapter"]

@@ -182,8 +182,8 @@ The agent's own MCP endpoint runs without the form-fill skill, so this boundary 
 can call Core's write tools directly, without a built-in approval step. See
 [Read tools and write tools](../reference/runtime.md#read-tools-and-write-tools).
 
-This requires a client that can present the approval: an AG-UI frontend that supports interrupts. On A2A and `/v1`
-a form can be filled, but nothing is started. The MCP interface does not offer workflow forms. See
+This requires a client that can present the approval: an AG-UI frontend that supports interrupts, or a chat client
+with an ask-user tool such as LibreChat. On A2A a form can be filled, but nothing is started. The MCP interface does not offer workflow forms. See
 [Start workflows from chat](https://workfloworchestrator.org/learn/orchestrator-agent/use-cases/workflows-from-chat/) for setup and
 [Runtime behaviour](../reference/runtime.md#workflow-forms) for the form-handling details.
 
