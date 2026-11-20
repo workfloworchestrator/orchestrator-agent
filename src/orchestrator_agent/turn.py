@@ -32,15 +32,18 @@ from uuid import UUID
 import structlog
 from orchestrator.core.db.models import AgentRunTable
 from pydantic_ai import DeferredToolResults
-from pydantic_ai.messages import FunctionToolResultEvent, ModelMessage, PartDeltaEvent, ToolReturnPart
+from pydantic_ai.messages import FunctionToolResultEvent, ModelMessage, PartDeltaEvent, ToolCallPart, ToolReturnPart
 from pydantic_ai.run import AgentRunResultEvent
 from sqlalchemy.orm import Session
 
 from orchestrator_agent.agent import new_deps
 from orchestrator_agent.artifacts import QueryArtifact, ToolArtifact
+from orchestrator_agent.form_fill import session as fs
+from orchestrator_agent.form_fill.pages import approval
+from orchestrator_agent.form_fill.start import answer, pending_start
 from orchestrator_agent.mcp_client import bind_outbound_token
 from orchestrator_agent.persistence import dump_messages, load_messages
-from orchestrator_agent.state import SearchState
+from orchestrator_agent.state import ApprovalStop, FormPhase, SearchState
 
 if TYPE_CHECKING:
     from orchestrator_agent.agent import WFOAgent
@@ -79,6 +82,31 @@ class ConversationLocks:
             if not self._users[conversation]:
                 del self._users[conversation]
                 self._locks.pop(conversation, None)
+
+
+def waiting_start(state: SearchState | None) -> tuple[ToolCallPart, ApprovalStop] | None:
+    """The start a conversation waits on, with what a person is shown to approve; None when it waits on none."""
+    if state is None or (session := state.form_fill) is None or session.status != FormPhase.CONFIRMING:
+        return None
+    call = pending_start(load_messages(state.message_history) or [])
+    return (call, approval(session)) if call is not None else None
+
+
+def settle(
+    state: SearchState, call: ToolCallPart, read: tuple[DeferredToolResults | None, bool], words: str
+) -> DeferredToolResults | None:
+    """The person's decision on the waiting start, to go on with (``run_turn``'s ``approval``); None for none.
+
+    ``read`` is the decision as the client carried it. When it carried none, ``words`` the person sent
+    instead decline the start for now. An outright rejection closes the form here, in code.
+    """
+    decided, rejected = read
+    if decided is None and words:
+        decided, rejected = answer(call, False, words)
+    if rejected and state.form_fill is not None:
+        fs.close(state.form_fill)
+        state.form_fill = None
+    return decided
 
 
 async def run_turn(
@@ -154,4 +182,4 @@ async def _run_model(
     return final_output
 
 
-__all__ = ["NO_RESULTS", "ConversationLocks", "OnArtifact", "run_turn"]
+__all__ = ["NO_RESULTS", "ConversationLocks", "OnArtifact", "run_turn", "settle", "waiting_start"]

@@ -8,6 +8,7 @@ import os
 os.environ.setdefault("DATABASE_URI", "postgresql://test:test@localhost:5432/test")
 
 from types import SimpleNamespace
+from typing import Any
 
 from pydantic_ai import Agent, DeferredToolRequests, DeferredToolResults, ToolDenied
 from pydantic_ai.messages import ModelMessage, ModelRequest, ModelResponse, TextPart, ToolCallPart, ToolReturnPart
@@ -65,7 +66,10 @@ def _agent(core, script: Script, skill: FormFillSkill | None = None) -> Agent:
 
     model = FunctionModel(script, stream_function=streamed)
     return Agent(
-        model, deps_type=StateDeps[SearchState], capabilities=[capability], output_type=[str, DeferredToolRequests]
+        model,
+        deps_type=StateDeps[SearchState],
+        capabilities=[capability],  # type: ignore[list-item]  # the capability is typed on these deps
+        output_type=[str, DeferredToolRequests],
     )
 
 
@@ -84,7 +88,7 @@ async def _run(agent: Agent, text: str | None, state: SearchState, *, hitl: bool
     return await agent.run(text, deps=StateDeps(state), message_history=history, deferred_tool_results=results)
 
 
-def _results(messages: list[ModelMessage]) -> list[dict]:
+def _results(messages: list[ModelMessage]) -> list[Any]:
     """What the tools answered in the run, in order."""
     return [
         part.content
@@ -106,7 +110,8 @@ async def _at_the_approval(core) -> tuple[SearchState, list[ModelMessage], str]:
     )
     state = SearchState()
     result = await _run(_agent(core, script), "create a 10G lightpath for UA, protected", state)
-    assert isinstance(result.output, DeferredToolRequests) and state.form_fill.status == "confirming"
+    assert isinstance(result.output, DeferredToolRequests)
+    assert state.form_fill is not None and state.form_fill.status == "confirming"
     return state, result.all_messages(), result.output.approvals[0].tool_call_id
 
 

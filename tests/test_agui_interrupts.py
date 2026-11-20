@@ -11,7 +11,7 @@ from typing import Any
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
-from ag_ui.core import ActivitySnapshotEvent, ResumeEntry, RunAgentInput, UserMessage
+from ag_ui.core import ActivitySnapshotEvent, Message, ResumeEntry, RunAgentInput, UserMessage
 from pydantic_ai.messages import (
     FunctionToolResultEvent,
     ModelMessage,
@@ -28,7 +28,7 @@ from orchestrator_agent.adapters.ag_ui.interrupts import answers, pending_interr
 from orchestrator_agent.adapters.ag_ui.worker import ApprovalPendingError, EmptyRunError
 from orchestrator_agent.form_fill.start import NOT_APPROVED, REJECTED, pending_start
 from orchestrator_agent.persistence import StoredThread, dump_messages
-from orchestrator_agent.state import FormFillSession, SearchState
+from orchestrator_agent.state import FormFillSession, FormPhase, SearchState
 
 from .conftest import mock_event_stream
 
@@ -42,7 +42,7 @@ ANSWERED = [*WAITING, ModelRequest(parts=[ToolReturnPart(tool_name="start_workfl
 
 
 def _run_input(
-    resume: list[ResumeEntry] | None = None, version: str | None = "1.0.3", messages: list[UserMessage] | None = None
+    resume: list[ResumeEntry] | None = None, version: str | None = "1.0.3", messages: list[Message] | None = None
 ) -> RunAgentInput:
     return RunAgentInput(
         thread_id="t",
@@ -62,7 +62,7 @@ def _resolved(interrupt_id: str, payload: Any) -> ResumeEntry:
 
 
 def _confirming() -> SearchState:
-    session = FormFillSession(workflow_key="w", status="confirming", page_inputs=[{"speed": "10G"}])
+    session = FormFillSession(workflow_key="w", status=FormPhase.CONFIRMING, page_inputs=[{"speed": "10G"}])
     return SearchState(form_fill=session, message_history=dump_messages(WAITING))
 
 

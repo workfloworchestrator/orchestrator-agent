@@ -20,10 +20,13 @@ carries when the person rejected the start or wrote something instead of decidin
 
 from __future__ import annotations
 
+import json
 from collections.abc import Sequence
 
+from pydantic_ai import DeferredToolResults, ToolDenied
 from pydantic_ai.messages import ModelMessage, ModelRequest, ModelResponse, ToolCallPart, ToolReturnPart
 
+from orchestrator_agent.state import ApprovalStop
 from orchestrator_agent.tool_names import START_WORKFLOW_TOOL
 
 # What the model is told, as the result of the start that was waiting, when the person did not approve it.
@@ -50,4 +53,29 @@ def pending_start(history: Sequence[ModelMessage]) -> ToolCallPart | None:
     return calls[-1] if calls and calls[-1].tool_call_id not in answered else None
 
 
-__all__ = ["NOT_APPROVED", "REJECTED", "pending_start"]
+def answer(call: ToolCallPart, approved: bool, words: str = "") -> tuple[DeferredToolResults, bool]:
+    """A person's decision on the waiting start as the call's result, and whether it rejects the start outright.
+
+    Not approving with words declines the start for now: the model reads them and acts on them. Not
+    approving without a word rejects it, and the caller closes the form.
+    """
+    if approved:
+        return DeferredToolResults(approvals={call.tool_call_id: True}), False
+    told = f"{NOT_APPROVED} {words!r}" if words else REJECTED
+    return DeferredToolResults(approvals={call.tool_call_id: ToolDenied(told)}), not words
+
+
+def question(stop: ApprovalStop) -> str:
+    """What a person is asked at the start, for a client that shows it in words."""
+    return f"Start workflow {stop.workflow_key} with these values?"
+
+
+def listed(stop: ApprovalStop) -> str:
+    """The values the workflow starts with, one per line, for a client that shows them as text."""
+    shown = {
+        name: value if isinstance(value, str) else json.dumps(value, default=str) for name, value in stop.values.items()
+    }
+    return "\n".join(f"- {name}: {value}" for name, value in shown.items())
+
+
+__all__ = ["NOT_APPROVED", "REJECTED", "answer", "listed", "pending_start", "question"]

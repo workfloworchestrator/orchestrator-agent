@@ -133,7 +133,7 @@ def task_for(agent: WFOAgent) -> Callable[[str], Awaitable[str]]:
         deps = new_deps(question)
         async with agent:
             result = await agent.run(question, deps=deps)
-        return result.output
+        return str(result.output)
 
     return run_wfo_agent
 

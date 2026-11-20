@@ -15,7 +15,7 @@ import httpx
 import pytest
 from fastapi import FastAPI
 from pydantic_ai import ToolDenied
-from pydantic_ai.messages import ModelRequest, ModelResponse, ToolCallPart, UserPromptPart
+from pydantic_ai.messages import ModelMessage, ModelRequest, ModelResponse, ToolCallPart, UserPromptPart
 
 from orchestrator_agent.adapters.chat.completions import (
     CONVERSATION_HEADER,
@@ -23,7 +23,7 @@ from orchestrator_agent.adapters.chat.completions import (
 )
 from orchestrator_agent.form_fill.start import NOT_APPROVED, REJECTED
 from orchestrator_agent.persistence import dump_messages
-from orchestrator_agent.state import FormFillSession, SearchState
+from orchestrator_agent.state import FormFillSession, FormPhase, SearchState
 
 from .conftest import make_text_result_event, mock_event_stream, parse_sse_events
 
@@ -160,7 +160,7 @@ class TestChatTurn:
 
 # --- the start of a workflow: approved through the chat's ask tool -------------------------------------------------
 
-WAITING = [
+WAITING: list[ModelMessage] = [
     ModelRequest(parts=[UserPromptPart(content="create a port")]),
     ModelResponse(parts=[ToolCallPart(tool_name="start_workflow", args={}, tool_call_id="s1")]),
 ]
@@ -168,7 +168,7 @@ WAITING = [
 
 def _waiting() -> SearchState:
     """A thread whose form is complete and whose start waits for the person."""
-    session = FormFillSession(workflow_key="w", status="confirming", page_inputs=[{"speed": "10G"}])
+    session = FormFillSession(workflow_key="w", status=FormPhase.CONFIRMING, page_inputs=[{"speed": "10G"}])
     return SearchState(form_fill=session, message_history=dump_messages(WAITING))
 
 
@@ -183,7 +183,7 @@ class TestApproval:
             state.form_fill = _waiting().form_fill
 
         turn = _Turn(_agent_doing(stops, text=""))
-        with patch("orchestrator_agent.adapters.chat.completions.pending_start", return_value=WAITING[1].parts[0]):
+        with patch("orchestrator_agent.turn.pending_start", return_value=WAITING[1].parts[0]):
             response = await turn.post(_body(_user("create a 10G port")))
         (choice,) = response.json()["choices"]
         (call,) = choice["message"]["tool_calls"]

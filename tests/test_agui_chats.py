@@ -15,7 +15,15 @@ import pytest
 from ag_ui.core import ResumeEntry, RunAgentInput, UserMessage
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
-from pydantic_ai.messages import ModelRequest, ModelResponse, TextPart, ToolCallPart, ToolReturnPart, UserPromptPart
+from pydantic_ai.messages import (
+    ModelMessage,
+    ModelRequest,
+    ModelResponse,
+    TextPart,
+    ToolCallPart,
+    ToolReturnPart,
+    UserPromptPart,
+)
 from pydantic_ai.run import AgentRunResultEvent
 from pydantic_ai.ui import StateDeps
 
@@ -30,13 +38,13 @@ from orchestrator_agent.api.endpoints import chats
 from orchestrator_agent.artifacts import ExportArtifact, QueryArtifact
 from orchestrator_agent.core_api import CoreApi
 from orchestrator_agent.persistence import StoredThread, dump_messages
-from orchestrator_agent.state import FormFillSession, SearchState
+from orchestrator_agent.state import FormFillSession, FormPhase, SearchState
 
 from .conftest import mock_event_stream
 
 RUN_ID = "00000000-0000-0000-0000-000000000042"
 ASKED = "Which customer is it for?"
-WAITING = [  # a thread whose form is complete: the start waits for the person
+WAITING: list[ModelMessage] = [  # a thread whose form is complete: the start waits for the person
     ModelRequest(parts=[UserPromptPart(content="create a port")]),
     ModelResponse(parts=[ToolCallPart(tool_name="start_workflow", args={}, tool_call_id="s1")]),
 ]
@@ -135,7 +143,7 @@ def test_the_transcript_can_be_its_last_messages_only():
 
 
 def test_the_pending_stop_is_the_waiting_start_while_the_form_is_open():
-    session = FormFillSession(workflow_key="w", status="confirming")
+    session = FormFillSession(workflow_key="w", status=FormPhase.CONFIRMING)
     state = SearchState(form_fill=session, message_history=dump_messages(WAITING))
     stop = pending_stop(state)
     assert stop is not None and (stop["id"], stop["metadata"]["workflow_key"]) == ("int-s1", "w")
@@ -270,7 +278,7 @@ def client():
 
 
 def _threads() -> list[StoredThread]:
-    session = FormFillSession(workflow_key="w", status="confirming")
+    session = FormFillSession(workflow_key="w", status=FormPhase.CONFIRMING)
     waiting = SearchState(form_fill=session, message_history=dump_messages(WAITING))
     return [
         StoredThread(

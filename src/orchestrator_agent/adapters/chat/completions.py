@@ -20,9 +20,9 @@ from the state persisted under the ``X-Conversation-Id`` header (LibreChat sends
 there when the endpoint is configured to), and the answer is one assistant message.
 
 A workflow form is filled by the model in the conversation. Its start needs a person's approval, which
-is shown through the client's ask-user tool (``approval``): the run stops on ``start_workflow``, the reply
-calls the tool, and the next request's tool message is the decision. A chat that offers no such tool can
-have a form prepared, not started.
+is shown through LibreChat's ask-user tool (``librechat``, the one chat client supported for it): the run
+stops on ``start_workflow``, the reply calls the tool, and the next request's tool message is the decision.
+A chat that does not offer that tool can have a form prepared, not started.
 
 The reply is computed before the response starts, so a streamed response is the finished message in a few
 chunks; the client shows it at once. The request is read with ``request``'s models; what goes back
@@ -51,14 +51,10 @@ from openai.types.chat.chat_completion_chunk import ChoiceDelta, ChoiceDeltaTool
 from openai.types.shared import ErrorObject
 from starlette.responses import JSONResponse, Response, StreamingResponse
 
-from orchestrator_agent.adapters.chat.approval import can_ask, card, decision
+from orchestrator_agent.adapters.chat.librechat import card, decision, offers_ask_tool
 from orchestrator_agent.adapters.chat.request import CHAT_MODEL, ChatRequest
-from orchestrator_agent.form_fill import session as fs
-from orchestrator_agent.form_fill.pages import approval
-from orchestrator_agent.form_fill.start import pending_start
-from orchestrator_agent.persistence import PostgresStatePersistence, load_messages
-from orchestrator_agent.state import FormPhase
-from orchestrator_agent.turn import NO_RESULTS, ConversationLocks, run_turn
+from orchestrator_agent.persistence import PostgresStatePersistence
+from orchestrator_agent.turn import NO_RESULTS, ConversationLocks, run_turn, settle, waiting_start
 
 if TYPE_CHECKING:
     from orchestrator_agent.agent import WFOAgent
@@ -131,15 +127,13 @@ class ChatCompletionsAdapter:
             prior_state = await persistence.load_state()
             user_input = body.user_text
             # A start that waits for approval goes on with the person's decision, and with nothing else.
-            waiting = pending_start(load_messages(prior_state.message_history) or []) if prior_state else None
-            answer = None
-            if waiting is not None and prior_state is not None and (session := prior_state.form_fill) is not None:
-                answer, rejected = decision(waiting, body)
-                if answer is None:
-                    return card(waiting, approval(session))  # no decision: the card again
-                if rejected:
-                    fs.close(session)
-                    prior_state.form_fill = None
+            decided = None
+            if prior_state is not None and (waiting := waiting_start(prior_state)) is not None:
+                # A message instead of an answer to the card declines the start for now, with the person's words.
+                words = "" if body.answers_a_call else user_input.strip()
+                decided = settle(prior_state, waiting[0], decision(waiting[0], body), words)
+                if decided is None:
+                    return card(*waiting)  # no decision: the card again
 
             state, output = await run_turn(
                 self.agent,
@@ -149,15 +143,12 @@ class ChatCompletionsAdapter:
                 agent_type="chat",
                 prior_state=prior_state,
                 user_input=user_input,
-                hitl=can_ask(body),
+                hitl=offers_ask_tool(body),
                 auth_token=auth_token,
-                approval=answer,
+                approval=decided,
             )
-            stopped = pending_start(load_messages(state.message_history) or [])
-            if stopped is not None and state.form_fill is not None and state.form_fill.status == FormPhase.CONFIRMING:
-                message = card(stopped, approval(state.form_fill))
-            else:
-                message = _says(output or NO_RESULTS)
+            stopped = waiting_start(state)
+            message = card(*stopped) if stopped is not None else _says(output or NO_RESULTS)
             await persistence.snapshot(state)
             db.session.commit()
             return message

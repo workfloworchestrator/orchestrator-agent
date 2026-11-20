@@ -11,14 +11,15 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""The start of a workflow over chat completions: the framework's tool approval, shown through a client tool.
+"""LibreChat's ask-user tool: how a chat in LibreChat is shown the start of a workflow to approve.
 
-A chat client that can ask its user a question offers a tool for it (LibreChat from v0.8.8, on a model spec
-with ``askUserQuestion: true``: ``ask_user_question``). A reply that calls the tool pauses the client's run
-and shows a card; the person's answer comes back as the tool message of the next request,
+LibreChat (from v0.8.8) gives a chat on a model spec with ``askUserQuestion: true`` one function tool,
+``ask_user_question``. A reply that calls it pauses LibreChat's run and shows a card; the person's answer
+comes back as the tool message of the next request,
 ``{"answers": {<question id>: <string>}}``, a picked option as its ``value`` verbatim. A run that stops on
 ``start_workflow`` goes out as such a call, under the id of the call that waits, and the answer becomes that
-call's result: an approval, a rejection, or what the person typed instead.
+call's result: an approval, a rejection, or what the person typed instead. Everything here is LibreChat's
+contract; what a decision means for the form is shared (``form_fill.start``).
 """
 
 from __future__ import annotations
@@ -29,11 +30,11 @@ from typing import Any
 from openai.types.chat import ChatCompletionMessage, ChatCompletionMessageFunctionToolCall
 from openai.types.chat.chat_completion_message_function_tool_call import Function
 from pydantic import BaseModel, ValidationError
-from pydantic_ai import DeferredToolResults, ToolDenied
+from pydantic_ai import DeferredToolResults
 from pydantic_ai.messages import ToolCallPart
 
 from orchestrator_agent.adapters.chat.request import ChatRequest
-from orchestrator_agent.form_fill.start import NOT_APPROVED, REJECTED
+from orchestrator_agent.form_fill.start import answer, listed, question
 from orchestrator_agent.state import ApprovalStop
 
 ASK_TOOL = "ask_user_question"
@@ -46,18 +47,17 @@ class _Answers(BaseModel):
     answers: dict[str, str]
 
 
-def can_ask(request: ChatRequest) -> bool:
-    """Whether the chat offers the tool an approval is shown through."""
+def offers_ask_tool(request: ChatRequest) -> bool:
+    """Whether the chat offers LibreChat's ask-user tool: only then can it be shown an approval."""
     return any((tool.get("function") or {}).get("name") == ASK_TOOL for tool in request.tools or [])
 
 
 def card(call: ToolCallPart, stop: ApprovalStop) -> ChatCompletionMessage:
     """The assistant message that shows the start to approve: the values as text, the decision as a card."""
-    values = "\n".join(f"- {name}: {_shown(value)}" for name, value in stop.values.items())
-    question: dict[str, Any] = {
+    asked: dict[str, Any] = {
         "id": QUESTION,
         "header": "Approval",
-        "question": f"Start workflow {stop.workflow_key} with these values?",
+        "question": question(stop),
         "description": NOTE,
         "options": [
             {"label": "Approve", "value": f"{call.tool_call_id}:approve"},
@@ -67,35 +67,27 @@ def card(call: ToolCallPart, stop: ApprovalStop) -> ChatCompletionMessage:
     ask = ChatCompletionMessageFunctionToolCall(
         id=call.tool_call_id,
         type="function",
-        function=Function(name=ASK_TOOL, arguments=json.dumps({"questions": [question]})),
+        function=Function(name=ASK_TOOL, arguments=json.dumps({"questions": [asked]})),
     )
-    return ChatCompletionMessage(role="assistant", content=values or None, tool_calls=[ask])
+    return ChatCompletionMessage(role="assistant", content=listed(stop) or None, tool_calls=[ask])
 
 
 def decision(call: ToolCallPart, request: ChatRequest) -> tuple[DeferredToolResults | None, bool]:
-    """The person's answer to the waiting start as the call's result, and whether it rejects the start outright.
+    """The answer on LibreChat's card as the result of the waiting start, and whether it rejects it outright.
 
-    A picked option is the decision. Anything else the person wrote, on the card or as a message instead of
-    an answer, declines the start for now with their words. No answer at all is no decision.
+    A picked option is the decision; anything else typed on the card declines the start for now with those
+    words. A request that carries no answer to this card is no decision.
     """
-    said = request.user_text.strip()
-    if request.answers_a_call:
-        try:
-            answers = _Answers.model_validate_json(request.tool_results.get(call.tool_call_id, "")).answers
-        except ValidationError:
-            return None, False
-        said = answers.get(QUESTION, "").strip()
-    if said == f"{call.tool_call_id}:approve":
-        return DeferredToolResults(approvals={call.tool_call_id: True}), False
-    if said in (f"{call.tool_call_id}:reject", SKIPPED):
-        return DeferredToolResults(approvals={call.tool_call_id: ToolDenied(REJECTED)}), True
-    if not said:
+    try:
+        answers = _Answers.model_validate_json(request.tool_results.get(call.tool_call_id, "")).answers
+    except ValidationError:
         return None, False
-    return DeferredToolResults(approvals={call.tool_call_id: ToolDenied(f"{NOT_APPROVED} {said!r}")}), False
+    said = answers.get(QUESTION, "").strip()
+    if not request.answers_a_call or not said:
+        return None, False
+    if said in (f"{call.tool_call_id}:reject", SKIPPED):
+        said = ""
+    return answer(call, said == f"{call.tool_call_id}:approve", said)
 
 
-def _shown(value: Any) -> str:
-    return value if isinstance(value, str) else json.dumps(value, default=str)
-
-
-__all__ = ["ASK_TOOL", "SKIPPED", "can_ask", "card", "decision"]
+__all__ = ["ASK_TOOL", "SKIPPED", "card", "decision", "offers_ask_tool"]

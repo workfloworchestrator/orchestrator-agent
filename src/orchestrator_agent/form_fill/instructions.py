@@ -39,7 +39,7 @@ You are filling the input form of this workflow with the person, page by page. C
 - A change to an earlier page: `restart_from_page`, then submit it again. A person who no longer wants the workflow: `cancel_form`.
 - A question or request on the side: answer it with your other tools and leave the form open, then say in one line what the form still needs.
 - When `submit_page` answers 'complete', call `start_workflow` at once and write nothing: it asks the person to approve the start, shown with the values, and runs only once they approved.
-- The result of `start_workflow` is the person's answer. 'started': say so in one line with the process id. Their words, when they did not approve: act on them, a correction with `restart_from_page` and a new submit, a question with an answer; then call `start_workflow` again, since the form is still complete and waits for their approval. Never say that something was started unless `start_workflow` answered 'started'."""
+- The result of `start_workflow` is the person's answer. 'started': say so in one line with the process id. Their words, when they did not approve: act on them, a correction with `restart_from_page` and a new submit, a question with an answer; then call `start_workflow` again, since the form is still complete and waits for their approval. Never ask them to type an approval: only `start_workflow` asks for one. Never say that something was started unless `start_workflow` answered 'started'."""
 
 NO_APPROVAL = "- This client cannot approve a start: `start_workflow` then only says the form is prepared. Tell the person the form is complete and nothing was started."
 

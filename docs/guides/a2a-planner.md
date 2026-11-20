@@ -47,9 +47,11 @@ second agent, see [How to run a companion agent with docker-agent](https://workf
    `Authorization` header to pass the agent's check, and as `auth_token` in the message metadata so that Orchestrator
    Core sees the user. Without the metadata, calls to Orchestrator Core run as the agent's service account. See
    [Authentication and authorization](../explanation/auth.md#outbound-who-the-agent-acts-as).
-6. Workflows cannot be started through a calling agent yet. Over A2A the Orchestrator Agent can fill and validate a
-   workflow form, but a start needs a person's approval, which only AG-UI carries today. See
-   [Workflow forms](../reference/runtime.md#workflow-forms).
+6. If users should start workflows through the calling agent, it must request and handle the
+   [kagent human-in-the-loop extension](../reference/endpoints.md#workflow-approval-over-a2a), which kagent 1.0 does
+   for an agent it uses as a tool. The Orchestrator Agent fills the form in conversation and then pauses for the
+   approval of the start. Without the extension a form is prepared, not started; the docker-agent toolset above
+   alone does not establish it.
 7. If your clients do not speak A2A, such as most chat UIs, put a gateway in front of the planner. Do not reuse the
    proxy of the example orchestrator: it checks no identity and sets no limits. See
    [Gateways](https://workfloworchestrator.org/learn/orchestrator-agent/production/#gateways).
@@ -62,8 +64,8 @@ loads agent cards only at startup.
 1. Ask the calling agent a question about WFO, for example *How many active subscriptions are there?*
 2. Check in the log or trace of the calling agent that it called the `wfo` peer, and that the answer contains the
    count it returned.
-3. Ask it to start a workflow. It should fill the form with you and then report that the form is prepared and
-   nothing was started.
+3. If you set up the extension, ask it to start a workflow. It should fill the form with you and ask for approval
+   before the workflow starts.
 
 ## Reference
 

@@ -14,7 +14,7 @@ conversation handling differ as described below.
 ## OpenAI chat completions
 
 `POST /v1/chat/completions` serves the agent as a chat model. `GET /v1/models` lists a single model id, `wfo`.
-The start of a workflow is approved through the client's ask-user tool, which LibreChat provides. See
+The start of a workflow is approved through LibreChat's ask-user tool, the one chat client supported for it. See
 [Workflow forms](runtime.md#workflow-forms), and [Connect LibreChat](../guides/librechat.md) for the headers the
 agent expects.
 
@@ -52,8 +52,8 @@ discover the agent through its card at `/.well-known/agent-card.json`, which adv
 [plugin](plugins.md) and the public `BASE_URL`.
 
 Callers that have not moved to v1.0 are still served: the card also advertises a 0.3 interface and the
-agent accepts `message/send` and `message/stream`. No A2A caller can approve a workflow start yet;
-see [Workflow forms](runtime.md#workflow-forms).
+agent accepts `message/send` and `message/stream`. A caller that activates kagent's human-in-the-loop extension can
+approve a workflow start; see [Workflow approval over A2A](#workflow-approval-over-a2a).
 
 The endpoint is built on the [A2A Python SDK](https://github.com/a2aproject/a2a-python), not on pydantic-ai. It covers
 what a client needs to ask the agent questions, not the whole protocol:
@@ -62,6 +62,33 @@ what a client needs to ask the agent questions, not the whole protocol:
 - The card advertises streaming. Tasks are kept in memory, so they are lost when the agent restarts.
 
 For the protocol itself, see the [A2A specification](https://a2a-protocol.org/latest/).
+
+### Workflow approval over A2A
+
+The start of a workflow is approved through kagent's human-in-the-loop extension,
+`https://kagent.dev/extensions/hitl/v1`, which the agent card advertises. A caller activates it with the
+`A2A-Extensions` header on the call; kagent 1.0 does so for an agent it uses as a tool. Without it a form can be
+filled, but `start_workflow` only reports it as prepared.
+
+When the model calls `start_workflow`, the task ends in `input-required`. Its status message lists the extension
+and carries, under the extension's URI in `metadata`, a `tool_approval_request` with one tool: `start_workflow`,
+under the id of the waiting call, with the workflow and the values of the accepted pages as its arguments. The
+decision comes back as a message on the same task with a `tool_approval_response` under the same key:
+
+| `approvals[]` entry | Effect |
+| --- | --- |
+| `{"id": "<call id>", "approved": true}` | Starts the workflow |
+| `{"id": "<call id>", "approved": false}` | Rejects the start and closes the form |
+| `{"id": "<call id>", "approved": false, "rejection_reason": "..."}` | Does not start; the model reads the reason, acts on it and asks for approval again |
+
+A message without a decision, while a start waits, shows the waiting start again and runs nothing.
+
+!!! note "One pause per call in kagent"
+    kagent shows a person one pause for each call of this agent. After a rejection with a reason, the model corrects
+    the form and asks for approval again while still answering that same call, and kagent does not show that second
+    request ([kagent issue #3244](https://github.com/kagent-dev/kagent/issues/3244)). The start keeps waiting: the
+    next call of this agent in that conversation shows it. Tell the calling agent to call again, for example with
+    `continue`, when a call returns while the form is not finished.
 
 ## AG-UI
 

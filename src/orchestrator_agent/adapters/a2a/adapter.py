@@ -20,8 +20,10 @@ own to core) and collects artifact results + final text.
 The endpoint serves A2A 1.0 and, through the SDK's compatibility layer, A2A 0.3.
 
 The workflow form-fill skill runs inside the agent as a capability: the model fills a form's pages in
-the conversation. Its start needs a person's approval, which this route cannot show yet: a form can be
-prepared here, not started (the AG-UI route approves starts).
+the conversation. Its start needs a person's approval, which a caller that activated kagent's HITL
+extension is shown (``kagent``, the one A2A client supported for it): the run stops on ``start_workflow``, the task pauses in
+``input-required`` with the start to approve, and the response on that task is the decision. Any other
+caller can have a form prepared, not started.
 
 ``A2A_SKILLS`` is static A2A protocol metadata (the agent's advertised skills) and is
 unrelated to pydantic-ai capabilities — it just describes what the agent can do.
@@ -31,7 +33,7 @@ from __future__ import annotations
 
 import json
 import uuid
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 import structlog
 from a2a.helpers import new_data_part, new_task, new_text_part
@@ -40,15 +42,24 @@ from a2a.server.events import EventQueue
 from a2a.server.request_handlers import DefaultRequestHandler
 from a2a.server.routes import add_a2a_routes_to_fastapi, create_agent_card_routes, create_jsonrpc_routes
 from a2a.server.tasks import InMemoryTaskStore, TaskUpdater
-from a2a.types import AgentCapabilities, AgentCard, AgentInterface, Message, TaskState
+from a2a.types import AgentCapabilities, AgentCard, AgentExtension, AgentInterface, Message, TaskState
 from a2a.utils.constants import PROTOCOL_VERSION_0_3, PROTOCOL_VERSION_1_0, TransportProtocol
 from fastapi import FastAPI
 from google.protobuf import json_format
 from pydantic_ai.messages import ToolReturnPart
 
+from orchestrator_agent.adapters.a2a.kagent import (
+    HITL_EXTENSION_DESCRIPTION,
+    HITL_EXTENSION_URI,
+    activated,
+    decision,
+    request,
+)
 from orchestrator_agent.capabilities.spec import skills_from_specs
+from orchestrator_agent.form_fill.start import question
 from orchestrator_agent.persistence import PostgresStatePersistence
-from orchestrator_agent.turn import NO_RESULTS, ConversationLocks, OnArtifact, run_turn
+from orchestrator_agent.state import SearchState
+from orchestrator_agent.turn import NO_RESULTS, ConversationLocks, OnArtifact, run_turn, settle, waiting_start
 
 if TYPE_CHECKING:
     from orchestrator_agent.agent import WFOAgent
@@ -66,8 +77,9 @@ _LINEAGE_HEADERS = ("x-kagent-root-context-id", "x-kagent-parent-context-id")
 AGENT_CARD_DESCRIPTION = (
     "Answers questions about orchestration data and starts workflows by filling their input forms in "
     "conversation: say what to start, for which subscription or product, and relay the user's answers to "
-    "what it asks. A start needs a person's approval, which this route cannot show: a form can be prepared "
-    "here, not started. "
+    "what it asks. A start needs a person's approval: a caller that activates kagent's HITL extension gets "
+    "the start to approve as an input-required pause, and answers it on the same task; without the extension "
+    "a form is prepared, not started. "
     "When a reply includes a pre-rendered Markdown table or Mermaid chart, relay that block to the user "
     "verbatim, without reformatting or summarising it."
 )
@@ -82,8 +94,8 @@ class WFOAgentExecutor(AgentExecutor):
     Consumes the pydantic-ai event stream and publishes A2A events (status updates, artifacts) via the
     ``TaskUpdater`` helper, one turn at a time per context.
 
-    The workflow form-fill skill runs inside the agent as a capability; this caller cannot be shown an
-    approval, so a form can be prepared here, not started.
+    The workflow form-fill skill runs inside the agent as a capability; the approval of a start is an
+    ``input-required`` pause for a caller that activated kagent's HITL extension (``kagent``).
     """
 
     def __init__(self, agent: "WFOAgent") -> None:
@@ -129,6 +141,17 @@ class WFOAgentExecutor(AgentExecutor):
             # The conversation's memory and open form: a form being filled spans turns.
             persistence = PostgresStatePersistence(thread_id=conversation, run_id=run_id, session=db.session)
             prior_state = await persistence.load_state()
+            hitl = activated(context)
+            # A start that waits for approval goes on with the person's decision, and with nothing else.
+            decided = None
+            if prior_state is not None and (waiting := waiting_start(prior_state)) is not None:
+                # From a caller that cannot answer the pause, a message declines the start for now.
+                words = "" if hitl else (user_input or "").strip()
+                decided = settle(prior_state, waiting[0], decision(waiting[0], context), words)
+                if decided is None:
+                    # No decision: the start is shown again (kagent shows one pause per call of this agent).
+                    await self._send(updater, prior_state, "")
+                    return
 
             state, final_output = await run_turn(
                 self.agent,
@@ -138,19 +161,33 @@ class WFOAgentExecutor(AgentExecutor):
                 agent_type="a2a",
                 prior_state=prior_state,
                 user_input=user_input,
-                hitl=False,
+                hitl=hitl,
                 auth_token=auth_token,
                 on_artifact=self._publisher(updater),
+                approval=decided,
             )
 
             await persistence.snapshot(state)
             db.session.commit()
-            await updater.complete(message=updater.new_agent_message(parts=[new_text_part(final_output or NO_RESULTS)]))
+            await self._send(updater, state, final_output or NO_RESULTS)
 
         except Exception:
             db.session.rollback()
             logger.exception("A2A execute: Task failed", task_id=context.task_id)
             await updater.failed(message=updater.new_agent_message(parts=[new_text_part("Task execution failed")]))
+
+    @staticmethod
+    async def _send(updater: TaskUpdater, state: SearchState, text: str) -> None:
+        """The turn's answer: completed text, or, when a start waits, an ``input-required`` pause that shows it."""
+        waiting = waiting_start(state)
+        if waiting is None:
+            await updater.complete(message=updater.new_agent_message(parts=[new_text_part(text)]))
+            return
+        call, stop = waiting
+        metadata: dict[str, Any] = request(call, stop)
+        message = updater.new_agent_message(parts=[new_text_part(question(stop))], metadata=metadata)
+        message.extensions.extend(metadata)  # a payload sits under the URI of the extension that defines it
+        await updater.requires_input(message)
 
     @staticmethod
     def _publisher(updater: TaskUpdater) -> OnArtifact:
@@ -196,7 +233,12 @@ class A2AAdapter:
                 AgentInterface(url=url, protocol_binding=TransportProtocol.JSONRPC.value, protocol_version=version)
                 for version in (PROTOCOL_VERSION_1_0, PROTOCOL_VERSION_0_3)
             ],
-            capabilities=AgentCapabilities(streaming=True),
+            capabilities=AgentCapabilities(
+                streaming=True,
+                extensions=[
+                    AgentExtension(uri=HITL_EXTENSION_URI, description=HITL_EXTENSION_DESCRIPTION, required=False)
+                ],
+            ),
             skills=A2A_SKILLS,
             default_input_modes=["application/json"],
             default_output_modes=["text/markdown", "application/json"],
