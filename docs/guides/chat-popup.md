@@ -94,7 +94,7 @@ serves the page to the agent.
 
     1. Upgrade `@orchestrator-ui/orchestrator-ui-components` to 11.0.0 or later. Version 11 removes the
        Search (beta) page; see the
-       [changelog](https://github.com/workfloworchestrator/orchestrator-ui-library/blob/main/packages/orchestrator-ui-components/CHANGELOG.md)
+       [changelog](https://github.com/workfloworchestrator/orchestrator-ui-library/blob/main/CHANGELOG.md)
        for what to change in your app.
     2. In the function that builds your `OrchestratorConfig` (`getInitialOrchestratorConfig` in
        `configuration/configuration.ts` of the example UI), read an environment variable for the agent and set
