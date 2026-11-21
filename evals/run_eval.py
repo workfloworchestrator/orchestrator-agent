@@ -2,33 +2,31 @@
 
 The agent runs in-process — built by the same ``build_agent`` assembly the
 server adapters use — against the live orchestrator-core MCP server from
-docker-compose.yml, once per model in ../eval-models.json whose provider key
-is set. The span-based evaluators read the tool calls from the OpenTelemetry
+docker-compose.yml, once per entry of ../eval-models.json whose variables are
+set. The span-based evaluators read the tool calls from the OpenTelemetry
 spans pydantic-ai emits: TrajectoryMatch and ArgumentCorrectness judge the
 route (which tools, in what order, with which arguments), ToolResultContains
 (evaluators.py) judges what the last call returned, so a different route to the
 right data is visible as such.
 
-A ``agent:<model>`` entry runs the model the way the server would be configured
-for an OpenAI-compatible endpoint, from the agent's own environment:
-AGENT_API_BASE and AGENT_API_KEY (both required, else the entry shows "no key")
-and AGENT_MODEL_SETTINGS, e.g. for an open-weight model behind a LiteLLM proxy.
+An entry names the variables that hold its key and, for an OpenAI-compatible
+endpoint such as an open-weight model behind a LiteLLM proxy, its URL; it shows
+"no key" when one of them is unset. The model is built by the agent's own
+settings, the way the server would be configured.
 
     uv run python run_eval.py [--models openai:gpt-4o-mini] [--cases name1,name2] [--repeat 5] [--fail-under 0.8]
 """
 
 import argparse
-import json
 import sys
 from collections import Counter, defaultdict
 from collections.abc import Awaitable, Callable
 from pathlib import Path
 from statistics import fmean
 from typing import NamedTuple
-from urllib.parse import urlparse
 
 from evaluators import ToolResultContains
-from settings import eval_settings
+from settings import EvalModel, eval_settings
 
 # The agent's AgentSettings reads the process environment at import time, so
 # the resolved eval settings must be published before importing the agent.
@@ -41,6 +39,7 @@ from opentelemetry.sdk.trace import TracerProvider
 # attaches its in-memory exporter to it per case.
 trace.set_tracer_provider(TracerProvider())
 
+from pydantic import TypeAdapter
 from pydantic_ai import Agent
 
 Agent.instrument_all()
@@ -58,20 +57,22 @@ from orchestrator_agent.form_fill import build_form_fill_skill
 from orchestrator_agent.settings import AgentSettings
 
 
-def configured_agent(name: str) -> AgentSettings | None:
-    """The agent settings behind an ``agent:<model>`` entry, or None when no endpoint and key are configured.
-
-    The endpoint, key and model settings are the ones the agent itself reads from AGENT_API_BASE, AGENT_API_KEY and
-    AGENT_MODEL_SETTINGS; only the model is replaced, so one environment can be evaluated against several models.
-    """
-    settings = AgentSettings(AGENT_MODEL=name.partition(":")[2])
-    return settings if settings.AGENT_API_BASE and settings.AGENT_API_KEY else None
+_MODELS = TypeAdapter(list[EvalModel])
 
 
-def model_settings_for(name: str) -> ModelSettings | None:
-    """The model settings an entry runs with: the configured ones for ``agent:`` entries, none for the others."""
-    settings = configured_agent(name) if name.startswith("agent:") else None
-    return settings.create_model_settings() if settings else None
+def agent_settings(entry: EvalModel) -> AgentSettings:
+    """The agent settings a server would run this entry with: its model, endpoint, key and model settings."""
+    return AgentSettings(
+        AGENT_MODEL=entry.model,
+        AGENT_API_BASE=entry.base(),
+        AGENT_API_KEY=entry.key(),
+        AGENT_MODEL_SETTINGS=entry.settings,
+    )
+
+
+def model_settings_for(entry: EvalModel) -> ModelSettings | None:
+    """The model settings an entry runs with; None when it names none."""
+    return agent_settings(entry).create_model_settings()
 
 
 # Saved reports can be committed as baselines, so only settings that cannot carry a credential are written to them.
@@ -81,49 +82,37 @@ _REPORTABLE_SETTINGS = frozenset(
 )
 
 
-def run_metadata(name: str) -> dict[str, object]:
+def run_metadata(entry: EvalModel) -> dict[str, object]:
     """What to record in the report so a result can be tied to the configuration that produced it.
 
     Model settings outside the allowlist are recorded by name only, so a report shows that they were set without
     holding their values.
     """
-    settings = configured_agent(name) if name.startswith("agent:") else None
-    model_settings = dict(settings.create_model_settings() or {}) if settings else {}
     return {
-        "model": name,
-        "model_settings": {key: value for key, value in model_settings.items() if key in _REPORTABLE_SETTINGS},
-        "unreported_model_settings": sorted(set(model_settings) - _REPORTABLE_SETTINGS),
-        "api_host": urlparse(settings.AGENT_API_BASE).hostname if settings and settings.AGENT_API_BASE else None,
+        "model": entry.model,
+        "model_settings": {key: value for key, value in entry.settings.items() if key in _REPORTABLE_SETTINGS},
+        "unreported_model_settings": sorted(set(entry.settings) - _REPORTABLE_SETTINGS),
+        # The name of the variable that holds the endpoint, never its value: the URL can be private.
+        "api_base": entry.api_base,
     }
 
 
-def build_model(name: str) -> Model | None:
-    """The pydantic-ai model for a ``provider:model`` name, or None when the settings hold no key for that provider."""
-    provider, _, model_name = name.partition(":")
-    if provider == "agent":
-        configured = configured_agent(name)
-        model = configured.create_model() if configured else None
-        return model if isinstance(model, Model) else None  # a custom endpoint always yields a model, never a bare name
-    if provider == "openai":
-        if not eval_settings.openai_api_key:
-            return None
-        # Chat Completions, as the agent's own settings build it; the plain model string would take the
-        # Responses API, which the locked openai SDK cannot read.
-        from pydantic_ai.models.openai import OpenAIChatModel
-        from pydantic_ai.providers.openai import OpenAIProvider
-
-        return OpenAIChatModel(model_name, provider=OpenAIProvider(api_key=eval_settings.openai_api_key))
-    if provider == "anthropic":
-        if not eval_settings.anthropic_api_key:
-            return None
+def build_model(entry: EvalModel) -> Model | None:
+    """The pydantic-ai model for an entry, or None when a variable it names is unset."""
+    if not entry.is_configured():
+        return None
+    provider, _, model_name = entry.model.partition(":")
+    if provider == "anthropic" and entry.api_base is None:
         from pydantic_ai.models.anthropic import AnthropicModel, AnthropicModelSettings
         from pydantic_ai.providers.anthropic import AnthropicProvider
 
         # The instructions and tool definitions are the same on every call: cache them.
         settings = AnthropicModelSettings(anthropic_cache_instructions=True, anthropic_cache_tool_definitions=True)
-        anthropic = AnthropicProvider(api_key=eval_settings.anthropic_api_key)
-        return AnthropicModel(model_name, provider=anthropic, settings=settings)
-    raise SystemExit(f"{name}: no provider {provider!r} in build_model")
+        return AnthropicModel(model_name, provider=AnthropicProvider(api_key=entry.key()), settings=settings)
+    # Chat Completions on OpenAI or an OpenAI-compatible endpoint, as the agent's own settings build it; with a
+    # key set that is always a model, never the plain model string (which would take the Responses API).
+    model = agent_settings(entry).create_model()
+    return model if isinstance(model, Model) else None
 
 
 def task_for(agent: WFOAgent) -> Callable[[str], Awaitable[str]]:
@@ -209,8 +198,12 @@ def _percent(value: float | None) -> str:
     return "-" if value is None else f"{value:.0%}"
 
 
-def print_table(reports: dict[str, EvaluationReport | None], cases: list[str], repeat: int) -> None:
+def print_table(
+    reports: dict[str, EvaluationReport | None], cases: list[str], repeat: int, summary: Path | None = None
+) -> None:
     """One table: a column per model holding three sub-columns, route match, argument correctness and outcome.
+
+    With ``summary`` the same table is also appended to that file as a Markdown code block.
 
     The route is how the agent got there, the outcome is whether the last call returned the expected data. Rich
     tables cannot span a header over several columns, so each model's cell holds a three-column grid; every grid has
@@ -256,7 +249,13 @@ def print_table(reports: dict[str, EvaluationReport | None], cases: list[str], r
         table.add_column(model, justify="center")
     table.add_row(names, *(Align.center(column(model)) for model in reports))
     # Wide enough for every column, so a narrow terminal or a CI log wraps rather than truncates.
-    Console(width=max(Console().width, 28 + 36 * len(reports))).print(table)
+    width = max(Console().width, 28 + 36 * len(reports))
+    Console(width=width).print(table)
+    if summary:
+        with summary.open("a") as file:
+            file.write("```\n")
+            Console(file=file, width=width, color_system=None).print(table)
+            file.write("```\n")
 
 
 def compare_to_baseline(report: EvaluationReport, baseline: EvaluationReport, tolerance: float) -> list[str]:
@@ -286,22 +285,23 @@ def compare_to_baseline(report: EvaluationReport, baseline: EvaluationReport, to
 
 
 def evaluate_model(
-    model_name: str, dataset: Dataset[str, str], args: argparse.Namespace
+    entry: EvalModel, dataset: Dataset[str, str], args: argparse.Namespace
 ) -> tuple[EvaluationReport | None, list[str]]:
     """Run the dataset against one model, print its report notes, and return the report with its gate failures.
 
-    The report is None when the settings hold no key for the model's provider.
+    The report is None when a variable the entry names is unset.
     """
-    model = build_model(model_name)
+    model_name = entry.model
+    model = build_model(entry)
     if model is None:
         return None, []
-    agent = build_agent(model, form_fill=build_form_fill_skill(), model_settings=model_settings_for(model_name))
+    agent = build_agent(model, form_fill=build_form_fill_skill(), model_settings=model_settings_for(entry))
     report = dataset.evaluate_sync(
         task_for(agent),
         name=model_name,
         max_concurrency=args.concurrency,
         repeat=args.repeat,
-        metadata=run_metadata(model_name),
+        metadata=run_metadata(entry),
     )
     failures: list[str] = []
 
@@ -343,7 +343,7 @@ def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
         "--models",
-        help="comma-separated models from eval-models.json to run (default: every one whose provider key is set)",
+        help="comma-separated models from eval-models.json to run (default: every entry whose variables are set)",
     )
     parser.add_argument("--cases", help="comma-separated case names to run (default: all)")
     parser.add_argument(
@@ -382,6 +382,12 @@ def main() -> None:
         default=None,
         help="write each model's full report as JSON, the model in the file name (baseline_report.json blesses baselines)",
     )
+    parser.add_argument(
+        "--summary-file",
+        type=Path,
+        default=None,
+        help="append the result table and the gate failures to this file as Markdown (CI: $GITHUB_STEP_SUMMARY)",
+    )
     args = parser.parse_args()
 
     dataset = Dataset[str, str].from_file(eval_settings.dataset_file, custom_evaluator_types=[ToolResultContains])
@@ -393,21 +399,24 @@ def main() -> None:
             evaluators=dataset.evaluators,
         )
 
-    models: list[str] = json.loads(eval_settings.models_file.read_text())
+    entries = {entry.model: entry for entry in _MODELS.validate_json(eval_settings.models_file.read_bytes())}
     if args.models:
         selected = [name.strip() for name in args.models.split(",")]
-        if unknown := [name for name in selected if name not in models]:
+        if unknown := [name for name in selected if name not in entries]:
             sys.exit(f"not in {eval_settings.models_file.name}: {', '.join(unknown)}")
-        models = selected
+        entries = {name: entries[name] for name in selected}
 
-    outcomes = {model_name: evaluate_model(model_name, dataset, args) for model_name in models}
+    outcomes = {name: evaluate_model(entry, dataset, args) for name, entry in entries.items()}
     reports = {model_name: report for model_name, (report, _) in outcomes.items()}
     failures = [failure for _, found in outcomes.values() for failure in found]
 
-    print_table(reports, [case.name for case in dataset.cases], args.repeat)
+    print_table(reports, [case.name for case in dataset.cases], args.repeat, args.summary_file)
     if not any(reports.values()):
-        failures.append("no model ran: set a provider key (see .env.example)")
+        failures.append("no model ran: set the variables an entry names (see .env.example)")
     if failures:
+        if args.summary_file:
+            with args.summary_file.open("a") as file:
+                file.writelines(f"- :x: {failure}\n" for failure in failures)
         sys.exit("; ".join(failures))
 
 

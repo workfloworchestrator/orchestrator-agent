@@ -1,6 +1,6 @@
 [
-  "openai:gpt-4o-mini",
-  "anthropic:claude-haiku-5-5",
-  "anthropic:claude-opus-5-5",
-  "agent:Qwen3.8-27B-FP8"
+  {"model": "openai:gpt-4o-mini", "api_key": "OPENAI_API_KEY"},
+  {"model": "anthropic:claude-haiku-5-5", "api_key": "ANTHROPIC_API_KEY"},
+  {"model": "anthropic:claude-opus-5-5", "api_key": "ANTHROPIC_API_KEY"},
+  {"model": "Qwen3.8-27B-FP8", "api_key": "WILMA_API_KEY", "api_base": "WILMA_API_BASE"}
 ]

@@ -31,10 +31,11 @@ uv run python run_eval.py --concurrency 8    # runs at once (default 4)
 uv run python run_eval.py --fail-under 0.7   # CI gate: exit non-zero below the floor
 ```
 
-`../eval-models.json` lists the models. The provider keys are settings
-(`settings.py`, from the environment or `.env`); a model runs when its
-provider's key is set and is reported as
-skipped otherwise. Scores are only comparable across runs on the same model.
+`../eval-models.json` lists the models, one entry each: the model, the name
+of the variable that holds its key (`api_key`) and, for an OpenAI-compatible
+endpoint, the name of the variable that holds its URL (`api_base`). The
+variables come from the environment or `.env`; an entry runs when they are
+set and is reported as skipped otherwise. Scores are only comparable across runs on the same model.
 The output is one table: the models as columns, a row per case, each cell the
 route match and the argument-correctness pass rate averaged over the runs.
 
@@ -106,9 +107,9 @@ pinned model — so a baseline change is always a reviewed diff.
 ## CI
 
 `.github/workflows/eval.yml` runs the benchmark on demand
-(`workflow_dispatch`), nightly, and on PRs labeled `eval`: compose up the
-backing services, run the golden set in-process from the branch's working
-tree, five times per case and per model, gate on the committed baselines plus
-the `--fail-under` floor. A model runs when its provider's key is set: the
-`OPENAI_API_KEY` and `ANTHROPIC_API_KEY` repository secrets, the same names
-as in `.env`.
+(`workflow_dispatch`) and on PRs labeled `eval`. It reads
+`../eval-models.json` and starts one job per entry: compose up the backing
+services, run the golden set in-process from the branch's working tree, five
+times per case, gate on the committed baseline plus the `--fail-under` floor.
+A job gets only the repository secrets its entry names, and is skipped with a
+notice when one of them is not set.
