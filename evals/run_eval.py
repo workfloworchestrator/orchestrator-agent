@@ -24,6 +24,7 @@ from collections.abc import Awaitable, Callable
 from pathlib import Path
 from statistics import fmean
 from typing import NamedTuple
+from urllib.parse import urlparse
 
 from evaluators import ToolResultContains
 from settings import EvalModel, eval_settings
@@ -113,6 +114,22 @@ def build_model(entry: EvalModel) -> Model | None:
     # key set that is always a model, never the plain model string (which would take the Responses API).
     model = agent_settings(entry).create_model()
     return model if isinstance(model, Model) else None
+
+
+def failure_reasons(report: EvaluationReport, entry: EvalModel) -> Counter[str]:
+    """Why runs failed to execute, by the first line of the error.
+
+    The entry's endpoint, its host and its key are cut out of the text: an error can quote them, and a CI log is public.
+    """
+    base = entry.base()
+    hidden = [value for value in (base, urlparse(base).hostname if base else None, entry.key()) if value]
+    reasons: Counter[str] = Counter()
+    for failure in report.failures:
+        reason = (failure.error_message.strip().splitlines() or ["no error message"])[0][:300]
+        for value in hidden:
+            reason = reason.replace(value, "<hidden>")
+        reasons[reason] += 1
+    return reasons
 
 
 def task_for(agent: WFOAgent) -> Callable[[str], Awaitable[str]]:
@@ -312,6 +329,8 @@ def evaluate_model(
 
     if report.failures:
         print(f"{model_name}: {len(report.failures)} run(s) failed to execute, counted as 0")
+        for reason, count in failure_reasons(report, entry).most_common(3):
+            print(f"  {count}x {reason}")
 
     if args.baseline:
         path = for_model(args.baseline, model_name)
@@ -327,9 +346,9 @@ def evaluate_model(
                 print(f"{model_name}: no regressions vs baseline {path.name} (tolerance {args.tolerance})")
 
     if args.fail_under is not None:
-        averages = report.averages()
-        values = list(averages.scores.values())
-        if averages.assertions is not None:
+        averages = report.averages()  # None when every run failed to execute
+        values = list(averages.scores.values()) if averages else []
+        if averages and averages.assertions is not None:
             values.append(averages.assertions)
         mean = sum(values) / len(values) if values else 0.0
         mean *= len(report.cases) / ((len(report.cases) + len(report.failures)) or 1)  # a crashed run is 0
