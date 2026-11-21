@@ -18,13 +18,13 @@ settings, the way the server would be configured.
 """
 
 import argparse
+import re
 import sys
 from collections import Counter, defaultdict
 from collections.abc import Awaitable, Callable
 from pathlib import Path
 from statistics import fmean
 from typing import NamedTuple
-from urllib.parse import urlparse
 
 from evaluators import ToolResultContains
 from settings import EvalModel, eval_settings
@@ -116,18 +116,23 @@ def build_model(entry: EvalModel) -> Model | None:
     return model if isinstance(model, Model) else None
 
 
-def failure_reasons(report: EvaluationReport, entry: EvalModel) -> Counter[str]:
-    """Why runs failed to execute, by the first line of the error.
+_ERROR_TYPE = re.compile(r"[A-Z][A-Za-z0-9_]*")  # an exception class name, as pydantic-evals prefixes it
+_STATUS_CODE = re.compile(r"status_code: (\d{3})\b")
 
-    The entry's endpoint, its host and its key are cut out of the text: an error can quote them, and a CI log is public.
+
+def failure_reasons(report: EvaluationReport) -> Counter[str]:
+    """Why runs failed to execute: the type of the error and, for an HTTP error, its status code.
+
+    Never the error's text. It is written by the endpoint and the client, so it can quote the address, an IP, part of
+    a key or anything else the endpoint answers, and a CI log is public: only what is known to be harmless is shown,
+    rather than cutting known secrets out of a text that may hold others.
     """
-    base = entry.base()
-    hidden = [value for value in (base, urlparse(base).hostname if base else None, entry.key()) if value]
     reasons: Counter[str] = Counter()
     for failure in report.failures:
-        reason = (failure.error_message.strip().splitlines() or ["no error message"])[0][:300]
-        for value in hidden:
-            reason = reason.replace(value, "<hidden>")
+        name, _, text = failure.error_message.partition(":")
+        reason = name if _ERROR_TYPE.fullmatch(name) else "error"
+        if status := _STATUS_CODE.search(text):
+            reason += f" (HTTP {status.group(1)})"
         reasons[reason] += 1
     return reasons
 
@@ -329,7 +334,7 @@ def evaluate_model(
 
     if report.failures:
         print(f"{model_name}: {len(report.failures)} run(s) failed to execute, counted as 0")
-        for reason, count in failure_reasons(report, entry).most_common(3):
+        for reason, count in failure_reasons(report).most_common(3):
             print(f"  {count}x {reason}")
 
     if args.baseline:
