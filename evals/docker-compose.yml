@@ -23,6 +23,9 @@ services:
     # MCP toolset the agent's tool contract requires (>= 5.7.0a3).
     image: ${CORE_IMAGE:-ghcr.io/workfloworchestrator/orchestrator-core:5.7.0a3}
     environment:
+      # TEMPORARY, as in ../pyproject.toml: the entrypoint installs core's main at this commit over the image's
+      # release. Remove on the release of orchestrator-core 5.7.0a4 and raise the image tag instead.
+      CORE_REF: 079668314b7a8d92e0eb97b62cffde3bad93714c
       DATABASE_URI: postgresql+psycopg://nwa:nwa@postgres/orchestrator-core
       MCP_ENABLED: "True"
       OAUTH2_ACTIVE: "False"

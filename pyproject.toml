@@ -6,7 +6,7 @@ license = "Apache-2.0"
 requires-python = ">=3.11,<3.14"
 dependencies = [
     "orchestrator-core>=5.7.0a3",
-    "pydantic-forms>=2.10.0",  # core's form types the skill reads, and the option sources its fields declare
+    "pydantic-forms>=2.10.1",  # core's form types the skill reads, and the option sources its fields declare
     "pydantic-ai-slim[mcp]>=2.60,<3",  # 2.60: MCPToolset `auth` as a function of the run, so each run gets its own session
     "ag-ui-protocol>=1.0.0,<2",  # interrupts (``RunFinishedEvent.outcome``, ``RunAgentInput.resume``): the AG-UI human-in-the-loop
     "a2a-sdk[http-server]>=1.1.5,<2",
@@ -140,3 +140,8 @@ override-dependencies = [
     "pydantic[email]>=2.13,<2.14",  # the extra pydantic-forms needs; an override drops extras it does not name
     "pydantic-settings>=2.15.0,<2.16",
 ]
+
+# TEMPORARY, remove on the release of orchestrator-core 5.7.0a4 and require ">=5.7.0a4" instead: core's main at the
+# merge of the form option tools (#2134). The same commit is CORE_REF in evals/docker-compose.yml.
+[tool.uv.sources]
+orchestrator-core = { url = "https://github.com/workfloworchestrator/orchestrator-core/archive/079668314b7a8d92e0eb97b62cffde3bad93714c.tar.gz" }
