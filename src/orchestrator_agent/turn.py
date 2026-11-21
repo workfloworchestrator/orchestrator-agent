@@ -31,15 +31,19 @@ from uuid import UUID
 
 import structlog
 from orchestrator.core.db.models import AgentRunTable
-from pydantic_ai.messages import FunctionToolResultEvent, ModelMessage, PartDeltaEvent, ToolReturnPart
+from pydantic_ai import DeferredToolResults
+from pydantic_ai.messages import FunctionToolResultEvent, ModelMessage, PartDeltaEvent, ToolCallPart, ToolReturnPart
 from pydantic_ai.run import AgentRunResultEvent
 from sqlalchemy.orm import Session
 
 from orchestrator_agent.agent import new_deps
 from orchestrator_agent.artifacts import QueryArtifact, ToolArtifact
+from orchestrator_agent.form_fill import session as fs
+from orchestrator_agent.form_fill.pages import approval
+from orchestrator_agent.form_fill.start import answer, pending_start
 from orchestrator_agent.mcp_client import bind_outbound_token
 from orchestrator_agent.persistence import dump_messages, load_messages
-from orchestrator_agent.state import FormInput, SearchState
+from orchestrator_agent.state import ApprovalStop, FormPhase, SearchState
 
 if TYPE_CHECKING:
     from orchestrator_agent.agent import WFOAgent
@@ -80,6 +84,31 @@ class ConversationLocks:
                 self._locks.pop(conversation, None)
 
 
+def waiting_start(state: SearchState | None) -> tuple[ToolCallPart, ApprovalStop] | None:
+    """The start a conversation waits on, with what a person is shown to approve; None when it waits on none."""
+    if state is None or (session := state.form_fill) is None or session.status != FormPhase.CONFIRMING:
+        return None
+    call = pending_start(load_messages(state.message_history) or [])
+    return (call, approval(session)) if call is not None else None
+
+
+def settle(
+    state: SearchState, call: ToolCallPart, read: tuple[DeferredToolResults | None, bool], words: str
+) -> DeferredToolResults | None:
+    """The person's decision on the waiting start, to go on with (``run_turn``'s ``approval``); None for none.
+
+    ``read`` is the decision as the client carried it. When it carried none, ``words`` the person sent
+    instead decline the start for now. An outright rejection closes the form here, in code.
+    """
+    decided, rejected = read
+    if decided is None and words:
+        decided, rejected = answer(call, False, words)
+    if rejected and state.form_fill is not None:
+        fs.close(state.form_fill)
+        state.form_fill = None
+    return decided
+
+
 async def run_turn(
     agent: "WFOAgent",
     db_session: Session,
@@ -90,17 +119,17 @@ async def run_turn(
     prior_state: SearchState | None,
     user_input: str,
     hitl: bool,
-    form_input: FormInput | None,
     auth_token: str | None,
     on_artifact: OnArtifact | None = None,
+    approval: DeferredToolResults | None = None,
 ) -> tuple[SearchState, str]:
     """Run the agent for one turn of ``thread``; the run's state and its answer.
 
     The run is recorded, the conversation's earlier turns are replayed as its message history, and its
-    open form is continued with ``form_input`` (the human's response to the pending stop, if the request
-    carried one). ``hitl`` says the caller can show a person a stop: a form needs it. The answer is the
-    agent's prose plus the deterministically rendered chart/table blocks; a form-fill reply is on the
-    state (``form_reply``). The caller snapshots the state, after recording a stop on it.
+    open form is continued. ``hitl`` says the caller can show a person an approval: a start needs one, and the
+    caller shows it when the run stops for it. ``approval`` is the person's decision on the start the thread
+    waits on: the run then goes on from that call, without a new message. The answer is the agent's prose
+    plus the deterministically rendered chart/table blocks. The caller snapshots the state.
     """
     deps = new_deps(user_input=user_input)
     deps.state.run_id = run_id
@@ -109,12 +138,11 @@ async def run_turn(
 
     deps.state.hitl = hitl
     deps.state.form_fill = prior_state.form_fill if prior_state is not None else None
-    deps.state.form_input = form_input
     # Multi-turn memory: the caller only needs to send the latest user turn.
     message_history = load_messages(prior_state.message_history if prior_state else [])
 
     with bind_outbound_token(auth_token):
-        output = await _run_model(agent, user_input, deps, message_history, on_artifact)
+        output = await _run_model(agent, user_input, deps, message_history, on_artifact, approval)
     return deps.state, output
 
 
@@ -124,11 +152,15 @@ async def _run_model(
     deps: Any,
     message_history: list[ModelMessage] | None,
     on_artifact: OnArtifact | None,
+    approval: DeferredToolResults | None = None,
 ) -> str:
     """Stream one model run: artifacts go out as they happen; the prose plus rendered blocks is returned."""
     final_output = ""
     injected_blocks: list[str] = []
-    async with agent.run_stream_events(user_input, deps=deps, message_history=message_history) as events:
+    prompt = None if approval is not None else user_input
+    async with agent.run_stream_events(
+        prompt, deps=deps, message_history=message_history, deferred_tool_results=approval
+    ) as events:
         async for event in events:
             if isinstance(event, FunctionToolResultEvent):
                 result = event.part
@@ -150,4 +182,4 @@ async def _run_model(
     return final_output
 
 
-__all__ = ["NO_RESULTS", "ConversationLocks", "OnArtifact", "run_turn"]
+__all__ = ["NO_RESULTS", "ConversationLocks", "OnArtifact", "run_turn", "settle", "waiting_start"]

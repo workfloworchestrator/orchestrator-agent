@@ -14,8 +14,7 @@ See [Run the agent with your Orchestrator Core](../getting-started.md) for setup
 | --- | --- | --- |
 | `DATABASE_URI` | *(required)* | PostgreSQL connection URI for the WFO database. Prefer the explicit `postgresql+psycopg://` scheme. A bare `postgresql://` also selects psycopg with the SQLAlchemy 2.1 version locked on `main` |
 | `WFO_CORE_MCP_URL` | `http://localhost:8080/mcp` | URL of the Orchestrator Core MCP server that serves the domain tools the agent calls |
-| `WFO_CORE_API_URL` | *(derived)* | Base URL for a form field's relative `optionsSource.url` and for Core export downloads. When unset, uses the origin of `WFO_CORE_MCP_URL` |
-| `WFO_OPTIONS_HOSTS` | `[]` | Additional hosts allowed for absolute form-option URLs. Supply a JSON list, for example `["inventory.example.com:8443"]`. Entries match the URL's host and port exactly; allowed destinations receive the run's bearer token or fallback service token |
+| `WFO_CORE_API_URL` | *(derived)* | Base URL of Core's REST API, where a chat's export file is fetched from. When unset, uses the origin of `WFO_CORE_MCP_URL` |
 | `BASE_URL` | `http://localhost:8080` | Public URL of the agent, advertised in the A2A agent card |
 
 ## Model
@@ -39,9 +38,8 @@ See [How to change the language model](../guides/own-llm.md) for examples and pr
 
 ### Model settings
 
-`AGENT_MODEL_SETTINGS` is a JSON object of pydantic-ai model settings. They are sent with every model request: the
-agent's, and the one that reads a person's typed answers for a workflow form. Empty sends none, so the provider's
-defaults apply.
+`AGENT_MODEL_SETTINGS` is a JSON object of pydantic-ai model settings. They are sent with every model request. Empty sends
+none, so the provider's defaults apply.
 
 ```bash
 AGENT_MODEL_SETTINGS='{"temperature": 0.2, "thinking": "high", "max_tokens": 4096}'
@@ -96,6 +94,5 @@ repository, and [Connect LibreChat](../guides/librechat.md) walks through it.
 | `endpoints.custom[].models.default` | `['wfo']` | The one model id the agent serves |
 | `endpoints.custom[].titleConvo` | `false` | Otherwise LibreChat asks the agent for a chat title before the first answer |
 | `endpoints.custom[].headers.X-Conversation-Id` | `'{% raw %}{{LIBRECHAT_BODY_CONVERSATIONID}}{% endraw %}'` | The agent keeps a conversation's memory and its open form under this id |
-| `endpoints.custom[].headers.X-Agent-Client` | `'librechat'` | Required: the agent opens a workflow form only for a caller that identifies itself as LibreChat |
+| `modelSpecs.list[].askUserQuestion` | `true` | Offers the ask-user tool to the agent, which shows the approval of a workflow start. Without it a form is prepared, not started. Needs LibreChat 0.8.8 or later |
 | `endpoints.custom[].headers.Authorization` | `'Bearer {% raw %}{{LIBRECHAT_OPENID_ACCESS_TOKEN}}{% endraw %}'` | Forwards the signed-in user's token to Core, independently of the inbound and service-account authentication toggles. Required to pass the agent's inbound check when `OAUTH2_ACTIVE=true` |
-| `modelSpecs.list[].askUserQuestion` | `true` | Offers the ask-user tool to the agent. Without it no workflow form is opened. Needs LibreChat 0.8.8 or later |

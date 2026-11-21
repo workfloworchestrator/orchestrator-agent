@@ -22,7 +22,7 @@ from starlette.responses import Response, StreamingResponse
 from structlog import get_logger
 
 from orchestrator_agent.adapters import AGUIWorker
-from orchestrator_agent.adapters.ag_ui import ThreadForbiddenError
+from orchestrator_agent.adapters.ag_ui import ApprovalPendingError, EmptyRunError, ThreadForbiddenError
 from orchestrator_agent.agent import WFOAgent
 from orchestrator_agent.api.dependencies import bearer_token, get_agent
 from orchestrator_agent.security import subject_of
@@ -56,4 +56,8 @@ async def agent_conversation(
         )
     except ThreadForbiddenError as exc:
         raise HTTPException(status_code=403, detail=str(exc))
+    except ApprovalPendingError as exc:
+        raise HTTPException(status_code=409, detail=str(exc))
+    except EmptyRunError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
     return StreamingResponse(stream, media_type=SSE_CONTENT_TYPE)

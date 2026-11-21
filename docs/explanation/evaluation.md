@@ -108,9 +108,9 @@ the comparison that made the failure visible. A reviewed update records a delibe
 
 ## What this benchmark leaves open
 
-The current suite covers single-turn search, aggregation, lookup and export behavior. It does not establish final-answer
-correctness, multi-turn reliability, workflow form filling or approval, or successful execution through a client and its
-protocol adapter. Those need additional evals, integration tests or manual acceptance checks appropriate to the claim.
+The current suite covers single-turn search, aggregation, lookup and export behavior, and filling a workflow form
+from one request. It does not establish final-answer correctness, multi-turn reliability, the approval of a workflow
+start, or successful execution through a client and its protocol adapter. Those need additional evals, integration tests or manual acceptance checks appropriate to the claim.
 
 The call budget constrains tool use, but the gates are not cost or latency acceptance criteria. The suite also has no
 separate comprehensive prompt-rule evaluator or support for declaring multiple equally valid golden routes per case.

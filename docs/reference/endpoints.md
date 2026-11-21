@@ -14,8 +14,9 @@ conversation handling differ as described below.
 ## OpenAI chat completions
 
 `POST /v1/chat/completions` serves the agent as a chat model. `GET /v1/models` lists a single model id, `wfo`.
-Workflow forms are shown through the client's ask-user tool, which LibreChat provides. See
-[Connect LibreChat](../guides/librechat.md) for the headers the agent expects.
+The start of a workflow is approved through LibreChat's ask-user tool, the one chat client supported for it. See
+[Workflow forms](runtime.md#workflow-forms), and [Connect LibreChat](../guides/librechat.md) for the headers the
+agent expects.
 
 This is not the full OpenAI API. It is a small, compatible subset that lets chat clients talk to the agent. The agent
 implements it itself, not pydantic-ai.
@@ -23,16 +24,19 @@ implements it itself, not pydantic-ai.
 - Only `POST /v1/chat/completions` and `GET /v1/models` exist. Other OpenAI endpoints, such as embeddings, are not
   available.
 - Of the request body the agent uses little, because it keeps its own memory of a conversation:
-    - `messages`: only the text of the last `user` message, plus `tool` messages when the request answers a form
-      card. Earlier, `system` and `assistant` messages are not read, and neither are non-text parts such as images.
+    - `messages`: only the text of the last `user` message, plus the `tool` message that answers a waiting
+      approval. Earlier, `system` and `assistant` messages are not read, and neither are non-text parts such as
+      images.
     - `stream`: with `true` the answer comes back as server-sent chunks, but it is computed in full first, so it does
       not arrive token by token.
-    - `tools`: only whether the list is empty is checked, which tells the agent whether the chat can show a form
-      card. The tools themselves are never called, apart from LibreChat's ask-user tool.
+    - `tools`: only whether it offers `ask_user_question` is read. With it, a workflow start that waits for approval
+      is answered with a call of that tool: one question with the options Approve and Reject, under the id of the
+      waiting call. The next request answers it with a `tool` message, `{"answers": {"q0": "<option value>"}}`.
+      Typed text instead of an option, or a new message, declines the start for now and goes to the model as what
+      the person wants changed. No other client tool is called.
     - `model` is echoed back in the response. The model is always the agent's own.
     - All other fields, such as `temperature`, `max_tokens` and `tool_choice`, are ignored.
-- The `X-Conversation-Id` and `X-Agent-Client` headers select the conversation and the client. See
-  [Connect LibreChat](../guides/librechat.md).
+- The `X-Conversation-Id` header selects the conversation. See [Connect LibreChat](../guides/librechat.md).
 - A response has one choice, which ends with `stop` or `tool_calls`, and has no `usage`.
 - Export preparation can succeed, but this response does not carry the export's download metadata. See
   [Export delivery](#export-delivery).
@@ -48,8 +52,8 @@ discover the agent through its card at `/.well-known/agent-card.json`, which adv
 [plugin](plugins.md) and the public `BASE_URL`.
 
 Callers that have not moved to v1.0 are still served: the card also advertises a 0.3 interface and the
-agent accepts `message/send` and `message/stream`. A 0.3 caller gets everything except workflow forms, which need the
-human-in-the-loop extension described in [Workflow forms](runtime.md#workflow-forms).
+agent accepts `message/send` and `message/stream`. A caller that activates kagent's human-in-the-loop extension can
+approve a workflow start; see [Workflow approval over A2A](#workflow-approval-over-a2a).
 
 The endpoint is built on the [A2A Python SDK](https://github.com/a2aproject/a2a-python), not on pydantic-ai. It covers
 what a client needs to ask the agent questions, not the whole protocol:
@@ -58,6 +62,33 @@ what a client needs to ask the agent questions, not the whole protocol:
 - The card advertises streaming. Tasks are kept in memory, so they are lost when the agent restarts.
 
 For the protocol itself, see the [A2A specification](https://a2a-protocol.org/latest/).
+
+### Workflow approval over A2A
+
+The start of a workflow is approved through kagent's human-in-the-loop extension,
+`https://kagent.dev/extensions/hitl/v1`, which the agent card advertises. A caller activates it with the
+`A2A-Extensions` header on the call; kagent 1.0 does so for an agent it uses as a tool. Without it a form can be
+filled, but `start_workflow` only reports it as prepared.
+
+When the model calls `start_workflow`, the task ends in `input-required`. Its status message lists the extension
+and carries, under the extension's URI in `metadata`, a `tool_approval_request` with one tool: `start_workflow`,
+under the id of the waiting call, with the workflow and the values of the accepted pages as its arguments. The
+decision comes back as a message on the same task with a `tool_approval_response` under the same key:
+
+| `approvals[]` entry | Effect |
+| --- | --- |
+| `{"id": "<call id>", "approved": true}` | Starts the workflow |
+| `{"id": "<call id>", "approved": false}` | Rejects the start and closes the form |
+| `{"id": "<call id>", "approved": false, "rejection_reason": "..."}` | Does not start; the model reads the reason, acts on it and asks for approval again |
+
+A message without a decision, while a start waits, shows the waiting start again and runs nothing.
+
+!!! note "One pause per call in kagent"
+    kagent shows a person one pause for each call of this agent. After a rejection with a reason, the model corrects
+    the form and asks for approval again while still answering that same call, and kagent does not show that second
+    request ([kagent issue #3244](https://github.com/kagent-dev/kagent/issues/3244)). The start keeps waiting: the
+    next call of this agent in that conversation shows it. Tell the calling agent to call again, for example with
+    `continue`, when a call returns while the form is not finished.
 
 ## AG-UI
 
@@ -94,22 +125,28 @@ it does not impose an approval policy on every custom frontend tool. See
 
 ### Workflow interrupts
 
-The endpoint shares the form-fill skill used by A2A and chat completions. To receive forms, send a
-`protocolVersion` that supports interrupts: the agent accepts version 0.1.19 or later. Without that declaration,
-the form handoff reports that the client cannot show a form; Core's three mutations remain hidden from the model.
+The start of a workflow is approved through an AG-UI interrupt. To be able to approve, send a `protocolVersion` that
+supports interrupts: the agent accepts version 0.1.19 or later. Without that declaration a form can be filled but
+`start_workflow` only reports it as prepared; Core's three mutations remain hidden from the model.
 
-A form stop ends the run with `RUN_FINISHED` and an interrupt outcome. Its interrupt has a reason, a response
-schema and metadata describing the questions or the start to approve. The next run uses the same `threadId` and
-sends a `resume` entry with the matching `interruptId`, `status: "resolved"` and one of these payloads:
+When the model calls `start_workflow`, the run ends with `RUN_FINISHED` and an interrupt outcome. The interrupt has
+reason `tool_call`, the id `int-<tool call id>` and, as metadata, the start to approve: the `create_workflow` call as
+it will be made and the labels of its values. The next run uses the same `threadId` and sends a `resume` entry with
+the matching `interruptId`, `status: "resolved"` and one of these payloads:
 
-| Interrupt reason | Resume `payload` |
+| Resume `payload` | Effect |
 | --- | --- |
-| `ask_user` | `{"answers": [[0], ["typed answer"]]}`: one list per question, containing selected choice positions or typed text |
-| `tool_call` | `{"approved": true}` to start, or `{"approved": false}` to cancel; the value must be a JSON boolean |
+| `{"approved": true}` | Starts the workflow. The value must be a JSON boolean |
+| `{"approved": false}` | Rejects the start and closes the form |
+| `{"approved": false, "reason": "..."}` | Does not start; the model reads the reason, acts on it and asks for approval again |
 
-A resume entry with `status: "cancelled"` cancels the form. An unreadable response to a pending stop shows it
-again. Sending a new chat message without a resume entry ends the open form and sends the message to the model.
-Form reply text is rendered as Markdown; the interrupt also carries the structured form data.
+A resume entry with `status: "cancelled"` also closes the form. While a start waits, a request for that thread must
+carry its resume entry: one without it is refused with 409. A request with neither a message nor a resume entry is
+refused with 400.
+
+While a form is open the agent also sends an `ACTIVITY_SNAPSHOT` with `activityType: "workflow_form"`. It says where
+the form stands and lists the ids of the tool calls that belong to it, so a frontend can show a form as one group
+without knowing any tool by name.
 
 The endpoint uses the AG-UI adapter of pydantic-ai, so what it supports is what that adapter supports. See
 [AG-UI in pydantic-ai](https://pydantic.dev/docs/ai/integrations/ui/ag-ui/) for how messages, tool calls and state
@@ -128,12 +165,11 @@ protocol is not served here. With authentication off they serve the unowned AG-U
 | --- | --- |
 | `GET /chats/?limit=50` | The caller's chats, newest first; `limit` is 1–200 |
 | `GET /chats/{thread_id}?last=50` | Chat summary, the last messages as AG-UI messages, and any pending interrupt; `last` is 1–500 |
-| `GET /chats/{thread_id}/options/{field}?q=...&limit=20` | Options for a searchable field in the pending form; `q` is at most 200 characters and `limit` is 1–50 |
 | `GET /chats/{thread_id}/exports/{query_id}` | A CSV export prepared by this chat, fetched from Core with the selected bearer token |
 | `DELETE /chats/{thread_id}` | Delete the chat's snapshots and run records; returns 204 |
 
 Reading another owner's chat returns 403; a missing chat or a thread from another protocol returns 404.
-Option searches require a matching searchable question in the pending stop. Export downloads require an export
+Export downloads require an export
 recorded in that chat; a missing export returns 404, and other upstream export failures return 502.
 
 For the protocol itself, see the [AG-UI documentation](https://docs.ag-ui.com/).
@@ -222,7 +258,7 @@ allow if "network-operators" in input.groups
 | --- | --- | --- |
 | `POST /v1/chat/completions` | `Authorization` header | service account |
 | `POST /agui/` | `Authorization` header | service account |
-| Chat option searches and export downloads | `Authorization` header | service account |
+| Chat export downloads | `Authorization` header | service account |
 | A2A `POST /` | `auth_token` or `authToken` in the message metadata | service account |
 | `/mcp` | not forwarded | service account when enabled; otherwise no bearer token |
 

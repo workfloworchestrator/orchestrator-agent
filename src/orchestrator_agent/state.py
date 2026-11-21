@@ -11,11 +11,9 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-from collections.abc import Sequence
-from dataclasses import dataclass
 from enum import StrEnum
-from typing import Any, Literal
-from uuid import UUID
+from typing import Any
+from uuid import UUID, uuid4
 
 from orchestrator.core.schemas.mcp_tools import WorkflowFormPage
 from orchestrator.core.search.filters import FilterTree
@@ -27,53 +25,6 @@ from typing_extensions import TypedDict
 # core's name for a subscription reference: the field of its ``ModifySubscriptionPage``, the first page of
 # every modify / terminate workflow.
 SUBSCRIPTION_ID = "subscription_id"
-
-
-class Decision(StrEnum):
-    """What the human decided about the start of the workflow: their answer to the approval, never words."""
-
-    START = "start"  # start the workflow as summarised
-    CANCEL = "cancel"  # abandon the form
-
-
-# --- what goes into the form-fill skill per turn, and what it hands back --------------------------------
-# A form is filled through a human-in-the-loop transport only: every stop is a pause that shows the human
-# questions with their options, or the start to approve, and only their structured response continues it.
-
-
-@dataclass(frozen=True)
-class FormInput:
-    """The human's response to the pending stop: their answers as data, or their decision on the start."""
-
-    values: dict[str, Any] | None = None
-    decision: Decision | None = None
-
-
-@dataclass(frozen=True)
-class AskField:
-    """One question for the human: the form field it fills, its wording, the options to pick from."""
-
-    name: str
-    question: str
-    choices: Sequence[str] = ()  # what the human is shown to pick from (labels)
-    values: Sequence[Any] = ()  # the form value behind each choice, same order; empty when the answer is free
-    multiple: bool = False
-    # The parts ``question`` is worded from, for a transport that words a question its own way.
-    required: bool = True
-    title: str = ""
-    problem: str = ""  # core's message when it rejected the answer
-    hint: str = ""  # one line shown with the question: how many options a long list has, what typed words matched
-    # A long list: a client that can search asks ``GET /chats/{thread}/options/{field}?q=`` and picks; typed words work too.
-    searchable: bool = False
-
-
-@dataclass(frozen=True)
-class Approval:
-    """The write the skill wants confirmed before it runs: shown to the human as a call to approve."""
-
-    hint: str
-    tool_name: str
-    args: dict[str, Any]
 
 
 class SummaryTable(TypedDict, total=False):
@@ -88,75 +39,51 @@ class SummaryTable(TypedDict, total=False):
     columns: list[list[Any]]
 
 
-class FormReply(BaseModel):
-    """What a turn of the form-fill skill came to, as data: the text of its reply, one JSON object.
+class FormPhase(StrEnum):
+    """Where a form stands; the strings are the session's ``status`` as persisted."""
 
-    Nothing in it is phrased by this code; it carries core's own data. ``gathering``: the page core did not
-    accept and what core ``rejected`` in its own words (its form tool's errors), the ``values`` known
-    so far. ``confirming``: the ``values`` to be submitted and the ``defaults`` that apply, and the
-    workflow's own ``summary`` of the start when its form ends in one (core's summary form). ``started``:
-    the ``process_id`` (or, when core's answer was not one, that answer as the ``reason``). ``failed``: the
-    ``reason``, as the error came. ``labels`` says how the form shows a value that is one of its options
-    (an id is not something a person can confirm).
+    GATHERING = "gathering"  # the model fills the current page with the person
+    CONFIRMING = "confirming"  # every page accepted: the start is out for approval
+    DONE = "done"  # closed: started, cancelled, prepared or failed; the session is dropped
+
+
+class ApprovalStop(BaseModel):
+    """The start of a workflow as the person approves it: what a client shows on the approval.
+
+    ``values`` are what the accepted pages hold, each as the form shows it (an id is not something a person
+    can confirm); ``defaults`` the optional fields nobody gave a value; ``summary`` the tables of the
+    workflow's own summary page, when its form ends in one.
     """
 
     workflow_key: str
-    status: Literal["gathering", "confirming", "started", "cancelled", "failed"]
-    page: int | None = None
-    title: str | None = None
-    rejected: list[FormFieldError] = Field(default_factory=list)
-    reason: str | None = None
     values: dict[str, Any] = Field(default_factory=dict)
-    labels: dict[str, Any] = Field(default_factory=dict)  # field -> the label of its value, where the form has one
     defaults: dict[str, Any] = Field(default_factory=dict)
-    summary: list[SummaryTable] = Field(default_factory=list)  # the tables of the form's own summary page
-    process_id: str | None = None
-
-    def as_text(self) -> str:
-        return self.model_dump_json(exclude_defaults=True)
-
-
-@dataclass(frozen=True)
-class Reply:
-    """One turn's answer: the ``FormReply`` as text, and the stop it is — questions or an approval — if any."""
-
-    text: str
-    ask: Sequence[AskField] | None = None
-    approval: Approval | None = None
+    summary: list[SummaryTable] = Field(default_factory=list)
 
 
 class FormFillSession(BaseModel):
-    """The state of one workflow form being filled over A2A turns (persisted with the thread).
+    """The state of one workflow form being filled over turns (persisted with the thread).
 
-    ``values`` is everything the human answered (or an interpreter made of their words), keyed by field
-    name and applied to a page when its field appears; ``page_inputs`` is the last walk's validated pages —
-    exactly what ``create_workflow`` is called with; ``pages`` is how core described them (title and
-    schema), which every stop reads.
+    Code keeps the machine: ``page_inputs`` are the pages core accepted, exactly what ``create_workflow`` is
+    called with, and ``page_labels`` how core shows their searched values; ``pages`` are the pages seen in
+    order as core described them, the accepted ones first and then the current one while ``gathering``. The
+    model fills the current page: ``draft`` is what it last submitted for it and ``rejected`` core's verdict
+    on that.
     """
 
+    id: str = Field(default_factory=lambda: uuid4().hex)  # the activity message a chat shows the form as
     workflow_key: str
-    status: Literal["opening", "gathering", "confirming", "done"] = "gathering"  # opening = handed off, not walked yet
-    values: dict[str, Any] = Field(default_factory=dict)
-    pages: list[WorkflowFormPage] = Field(default_factory=list)  # the last walk's pages as core described them
+    status: FormPhase = FormPhase.GATHERING
+    pages: list[WorkflowFormPage] = Field(default_factory=list)
     page_inputs: list[dict[str, Any]] = Field(default_factory=list)
+    draft: dict[str, Any] = Field(default_factory=dict)
+    rejected: list[FormFieldError] = Field(default_factory=list)
+    page_labels: list[dict[str, Any]] = Field(default_factory=list)  # per accepted page: field -> label
 
     @field_serializer("pages")
     def _pages_by_alias(self, pages: list[WorkflowFormPage], info: SerializationInfo) -> list[dict[str, Any]]:
         """Each page by its public keys (``schema``, not ``schema_``), so a persisted session validates back as it was."""
         return [page.model_dump(mode=info.mode, by_alias=True) for page in pages]
-
-    # widget field -> what the person's words resolved to: {"value": <option value>, "label": <its label>}
-    resolved: dict[str, dict[str, Any]] = Field(default_factory=dict)
-    # widget fields that waited for another value (``later``) at the last stop: asked once they have options
-    waiting: list[str] = Field(default_factory=list)
-    # accept fields: "<page>:<name>" -> the fingerprint of what the consent was given for (see the skill)
-    consents: dict[str, str] = Field(default_factory=dict)
-    asked: list[str] = Field(default_factory=list)  # fields of optional-only pages already asked once
-    interpreted: dict[str, str] = Field(default_factory=dict)  # field -> the person's words already interpreted
-    pending: dict[str, Any] | None = None  # the stop the transport sent as a pause, to map the response back
-    # The pending stop answered a response rather than a message: a parent runtime that pauses once per call
-    # has not shown it yet, and its next message asks for it again.
-    unseen: bool = False
 
 
 class SearchState(BaseModel):
@@ -172,6 +99,4 @@ class SearchState(BaseModel):
     message_history: list[dict[str, Any]] = Field(default_factory=list)
     owner: str | None = None  # the subject of the person the thread belongs to, on a route that binds threads (AG-UI)
     form_fill: FormFillSession | None = None
-    form_reply: Reply | None = Field(default=None, exclude=True)  # the form-fill reply of this turn; never persisted
-    form_input: FormInput | None = Field(default=None, exclude=True)  # the human's response carried by this turn
-    hitl: bool = Field(default=False, exclude=True)  # this turn's caller can show a pause (a form needs it)
+    hitl: bool = Field(default=False, exclude=True)  # this turn's caller can show an approval (a start needs one)

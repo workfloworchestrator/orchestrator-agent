@@ -17,14 +17,13 @@ Uses the ``a2a-sdk`` 1.x server primitives (``AgentExecutor``, ``DefaultRequestH
 factories). The executor drives the plain capabilities-based agent (each run with an MCP session of its
 own to core) and collects artifact results + final text.
 
-The endpoint serves A2A 1.0 and, through the SDK's compatibility layer, A2A 0.3: a 0.3 caller gets
-everything but workflow forms, which need the HITL extension.
+The endpoint serves A2A 1.0 and, through the SDK's compatibility layer, A2A 0.3.
 
-The workflow form-fill skill runs inside the agent as a capability and is answered by a human in the
-loop: for a caller that activated kagent's HITL extension, a stop of the skill goes out as an
-``input-required`` pause on the task with the questions (or the start to approve) as its payload, and
-the human's response comes back as a message carrying the matching payload. No form is opened for any
-other caller.
+The workflow form-fill skill runs inside the agent as a capability: the model fills a form's pages in
+the conversation. Its start needs a person's approval, which a caller that activated kagent's HITL
+extension is shown (``kagent``, the one A2A client supported for it): the run stops on ``start_workflow``, the task pauses in
+``input-required`` with the start to approve, and the response on that task is the decision. Any other
+caller can have a form prepared, not started.
 
 ``A2A_SKILLS`` is static A2A protocol metadata (the agent's advertised skills) and is
 unrelated to pydantic-ai capabilities — it just describes what the agent can do.
@@ -34,7 +33,6 @@ from __future__ import annotations
 
 import json
 import uuid
-from collections.abc import Sequence
 from typing import TYPE_CHECKING, Any
 
 import structlog
@@ -50,22 +48,24 @@ from fastapi import FastAPI
 from google.protobuf import json_format
 from pydantic_ai.messages import ToolReturnPart
 
-from orchestrator_agent.adapters.a2a.kagent import HITL_EXTENSION_DESCRIPTION, HITL_EXTENSION_URI, KagentHitl
-from orchestrator_agent.adapters.hitl import HumanInTheLoop
+from orchestrator_agent.adapters.a2a.kagent import (
+    HITL_EXTENSION_DESCRIPTION,
+    HITL_EXTENSION_URI,
+    activated,
+    decision,
+    request,
+)
 from orchestrator_agent.capabilities.spec import skills_from_specs
+from orchestrator_agent.form_fill.start import question
 from orchestrator_agent.persistence import PostgresStatePersistence
-from orchestrator_agent.state import FormInput
-from orchestrator_agent.turn import NO_RESULTS, ConversationLocks, OnArtifact, run_turn
+from orchestrator_agent.state import SearchState
+from orchestrator_agent.turn import NO_RESULTS, ConversationLocks, OnArtifact, run_turn, settle, waiting_start
 
 if TYPE_CHECKING:
     from orchestrator_agent.agent import WFOAgent
 
 logger = structlog.get_logger(__name__)
 
-
-# A client's way of showing a stop, over this protocol: its request in, and out the metadata of the
-# ``input-required`` message that pauses the task (the stop's payload, under its extension's URI).
-A2AHitl = HumanInTheLoop[RequestContext, dict[str, Any]]
 
 # kagent stamps the chat conversation a call belongs to on every hop (root: the user-facing chat; parent:
 # the agent calling us). Its remote-agent tool's own A2A context is not that conversation: by default it
@@ -75,14 +75,13 @@ _LINEAGE_HEADERS = ("x-kagent-root-context-id", "x-kagent-parent-context-id")
 # Card-level tool description a consuming agent reads. The output-handling note covers only the
 # artifact-bearing replies (a result with a pre-rendered table/chart), not every tool call.
 AGENT_CARD_DESCRIPTION = (
-    "Answers questions about orchestration data and starts workflows by walking the user through their "
-    "input forms: ask for one (what, and for which subscription or product). A form is filled by a person "
-    "through human-in-the-loop pauses (kagent's HITL extension): the task pauses with the questions of a "
-    "form page, and at the end with the start to approve; nothing is started without that approval, and a "
-    "caller that does not activate the extension cannot start a workflow. When a paused call returns "
-    "before the form is finished, call again to show the next step. When a reply includes a pre-rendered "
-    "Markdown table or Mermaid chart, relay that block to the user verbatim, without reformatting or "
-    "summarising it."
+    "Answers questions about orchestration data and starts workflows by filling their input forms in "
+    "conversation: say what to start, for which subscription or product, and relay the user's answers to "
+    "what it asks. A start needs a person's approval: a caller that activates kagent's HITL extension gets "
+    "the start to approve as an input-required pause, and answers it on the same task; without the extension "
+    "a form is prepared, not started. "
+    "When a reply includes a pre-rendered Markdown table or Mermaid chart, relay that block to the user "
+    "verbatim, without reformatting or summarising it."
 )
 
 
@@ -95,16 +94,12 @@ class WFOAgentExecutor(AgentExecutor):
     Consumes the pydantic-ai event stream and publishes A2A events (status updates, artifacts) via the
     ``TaskUpdater`` helper, one turn at a time per context.
 
-    The workflow form-fill skill runs inside the agent as a capability. The executor's part is the
-    transport around it — the human-in-the-loop transport of the client that is calling (``adapters.hitl``;
-    kagent's extension in ``kagent``, by default the only one): before the run, the conversation's open form and the
-    human's response carried by the message go on the run state; after the run, a stop of the skill is
-    delivered as an ``input-required`` pause on the task, and anything else as completed text.
+    The workflow form-fill skill runs inside the agent as a capability; the approval of a start is an
+    ``input-required`` pause for a caller that activated kagent's HITL extension (``kagent``).
     """
 
-    def __init__(self, agent: "WFOAgent", transports: Sequence[A2AHitl] | None = None) -> None:
+    def __init__(self, agent: "WFOAgent") -> None:
         self.agent = agent
-        self.transports: Sequence[A2AHitl] = (KagentHitl(),) if transports is None else transports
         self._locks = ConversationLocks()
 
     @staticmethod
@@ -137,24 +132,26 @@ class WFOAgentExecutor(AgentExecutor):
 
         user_input = context.get_user_input()
         auth_token = self._parse_auth_token(context.message)
-        # The transport of the client that is calling: it asked for native pauses (a form needs them).
-        transport = next((t for t in self.transports if t.shows_stops(context)), None)
-
         from orchestrator.core.db import db
 
         try:
             run_id = uuid.uuid4()
             logger.debug("A2A execute: starting", task_id=task_id, user_input=user_input[:100] if user_input else "")
 
-            # The conversation's memory and open form. A form being filled spans turns: it is what the
-            # skill continues, with the human's response to its stop when this message carries one.
+            # The conversation's memory and open form: a form being filled spans turns.
             persistence = PostgresStatePersistence(thread_id=conversation, run_id=run_id, session=db.session)
             prior_state = await persistence.load_state()
-            session = prior_state.form_fill if prior_state is not None else None
-            response = transport.read(session, context) if transport is not None else None
-            if isinstance(response, dict):  # the transport answers this message itself
-                await self._send(updater, NO_RESULTS, response)
-                return
+            hitl = activated(context)
+            # A start that waits for approval goes on with the person's decision, and with nothing else.
+            decided = None
+            if prior_state is not None and (waiting := waiting_start(prior_state)) is not None:
+                # From a caller that cannot answer the pause, a message declines the start for now.
+                words = "" if hitl else (user_input or "").strip()
+                decided = settle(prior_state, waiting[0], decision(waiting[0], context), words)
+                if decided is None:
+                    # No decision: the start is shown again (kagent shows one pause per call of this agent).
+                    await self._send(updater, prior_state, "")
+                    return
 
             state, final_output = await run_turn(
                 self.agent,
@@ -164,23 +161,15 @@ class WFOAgentExecutor(AgentExecutor):
                 agent_type="a2a",
                 prior_state=prior_state,
                 user_input=user_input,
-                hitl=transport is not None,
-                form_input=response if isinstance(response, FormInput) else None,
+                hitl=hitl,
                 auth_token=auth_token,
                 on_artifact=self._publisher(updater),
+                approval=decided,
             )
-
-            reply = state.form_reply
-            stop = None
-            if reply is not None:
-                # The skill's reply, in place of the model's prose and rendered blocks — as a pause when
-                # it is a stop (recorded on the session, so before the snapshot).
-                final_output = transport.words(reply) if transport is not None else reply.text
-                stop = transport.pause(reply, state.form_fill, context) if transport is not None else None
 
             await persistence.snapshot(state)
             db.session.commit()
-            await self._send(updater, final_output or NO_RESULTS, stop)
+            await self._send(updater, state, final_output or NO_RESULTS)
 
         except Exception:
             db.session.rollback()
@@ -188,13 +177,16 @@ class WFOAgentExecutor(AgentExecutor):
             await updater.failed(message=updater.new_agent_message(parts=[new_text_part("Task execution failed")]))
 
     @staticmethod
-    async def _send(updater: TaskUpdater, text: str, stop: dict[str, Any] | None) -> None:
-        """The turn's answer: completed text, or — as a stop — an ``input-required`` pause carrying its payload."""
-        message = updater.new_agent_message(parts=[new_text_part(text)], metadata=stop)
-        if stop is None:
-            await updater.complete(message=message)
+    async def _send(updater: TaskUpdater, state: SearchState, text: str) -> None:
+        """The turn's answer: completed text, or, when a start waits, an ``input-required`` pause that shows it."""
+        waiting = waiting_start(state)
+        if waiting is None:
+            await updater.complete(message=updater.new_agent_message(parts=[new_text_part(text)]))
             return
-        message.extensions.extend(stop)  # a payload sits under the URI of the extension that defines it
+        call, stop = waiting
+        metadata: dict[str, Any] = request(call, stop)
+        message = updater.new_agent_message(parts=[new_text_part(question(stop))], metadata=metadata)
+        message.extensions.extend(metadata)  # a payload sits under the URI of the extension that defines it
         await updater.requires_input(message)
 
     @staticmethod

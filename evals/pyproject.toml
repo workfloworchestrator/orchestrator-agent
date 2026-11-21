@@ -16,6 +16,8 @@ dependencies = [
 
 [tool.uv.sources]
 orchestrator-agent = { path = "..", editable = true }
+# TEMPORARY, as in ../pyproject.toml: remove on the release of orchestrator-core 5.7.0a4.
+orchestrator-core = { url = "https://github.com/workfloworchestrator/orchestrator-core/archive/079668314b7a8d92e0eb97b62cffde3bad93714c.tar.gz" }
 
 [tool.setuptools]
 py-modules = []

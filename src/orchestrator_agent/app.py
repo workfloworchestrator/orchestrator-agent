@@ -25,8 +25,8 @@ from orchestrator_agent.adapters import A2AAdapter, ChatCompletionsAdapter, MCPA
 from orchestrator_agent.adapters.ag_ui.contract import openapi_with_the_agui_contract
 from orchestrator_agent.agent import build_agent
 from orchestrator_agent.api.api import api_router
+from orchestrator_agent.core_api import CoreApi, api_base
 from orchestrator_agent.form_fill import build_form_fill_skill
-from orchestrator_agent.form_fill.widgets import CoreApi
 from orchestrator_agent.mcp_client import build_core_toolset, verify_tool_contract
 from orchestrator_agent.observability import configure_langfuse, shutdown_langfuse
 from orchestrator_agent.security import AuthMiddleware, create_auth_manager
@@ -48,19 +48,17 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
 
     a2a_url = f"{agent_settings.BASE_URL}/"
     model = agent_settings.create_model()
-    form_fill = build_form_fill_skill(model)
+    form_fill = build_form_fill_skill()
     model_settings = agent_settings.create_model_settings()
     a2a = A2AAdapter(build_agent(model, form_fill=form_fill, model_settings=model_settings), url=a2a_url)
     a2a.add_routes(app)
-    # The same agent as an OpenAI-compatible chat model (LibreChat): forms through its ask-user tool.
+    # The same agent as an OpenAI-compatible chat model (LibreChat): a form's approval through its ask-user tool.
     ChatCompletionsAdapter(a2a.agent).add_routes(app)
-    # And behind the AG-UI route (the chat popup): forms through AG-UI interrupts.
+    # And behind the AG-UI route (the chat popup): a form's approval through an AG-UI interrupt.
     app.state.agent = a2a.agent
-    # The chats API searches a form field's options with the skill's widgets, as the person asking, and serves
-    # a chat's export by passing on the CSV file it fetches from core's API the same way.
-    app.state.form_fill = form_fill
-    app.state.core_toolset = core_toolset
-    app.state.core_api = form_fill.fetch
+    # The chats API serves a chat's export by passing on the CSV file it fetches from core's API, as the person
+    # asking.
+    app.state.core_api = CoreApi(api_base(agent_settings.WFO_CORE_MCP_URL, agent_settings.WFO_CORE_API_URL))
 
     mcp_app = MCPApp(build_agent(agent_settings.create_model(), model_settings=model_settings))
     app.mount("/mcp", mcp_app.app)
@@ -70,8 +68,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     stack = AsyncExitStack()
     await stack.__aenter__()
     await stack.enter_async_context(mcp_app)
-    if isinstance(form_fill.fetch, CoreApi):
-        stack.push_async_callback(form_fill.fetch.aclose)
+    stack.push_async_callback(app.state.core_api.aclose)
 
     logger.info(
         "Agent adapters started",
@@ -81,7 +78,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
         mcp_path="/mcp",
         agent_model=agent_settings.AGENT_MODEL,
         model_settings=sorted(agent_settings.AGENT_MODEL_SETTINGS),  # the keys only: headers can be secret
-        form_fill_skill="literal",
+        form_fill_skill="hybrid",
     )
 
     yield

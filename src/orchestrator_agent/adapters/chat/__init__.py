@@ -11,28 +11,12 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""The agent as an OpenAI-compatible chat model, and the clients that can show a person a workflow form over it.
+"""The agent as an OpenAI-compatible chat model.
 
-``completions`` is the endpoint (``/v1/chat/completions``), ``request`` the request as it is read;
-``librechat`` is LibreChat as the client — its ask-user tool, the one way a form is shown over chat
-completions today. Another chat client's way of asking a person is a module next to it, added to the
-adapter's transports.
+``completions`` is the endpoint (``/v1/chat/completions``), ``request`` the request as it is read.
 """
 
-from orchestrator_agent.adapters.chat.completions import (
-    CLIENT_HEADER,
-    CONVERSATION_HEADER,
-    ChatCompletionsAdapter,
-    ChatHitl,
-)
-from orchestrator_agent.adapters.chat.librechat import LibreChatHitl
+from orchestrator_agent.adapters.chat.completions import CONVERSATION_HEADER, ChatCompletionsAdapter
 from orchestrator_agent.adapters.chat.request import ChatRequest
 
-__all__ = [
-    "CLIENT_HEADER",
-    "CONVERSATION_HEADER",
-    "ChatCompletionsAdapter",
-    "ChatHitl",
-    "ChatRequest",
-    "LibreChatHitl",
-]
+__all__ = ["CONVERSATION_HEADER", "ChatCompletionsAdapter", "ChatRequest"]

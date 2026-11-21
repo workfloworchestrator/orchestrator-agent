@@ -15,8 +15,10 @@ Every plugin is also advertised as a skill in the A2A agent card, unless it sets
 | [export](#export) | `export_query` | Prepared export; downloadable through the AG-UI chats API |
 | [workflow](#workflow) | `list_workflows`, `start_workflow_form` | A form to fill in, then a started process |
 
-`start_workflow_form` is a local handoff tool supplied by the form-fill capability. The other tools in this table
-come from Orchestrator Core. The skill itself calls Core's form and workflow-start tools after the handoff.
+`start_workflow_form` is a local tool supplied by the form-fill capability: it opens a form. While a form is open the
+capability adds the page tools (`submit_page`, `search_options`, `restart_from_page`, `cancel_form`) and, once the
+form is complete, `start_workflow`. The other tools in this table come from Orchestrator Core. The skill itself calls
+Core's form and workflow-start tools.
 
 The agent also uses `discover_filter_paths` and `get_valid_operators` before it filters or groups. These belong to no
 plugin and are always available.
@@ -60,8 +62,8 @@ Example: *Export the last search results as CSV.*
 ## workflow
 
 Hands off a workflow start, whether it creates, modifies or terminates something, or runs a task. The agent lists the
-workflows, picks the right one and hands over to the form-fill skill, which asks the user the questions of the form
-and asks for approval before it starts the process. The agent never starts a workflow on chat text alone. See
+workflows, picks the right one and opens its form. It then fills the form with the user through the form-fill skill,
+which asks for approval before it starts the process. The agent never starts a workflow on chat text alone. See
 [Start workflows from chat](https://workfloworchestrator.org/learn/orchestrator-agent/use-cases/workflows-from-chat/).
 
 Example: *Start the terminate workflow for subscription abc123.*

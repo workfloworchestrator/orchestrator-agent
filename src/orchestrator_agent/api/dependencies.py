@@ -31,7 +31,7 @@ def get_agent(request: Request) -> WFOAgent:
 
         model = agent_settings.create_model()
         agent = build_agent(
-            model, form_fill=build_form_fill_skill(model), model_settings=agent_settings.create_model_settings()
+            model, form_fill=build_form_fill_skill(), model_settings=agent_settings.create_model_settings()
         )
         request.app.state.agent = agent
     return agent

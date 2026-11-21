@@ -5,9 +5,14 @@ set -eu
 cd /home/orchestrator
 export PATH="/home/orchestrator/.venv/bin:$PATH"
 
-# The image ships orchestrator-core without the [mcp] extra; install it for the
-# exact version the image carries so the MCP server can mount.
-if ! python -c "import fastmcp" 2>/dev/null; then
+# CORE_REF (docker-compose.yml) replaces the image's release by core at that commit. Otherwise: the image ships
+# orchestrator-core without the [mcp] extra; install it for the exact version the image carries so the MCP
+# server can mount.
+if [ -n "${CORE_REF:-}" ]; then
+    echo "= install orchestrator-core[mcp] at commit ${CORE_REF}"
+    uv pip install --python /home/orchestrator/.venv \
+        "orchestrator-core[mcp] @ https://github.com/workfloworchestrator/orchestrator-core/archive/${CORE_REF}.tar.gz"
+elif ! python -c "import fastmcp" 2>/dev/null; then
     core_version=$(python -c "from importlib.metadata import version; print(version('orchestrator-core'))")
     echo "= install orchestrator-core[mcp]==${core_version}"
     uv pip install --python /home/orchestrator/.venv "orchestrator-core[mcp]==${core_version}"

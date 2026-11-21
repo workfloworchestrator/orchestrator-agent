@@ -16,8 +16,8 @@
 The agent keeps a thread as the model's memory (pydantic-ai messages). A client that reopens the thread
 needs it as AG-UI messages, the shape it renders from the stream: pydantic-ai's adapter converts them, and
 two things are put the way the stream put them. A tool result that carried an artifact is the artifact's
-reference again, not the raw payload the model saw; and the form-fill skill's replies, one JSON object
-each, are the words the person read.
+reference again, not the raw payload the model saw; and every form the thread filled has its activity
+message, naming the tool calls that are its own (``activity``).
 """
 
 from __future__ import annotations
@@ -26,24 +26,30 @@ import dataclasses
 from datetime import datetime
 from typing import Any
 
-from ag_ui.core import Message
+from ag_ui.core import ActivityMessage, Message
 from pydantic import BaseModel, TypeAdapter, ValidationError
 from pydantic_ai.messages import (
     ModelMessage,
     ModelRequest,
     ModelRequestPart,
     ModelResponse,
-    TextPart,
     ToolReturnPart,
     UserPromptPart,
 )
 from pydantic_ai.ui.ag_ui import AGUIAdapter
 
+from orchestrator_agent.adapters.ag_ui.activity import (
+    FORM_ACTIVITY,
+    closed_form,
+    form_activity,
+    form_calls,
+    form_groups,
+)
 from orchestrator_agent.adapters.ag_ui.contract import carried
-from orchestrator_agent.adapters.words import shown
+from orchestrator_agent.adapters.ag_ui.interrupts import pending_interrupt
 from orchestrator_agent.artifacts import DataArtifact, ExportArtifact, QueryArtifact
 from orchestrator_agent.persistence import load_messages
-from orchestrator_agent.state import Reply, SearchState
+from orchestrator_agent.state import FormPhase, SearchState
 
 UNTITLED = "New chat"
 TITLE_LENGTH = 80
@@ -83,28 +89,34 @@ def title_of(state: SearchState) -> str:
 
 def transcript(state: SearchState, *, last: int | None = None) -> list[Message]:
     """The thread's messages as AG-UI messages, the last ``last`` of them (all when None)."""
-    messages = [_for_the_person(message) for message in load_messages(state.message_history) or []]
-    agui = AGUIAdapter.dump_messages(messages)
-    return agui[-last:] if last else agui
+    history = load_messages(state.message_history) or []
+    agui: list[Message] = AGUIAdapter.dump_messages([_for_the_person(message) for message in history])
+    return [*(agui[-last:] if last else agui), *_forms(state, history)]
+
+
+def _forms(state: SearchState, history: list[ModelMessage]) -> list[ActivityMessage]:
+    """An activity message for every form the thread filled: the open one as it stands, the others as closed."""
+    groups = form_groups(form_calls(history))
+    session = state.form_fill if state.form_fill is not None and state.form_fill.status != FormPhase.DONE else None
+    forms = [(calls[0].tool_call_id, closed_form(calls)) for calls in groups]
+    if session is not None:
+        forms = [*forms[:-1], (session.id, form_activity(session, groups[-1] if groups else []))]
+    return [
+        ActivityMessage(id=id_, role="activity", activity_type=FORM_ACTIVITY, content=form.model_dump(mode="json"))
+        for id_, form in forms
+    ]
 
 
 def pending_stop(state: SearchState) -> dict[str, Any] | None:
-    """The form stop the thread waits on, as the client was shown it; None when no form is open."""
-    session = state.form_fill
-    if session is None or session.status == "done" or not session.pending:
-        return None
-    shown_as = session.pending.get("shown")
-    return dict(shown_as) if isinstance(shown_as, dict) else None
+    """The approval the thread waits on, as the client was shown it; None when it waits on none."""
+    interrupt = pending_interrupt(state, load_messages(state.message_history) or [])
+    return None if interrupt is None else interrupt.model_dump(mode="json", by_alias=True, exclude_none=True)
 
 
 def _for_the_person(message: ModelMessage) -> ModelMessage:
-    """The message as the stream showed it: artifact references for tool results, words for the skill's replies."""
+    """The message as the stream showed it: artifact references for tool results."""
     if isinstance(message, ModelResponse):
-        said = [
-            dataclasses.replace(part, content=shown(Reply(part.content))) if isinstance(part, TextPart) else part
-            for part in message.parts
-        ]
-        return dataclasses.replace(message, parts=said)
+        return message
     asked = [_reference(part) if isinstance(part, ToolReturnPart) else part for part in _the_persons(message)]
     return dataclasses.replace(message, parts=asked)
 

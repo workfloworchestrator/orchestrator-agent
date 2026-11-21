@@ -19,12 +19,10 @@ request: the latest user message is the turn's input, the conversation's memory 
 from the state persisted under the ``X-Conversation-Id`` header (LibreChat sends its conversation id
 there when the endpoint is configured to), and the answer is one assistant message.
 
-The workflow form-fill skill is answered by a person through the calling client's own way of asking
-them: a human-in-the-loop transport (``adapters.hitl.HumanInTheLoop``), picked per request as the one
-whose client is calling — LibreChat, through its ask-user tool (``librechat``). A stop of the skill goes out as what makes that client
-show it, and the response it sends back is the skill's input. A request no transport claims is a caller
-that cannot show a stop: no form is opened. A form turn runs no model, so nothing between the person's
-click and the skill is a model's reading.
+A workflow form is filled by the model in the conversation. Its start needs a person's approval, which
+is shown through LibreChat's ask-user tool (``librechat``, the one chat client supported for it): the run
+stops on ``start_workflow``, the reply calls the tool, and the next request's tool message is the decision.
+A chat that does not offer that tool can have a form prepared, not started.
 
 The reply is computed before the response starts, so a streamed response is the finished message in a few
 chunks; the client shows it at once. The request is read with ``request``'s models; what goes back
@@ -35,7 +33,7 @@ from __future__ import annotations
 
 import time
 import uuid
-from collections.abc import Iterator, Mapping
+from collections.abc import Iterator
 from typing import TYPE_CHECKING, Annotated, Literal
 
 import structlog
@@ -53,12 +51,10 @@ from openai.types.chat.chat_completion_chunk import ChoiceDelta, ChoiceDeltaTool
 from openai.types.shared import ErrorObject
 from starlette.responses import JSONResponse, Response, StreamingResponse
 
-from orchestrator_agent.adapters.chat.librechat import CLIENT, LibreChatHitl
+from orchestrator_agent.adapters.chat.librechat import card, decision, offers_ask_tool
 from orchestrator_agent.adapters.chat.request import CHAT_MODEL, ChatRequest
-from orchestrator_agent.adapters.hitl import HumanInTheLoop
 from orchestrator_agent.persistence import PostgresStatePersistence
-from orchestrator_agent.state import FormInput
-from orchestrator_agent.turn import NO_RESULTS, ConversationLocks, run_turn
+from orchestrator_agent.turn import NO_RESULTS, ConversationLocks, run_turn, settle, waiting_start
 
 if TYPE_CHECKING:
     from orchestrator_agent.agent import WFOAgent
@@ -66,32 +62,19 @@ if TYPE_CHECKING:
 logger = structlog.get_logger(__name__)
 
 CONVERSATION_HEADER = "x-conversation-id"
-# A chat client says who it is in a header its endpoint is configured to send (LibreChat: ``headers:`` of
-# the custom endpoint in librechat.yaml). On its own it only sends the user agent of its HTTP library.
-CLIENT_HEADER = "x-agent-client"
-FORM_RESPONSE = "[form response]"  # the input of a turn that is the person's response to a stop
-NOT_OPEN = "That form is no longer open. Ask again to start it."
-
-# A client's way of showing a stop, over this protocol: the request in, an assistant message out.
-ChatHitl = HumanInTheLoop[ChatRequest, ChatCompletionMessage]
-
 _bearer = HTTPBearer(auto_error=False)
 
 
 class ChatCompletionsAdapter:
     """Serves the agent as an OpenAI-compatible chat model and adds its routes to a FastAPI app.
 
-    ``transports`` are the clients a form can be shown through, by the name each gives itself in the
-    ``X-Agent-Client`` header: the transport of the client that is calling is used.
-
     Usage::
 
         ChatCompletionsAdapter(agent).add_routes(app)
     """
 
-    def __init__(self, agent: "WFOAgent", transports: Mapping[str, ChatHitl] | None = None) -> None:
+    def __init__(self, agent: "WFOAgent") -> None:
         self.agent = agent
-        self.transports: Mapping[str, ChatHitl] = {CLIENT: LibreChatHitl()} if transports is None else transports
         self._locks = ConversationLocks()
 
     def add_routes(self, app: FastAPI) -> None:
@@ -107,14 +90,12 @@ class ChatCompletionsAdapter:
         self,
         body: ChatRequest,
         conversation: Annotated[str | None, Header(alias=CONVERSATION_HEADER)] = None,
-        client: Annotated[str | None, Header(alias=CLIENT_HEADER)] = None,
         credentials: Annotated[HTTPAuthorizationCredentials | None, Depends(_bearer)] = None,
     ) -> Response:
         try:
             message = await self.complete(
                 body,
                 conversation=conversation,
-                client=client,
                 auth_token=credentials.credentials if credentials else None,
             )
         except Exception:
@@ -127,44 +108,32 @@ class ChatCompletionsAdapter:
         return Response(completion.model_dump_json(exclude_unset=True), media_type="application/json")
 
     async def complete(
-        self, body: ChatRequest, *, conversation: str | None, client: str | None = None, auth_token: str | None = None
+        self, body: ChatRequest, *, conversation: str | None, auth_token: str | None = None
     ) -> ChatCompletionMessage:
         """One turn of a conversation, as the assistant message that answers it.
 
-        Without a conversation id the request is a conversation of its own. ``client`` is who the caller
-        says it is (the ``X-Agent-Client`` header): it picks the transport a form is shown through.
+        Without a conversation id the request is a conversation of its own.
         """
         thread = conversation or uuid.uuid4().hex
         async with self._locks.turn(thread):
-            return await self._complete(body, thread, client, auth_token)
+            return await self._complete(body, thread, auth_token)
 
-    async def _complete(
-        self, body: ChatRequest, thread: str, client: str | None, auth_token: str | None
-    ) -> ChatCompletionMessage:
+    async def _complete(self, body: ChatRequest, thread: str, auth_token: str | None) -> ChatCompletionMessage:
         from orchestrator.core.db import db
 
-        # The transport of the client that is calling, when this chat can show a person a stop (a form
-        # needs one).
-        transport = self.transports.get((client or "").strip().lower())
-        if transport is not None and not transport.shows_stops(body):
-            transport = None
         run_id = uuid.uuid4()
         try:
             persistence = PostgresStatePersistence(thread_id=thread, run_id=run_id, session=db.session)
             prior_state = await persistence.load_state()
-            session = prior_state.form_fill if prior_state is not None else None
-
             user_input = body.user_text
-            form_input: FormInput | None = None
-            if body.answers_a_call:
-                # The person answered a stop. The transport reads the answer as the skill's input for this
-                # turn — or answers the request itself, while its client is not done showing the stop.
-                response = transport.read(session, body) if transport is not None else None
-                if isinstance(response, ChatCompletionMessage):
-                    return response
-                if response is None:
-                    return _says(NOT_OPEN)
-                user_input, form_input = FORM_RESPONSE, response
+            # A start that waits for approval goes on with the person's decision, and with nothing else.
+            decided = None
+            if prior_state is not None and (waiting := waiting_start(prior_state)) is not None:
+                # A message instead of an answer to the card declines the start for now, with the person's words.
+                words = "" if body.answers_a_call else user_input.strip()
+                decided = settle(prior_state, waiting[0], decision(waiting[0], body), words)
+                if decided is None:
+                    return card(*waiting)  # no decision: the card again
 
             state, output = await run_turn(
                 self.agent,
@@ -174,17 +143,12 @@ class ChatCompletionsAdapter:
                 agent_type="chat",
                 prior_state=prior_state,
                 user_input=user_input,
-                hitl=transport is not None,
-                form_input=form_input,
+                hitl=offers_ask_tool(body),
                 auth_token=auth_token,
+                approval=decided,
             )
-            # The model's text, or the form-fill skill's reply: as what makes the client show it when it is
-            # a stop (recorded on the session, so before the snapshot), in the client's wording otherwise.
-            message = _says(output or NO_RESULTS)
-            if (reply := state.form_reply) is not None:
-                stop = transport.pause(reply, state.form_fill, body) if transport is not None else None
-                text = transport.words(reply) if transport is not None else reply.text
-                message = stop if stop is not None else _says(text)
+            stopped = waiting_start(state)
+            message = card(*stopped) if stopped is not None else _says(output or NO_RESULTS)
             await persistence.snapshot(state)
             db.session.commit()
             return message
@@ -240,4 +204,4 @@ def _chunks(model: str, message: ChatCompletionMessage) -> Iterator[str]:
     yield "data: [DONE]\n\n"
 
 
-__all__ = ["CLIENT_HEADER", "CONVERSATION_HEADER", "ChatCompletionsAdapter", "ChatHitl"]
+__all__ = ["CONVERSATION_HEADER", "ChatCompletionsAdapter"]

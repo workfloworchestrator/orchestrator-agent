@@ -27,8 +27,8 @@ That structure is what makes traces useful for an agent:
   model can take a different route and use a different number of calls or tokens.
 - **Latency.** A run that loops through the same tool, or reads large results, shows up as a long trace, and the
   timings show whether the time went to the model or to a tool.
-- **What the model did.** A trace records instrumented tool use. Workflow forms also call Core directly from Python,
-  outside the model's tool-call loop, so model/tool spans alone are not a complete audit of form validation or
+- **What the model did.** A trace records instrumented tool use. The form tools are in it, but the calls they make to
+  Core from Python are not, so model/tool spans alone are not a complete audit of form validation or
   workflow starts. Core's recorded identity depends on the token used, see
   [Authentication and authorization](auth.md#outbound-who-the-agent-acts-as).
 

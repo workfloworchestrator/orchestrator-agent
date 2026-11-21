@@ -25,11 +25,11 @@ another port. The source launch explicitly loads `.env` with `uv run --env-file 
 
 | Path | Protocol | Description |
 | --- | --- | --- |
-| `POST /agui/` | AG-UI | SSE streaming, stored conversation history and workflow forms through interrupts; supports the [chat popup](#chat-popup-ag-ui); `/agui` redirects here |
-| `/chats/` | REST | AG-UI chat history, pending forms, option searches and export downloads; see [Endpoints and protocols](docs/reference/endpoints.md#chats-api) |
+| `POST /agui/` | AG-UI | SSE streaming, stored conversation history and a workflow start's approval through an interrupt; supports the [chat popup](#chat-popup-ag-ui); `/agui` redirects here |
+| `/chats/` | REST | AG-UI chat history, the approval a chat waits on and export downloads; see [Endpoints and protocols](docs/reference/endpoints.md#chats-api) |
 | `POST /` | A2A | Agent-to-agent JSON-RPC, protocol v1.0 (`SendMessage`, `SendStreamingMessage`) |
 | `GET /.well-known/agent-card.json` | A2A | Agent card discovery |
-| `POST /v1/chat/completions` | OpenAI chat completions | The agent as a chat model for LibreChat; workflow forms through its ask-user tool |
+| `POST /v1/chat/completions` | OpenAI chat completions | The agent as a chat model for LibreChat; a workflow start's approval through LibreChat's ask-user tool |
 | `GET /v1/models` | OpenAI | Lists the one model id (`wfo`) |
 | `/mcp` | MCP | Model Context Protocol tools |
 | `GET /health/` | REST | Database health check; `/health` redirects here |
@@ -84,26 +84,27 @@ one origin. With OAuth2 on, the popup's `token` prop is the bearer the agent for
 
 **The contract.** The popup's types come from this agent's OpenAPI document, which also names what travels
 inside AG-UI messages (`adapters/ag_ui/contract.py`): the artifact reference a tool result carries with its
-chart data, the metadata of a form stop and the answers that resolve it. The popup checks in a copy of the
+chart data, the metadata of a workflow's approval and the answer that resolves it. The popup checks in a copy of the
 document; when a route or one of those models changes here, refresh it there (`npm run contract:pull`
 against a running agent, or write it from this checkout with
 `uv run python -m orchestrator_agent.adapters.ag_ui.contract <path>`).
 
-**Workflow forms in the popup.** A form is filled the same deterministic way as through kagent and LibreChat
-(see [Workflow form-fill](#workflow-form-fill-a2a-human-in-the-loop)): the skill walks core's pages, and the
-popup shows each stop as a card — a page's questions with their choices as chips (or a text box), then the
-start to approve with the values the workflow gets — and sends the person's answer back. The transport is
-AG-UI's own interrupt lifecycle (`adapters/ag_ui/interrupts.py`): a stop ends the run with an interrupt
-outcome, the card is that interrupt, and the next run carries its resume entry. No model reads the answer.
-Typing a message while a card is open cancels the form first, then sends the message.
+**Workflow forms in the popup.** A form is filled in the conversation, by the model, with no component per
+field (see [Workflow form-fill](#workflow-form-fill-the-model-fills-a-person-approves)). The popup shows the
+form's tool calls as one group, from the `workflow_form` activity message the agent sends, and one card: the
+start to approve with the values the workflow gets. The transport is AG-UI's own interrupt lifecycle: the
+model's `start_workflow` call ends the run with an interrupt outcome, the card is that interrupt, and the next
+run carries its resume entry (`adapters/ag_ui/interrupts.py`). The card offers Approve, Reject and "Talk about
+this"; while it is open the message box is blocked, and the agent refuses a run for that thread without the
+decision (409).
 
 **Chats live on the agent.** The popup sends one message per run; the agent replays the thread's earlier
 turns from its own store (core's `graph_snapshots`, where the other routes keep their memory too) and records
 the run's messages. A small API next to the route serves them back: `GET /chats/` lists the person's chats,
 newest first; `GET /chats/{thread_id}?last=50` gives one with its last messages as AG-UI messages and the form
-stop it waits on; `DELETE /chats/{thread_id}` forgets it; `GET /chats/{thread_id}/exports/{query_id}` serves an
-export the chat prepared as a CSV file, as the person asking. The popup opens on that list (a chat whose form
-waits is marked), and opening one loads its history and shows a pending form card again. A thread belongs to the subject of the bearer that
+approval it waits on; `DELETE /chats/{thread_id}` forgets it; `GET /chats/{thread_id}/exports/{query_id}` serves an
+export the chat prepared as a CSV file, as the person asking. The popup opens on that list (a chat whose
+approval waits is marked), and opening one loads its history and shows a pending approval again. A thread belongs to the subject of the bearer that
 created it: only that subject continues, reads or deletes it, and a thread written by another route (kagent,
 LibreChat) is never served here. The other routes are unchanged: they keep trusting the conversation id their
 client forwards. With OAuth2 off there is no subject, every thread is unowned and every caller sees them — a
@@ -115,8 +116,7 @@ development setting.
 | --- | --- | --- |
 | `DATABASE_URI` | *(required)* | PostgreSQL connection URI for the WFO database |
 | `WFO_CORE_MCP_URL` | `http://localhost:8080/mcp` | URL of orchestrator-core's MCP server (serves the domain tools the agent calls) |
-| `WFO_CORE_API_URL` | *(derived)* | Base URL for relative form-option URLs and Core export downloads; when unset, uses the origin of `WFO_CORE_MCP_URL` |
-| `WFO_OPTIONS_HOSTS` | `[]` | JSON list of additional hosts allowed for form-option HTTP requests, including a port when present. These destinations receive the run's bearer token or fallback service token |
+| `WFO_CORE_API_URL` | *(derived)* | Base URL of core's REST API, where a chat's export file is fetched from. Unset: the origin of `WFO_CORE_MCP_URL` |
 | `BASE_URL` | `http://localhost:8080` | Public URL of this agent service |
 | `AGENT_MODEL` | `openai:gpt-4o` | LLM model in `provider:model` format |
 | `AGENT_API_BASE` | *(none)* | Custom base URL for the LLM provider (OpenAI-compatible) or Azure endpoint |
@@ -207,7 +207,7 @@ in `capabilities/behavior/`. See [Plugins](#plugins).
 
 The cross-cutting guards cover deferred-tool visibility, discovery before filtering/grouping and history trimming.
 On A2A, chat completions and AG-UI, `WriteToolGate` also hides Core's three workflow mutations so the
-[form-fill skill](#workflow-form-fill-a2a-human-in-the-loop) controls starts. This gate is absent from the agent's MCP interface.
+[form-fill skill](#workflow-form-fill-the-model-fills-a-person-approves) controls starts. This gate is absent from the agent's MCP interface.
 
 Search tables and grouped charts are rendered in code. A2A and chat completions append them to the answer; AG-UI
 carries rendered blocks and optional `ChartData` in artifact metadata, so a frontend can draw its own charts,
@@ -288,187 +288,81 @@ guessing). pydantic-ai's defer alone hides only instructions, not toolset tools 
 that gap, keying on the same `tools:` ownership. All built-ins are `false` (always-on). The seam
 exists for when the capability set grows large enough that on-demand loading is worth the routing.
 
-### Workflow form-fill (A2A, human in the loop)
+### Workflow form-fill (the model fills, a person approves)
 
-Starting a workflow is **not done by the model**, and never on the strength of chat text. It is a
-deterministic skill (`form_fill/`) that runs inside the agent as a pydantic-ai capability and is answered
-by a person through native pauses — kagent's human-in-the-loop extension over A2A, LibreChat's ask-user tool,
-or AG-UI interrupts. Every stop carries the questions of a form page, or the start to approve;
-only the person's structured response to it continues the form. A caller that cannot show a pause
-gets no form (the handoff tool says so and the model relays it). The skill:
+Starting a workflow is a conversation with a hard edge. The model fills the workflow's input form with the
+person, page by page; the form's state, its option lists and the start itself are code (`form_fill/`), and
+nothing starts without a person's structured approval. The approval is pydantic-ai's own tool approval, which
+AG-UI carries as an interrupt (the chat popup). No client needs a component per form field: the questions are
+the model's own words. Chat completions carries it through LibreChat's ask-user tool, and A2A through kagent's
+human-in-the-loop extension. A caller that can show neither can have a form prepared, not started.
 
-1. **Routes** — deciding *that* a request starts a workflow and *which* one is a judgment call, so the
-   model makes it: it reads `list_workflows` and hands off with the `start_workflow_form(workflow_key)`
-   tool (any key of core's catalogue, tasks included). That is all the model does — on the request that
-   follows, the skill walks the first pages and its first stop ends the run in place of the model's
-   text. The subscription id the model passes fills the form's first page; a subscription core will not
-   run the workflow on is rejected by core's own subscription page, and that rejection is a question
-   like any other.
-2. **Walks the form from page 0** with core's `get_workflow_form`, using the answers so far; a required
-   choice with a single option (a single-product workflow's product page) is taken, each walk anew.
-   Pages are dynamic (later pages depend on earlier answers), so the walk re-runs from page 0 every
-   turn: a changed answer just changes what core generates next.
-3. **Stops** for unanswered fields, consent, unresolved option choices or a page core rejected.
-   Core's rejected fields carry its messages; other stops can happen before a page is submitted.
-   Questions show the field's title, whether it is required, and its options as chips shown by their
-   labels (a boolean is two chips; a list field takes several). A picked chip travels as the value
-   behind it; an unanswered question sends nothing, so the form's default applies. A page of optional
-   fields nobody has touched is asked once. Consent (pydantic-forms' `Accept`) is only ever the person's
-   explicit `ACCEPTED` for the page asking it, and it is void once what it was given for changes. A
-   refusal that is not core's verdict on the page's values (a passing failure in core) leaves the form
-   open: the page is asked again with what core said.
-4. **Confirms** — at `complete: true` the stop is an approval of the `create_workflow` call, shown as it
-   will be made (`workflow_key`, `json_data`: exactly the validated pages) plus `labels` saying what its
-   ids stand for. Approve starts; reject cancels. A form that ends in the workflow's own summary page
-   (core's summary form) has its tables on the reply as `summary`. LibreChat's approval always shows the
-   values as they will be sent — that is what is approved — and adds those tables under them: what the
-   workflow's author wants confirmed, before and after for a modify.
-5. **Starts** — `create_workflow` from code with exactly the last walk's validated pages. The approved branch
-   makes one attempt; concurrent requests are not deduplicated across workers. Only core's own validation errors on the pages reopen the form (the rejected
-   fields are asked again); any other failure leaves it unknown whether the process started, so the
-   form closes.
+1. **Opens** — deciding *that* a request starts a workflow and *which* one is a judgment call, so the model
+   makes it: it reads `list_workflows` and calls `start_workflow_form(workflow_key, subscription_id?)` (any
+   key of core's catalogue, tasks included; a key core does not know is a tool retry). The tool opens the
+   form on core's first page. A subscription id the model passes is submitted by code where the first page
+   asks for one, so core's verdict on it is the first thing the model reads. One form is open at a time.
+2. **Fills** — while a form is open the model has the page tools, built per model request from the form's
+   state (`form_fill/tools.py`): `submit_page`, whose parameters are the current page's JSON Schema as core
+   wrote it (less the frontend's hints, the fields that are only shown, and consent), `search_options` for a
+   long list, `restart_from_page` to change an accepted page, and `cancel_form`. It reads what the person
+   said into the page, asks in plain words for what is missing, and fixes what core rejected. Its
+   instructions are rendered per request (`form_fill/instructions.py`): the rules, the pages accepted with
+   their values, the current page and core's last verdict.
+3. **Core judges** — the pages core accepted are exactly what `create_workflow` is called with, and core's
+   validation is the only validation. A short option list is in the tool's schema (`enum`, with `options` as
+   labels). A long one is found with `search_options`, which asks core's `get_workflow_form_options`; core
+   rejects a submitted value that is not among the field's options, so the model cannot invent an id. What a
+   page fills by itself is filled by code: consent (pydantic-forms' `Accept`: the approval at the end is the
+   person's consent, before anything is written) and a required choice with one option.
+4. **Asks for approval** — when core says the form is complete the model calls `start_workflow`, which takes
+   no arguments. Unapproved, the call stops the run (`ApprovalRequired`) with what the person is shown: the
+   `create_workflow` call as it will be made (`workflow_key`, `json_data`: exactly the accepted pages) plus
+   `labels` saying what its ids stand for, rendered by code. The model never writes what the person approves.
+5. **The person decides.** Approve starts. Reject closes the form, in code. A rejection with words ("Talk
+   about this" in the popup) leaves the form open: the words come back as the result of the `start_workflow`
+   call, the model acts on them (`restart_from_page` and the corrected page, or an answer) and calls
+   `start_workflow` again.
+6. **Starts** — `create_workflow` from code, once per approval, and only inside an approved `start_workflow`
+   call. Only core's own verdict on the pages reopens the form (the page it rejects is current again, with
+   its words); any other failure leaves it unknown whether the process started, so the form closes.
 
-Internally, the skill's reply text is one JSON object (`FormReply`: `status` gathering / confirming / started /
-cancelled / failed, core's `rejected` errors as they came, the `values` so far with their `labels`, the
-`defaults` that apply, the `process_id`, or the `reason`). A2A passes this to the calling agent. LibreChat and
-AG-UI render it as Markdown for the person through `adapters/words.py`, alongside their structured form stops.
+**What the model can and cannot do.** Inside a page the model is in the loop, so its quality matters there:
+it may misread a sentence or pick between two options it should have asked about, and the approval is where
+the person sees it. What it cannot do is structural: it has no write tool, `start_workflow` does nothing
+before the person approved, core refuses a value that is not among a field's options, the model does not
+write the approval, and typed words are never a start.
 
-**No chat text is read.** Not by this code and not by a model: a message that carries no response to
-the pending stop means the stop went unanswered (the person rejected it, or moved on), so the form is
-over and the message goes to the model like any other. Typing "yes" is not an approval. There is one
-exception, forced by how a parent runtime works: kagent pauses once per tool call, so the stop that
-answers a response is not shown until the parent calls again; such a stop is marked `unseen`, and the
-parent's next message (kagent's parent is told to call again with `continue`) shows it instead of ending
-the form. Corrections after the fact are not offered: reject, and start the form again.
+**A page as core describes it.** Core's form tool (`get_workflow_form`) describes each page as one JSON
+Schema (`schema`): every reference inlined, so a choice or a nested model is read in place; `readOnly` on a
+field that is only shown; a choice's values in `enum` with their labels in `options`; the limits a list is
+validated against; consent as `format: "accept"`; each field's label and help text in `title` and
+`description`. A field whose options live elsewhere (`optionsSource`, pydantic-forms ≥ 2.10) is read by core:
+a short list arrives as a choice, a long one keeps its `optionsSource` and is searched with core's
+`get_workflow_form_options`, and core labels the accepted values for the approval. Asked for a verdict
+(`verdict="result"`), a rejected page comes back as a result with core's errors. `form_fill/model.py` reads
+the schema into one `FieldSpec` per field and `form_fill/pages.py` makes of it what the model's tool takes
+and what the approval shows. No model is rebuilt from the schema. Core's tool results are validated with
+core's own response models and its tool arguments are built from core's request models (the agent depends on
+orchestrator-core), so nothing here reads a tool error's text.
 
-Core validates every submitted page. What a person *types* for an ordinary field (a number in words, an option described, a structured
-field such as a contact) is words, not a value: core rejects it, and it is then interpreted once, a page
-at a time, into the fields' values — one run of the agent's model whose output schema is the page schema
-with every field optional (`form_fill/interpret.py`) — and core decides again. Words that fit more than
-one option of a field are not a value: the model is asked for every option the words fit, and the field
-is filled only when that is exactly one — otherwise the person is asked again. The person sees the result
-before anything starts, at the approval. The interpreter is one protocol attribute of the skill, so
-another engine drops in behind the same protocol.
-
-**One JSON Schema per page.** Core returns a self-contained page schema, with references inlined,
-`readOnly` markers, choice values and labels, defaults and descriptions. `form_fill/model.py` reads it into
-`FieldSpec` records for the questions and approval labels. The interpreter uses an optional-field variant of
-the schema through pydantic-ai's `StructuredDict`; it does not rebuild a Pydantic model. The session persists
-the walked schemas and answers. Core's tool results are validated with Core's response models. The skill asks
-for `verdict="result"`, so rejected pages arrive as structured results carrying Core's validation errors.
-
-**Form-option sources.** Fields with `optionsSource` have their options fetched over HTTP before the page is
-read. The source declares its URL, value/label mapping, search parameter and any dependencies on other page
-values. Up to ten options are shown as choices; longer lists are typed or searched. Typed answers for fields
-whose options were fetched are resolved before submission to Core: an
-exact match supplies the option value; otherwise a model chooses the matching candidates. Ambiguous or
-unmatched words are asked again. Dependent sources wait for their inputs, and a failed source leaves the field
-typed for Core to validate. Relative sources use `WFO_CORE_API_URL`, or Core's MCP origin when unset;
-absolute sources must use that base's host and port or an entry in `WFO_OPTIONS_HOSTS`. These calls use the
-same bearer-token selection as MCP.
-
-The write-tool gate hides Core's three known workflow mutations where the form-fill skill runs: A2A,
-chat completions and AG-UI. The MCP agent has neither that gate nor the workflow plugin, so its model can call
-Core's write tools directly. The gate matches tool names, not `readOnlyHint` annotations, and custom tools are not
-given an approval step automatically. AG-UI frontend tools are also passed to its underlying adapter. See
-[Read tools and write tools](docs/reference/runtime.md#read-tools-and-write-tools).
-
-On A2A, chat completions and AG-UI, built-in workflow starts go through the separate form skill after a matching approval
-response.
-The calling client must obtain that approval from a person. Conversation and query persistence
-still write to the database. Routing in front of the model and prefilling pages from the
-conversation with a typed decision engine (Jev) live on a separate branch; a handed-off key core does not
-know is a tool retry, so the model corrects itself.
+In the agent the skill runs in (A2A, chat completions and AG-UI share one agent) the model never sees
+core's write tools (`WriteToolGate` hides `create_workflow` / `resume_workflow_process` /
+`abort_workflow_process`), so a workflow is only ever started by this skill; the MCP agent runs without the
+skill, so it gets neither the gate nor the `workflow` plugin, and its model can call core's write tools
+directly.
 
 **A2A protocol version.** The A2A endpoint speaks protocol v1.0 (a2a-sdk 1.x, protobuf types:
 `SendMessage`, `SendStreamingMessage`; the agent card is at `/.well-known/agent-card.json`; a v1 client
 sends `A2A-Version: 1.0`). Callers that have not moved yet are still served: the card also advertises a
 0.3 interface and the SDK's compatibility layer accepts `message/send` / `message/stream`
-(`enable_v0_3_compat`), as the A2A project recommends for a staged migration. A 0.3 caller gets
-everything but workflow forms, which need the extension below. Drop the flag and the 0.3 interface once
+(`enable_v0_3_compat`), as the A2A project recommends for a staged migration. Drop the flag and the 0.3 interface once
 no caller needs them.
-
-**kagent human-in-the-loop.** kagent ≥ 1.0.0-alpha1 uses another agent as a tool through its remote A2A
-tool and activates the extension `https://kagent.dev/extensions/hitl/v1` (`A2A-Extensions` header). A
-stop of the skill is then an `input-required` task whose status message carries, under that URI in its
-metadata, an `ask_user_request` (the questions) or a `tool_approval_request` (the start); the person's
-response comes back as a message on the same task with the matching `ask_user_response` /
-`tool_approval_response`. The wire shapes mirror kagent's `go/api/a2a/hitl.go` (`adapters/a2a/kagent.py`;
-kagent's own Python models need a package that is not published), and the same module maps a
-response onto the skill's input and a stop onto the pause. Through a kagent parent the questions and the
-approval are relayed to the person and their response is forwarded by the runtime, not by the parent's
-model. A rejection that reaches this agent cancels the form. kagent's Go runtime does not forward one
-today (its ADK ends the parent's tool call before the tool can pass it on), which is why an unanswered
-stop also ends the form. One thing is asked of the parent's instruction: when a call to this agent returns while
-the form is not finished, call it again (with `continue`) so the next prompt is shown.
 
 **Which conversation a call belongs to.** Memory and the open form are keyed on the chat a parent agent
 forwards with every call (`x-kagent-root-context-id`, else `x-kagent-parent-context-id`), and on the A2A
 `contextId` only when there is none. kagent's remote-agent tool does not give each chat its own context:
 by default one context serves every chat that tool handles, and with session isolation each call gets a
 new one. Keyed on the context alone, one chat could continue or end another chat's form.
-
-**LibreChat directly (chat completions).** LibreChat has no A2A client, but from v0.8.8 it has an
-ask-user tool, and that is a second human-in-the-loop transport for the same skill. LibreChat calls
-`POST /v1/chat/completions` on this agent as a custom endpoint (`adapters/chat/completions.py`). The
-adapter knows the caller can show a stop from the `X-Agent-Client: librechat` header, which the endpoint
-is configured to send (LibreChat does not identify itself on its own), together with the chat offering a
-tool at all: a chat on a model spec with `askUserQuestion: true` carries one, `ask_user_question`, and a
-chat without the spec carries none and cannot show a card. The tool's name is not what is checked. A stop
-of the skill then goes out as a call of that tool: LibreChat shows the questions as a card (options as buttons, a text
-box), pauses its run, and sends the answers back as the tool message of the next request, a picked option
-as its value verbatim. `adapters/chat/librechat.py` maps both ways. No model sits between the click and
-the skill: LibreChat has none of its own on this path, and a form turn skips this agent's model as on
-A2A. What the tool does not take is handled in the adapter:
-
-- four questions a call: a page with more fields is shown as several cards, one after the other;
-- twelve options a question, with one slot reserved for "Keep default" on optional fields: a field with more
-  is asked as free text, its options listed. Ordinary fields go to Core and, if rejected, to the interpreter;
-  sourced-option fields resolve the words against their fetched options before submission;
-- every question must be answered: an optional field gets a "Keep default" option;
-- the card always takes typed text: an option's value is a token only that stop knows, so typing
-  "Approve" approves nothing and the approval is shown again;
-- "Skip" keeps the defaults of optional fields and cancels the form when a required field (or the
-  approval) is skipped.
-
-A chat message sent instead of an answer ends the form, as on A2A; a chat without the model spec gets no
-tool and so no form, and neither does a caller that does not send the header. Memory and the open form are keyed on the `X-Conversation-Id` header, and the
-`Authorization` bearer token is forwarded to core. The LibreChat side (a complete file is in
-[`examples/librechat.yaml`](examples/librechat.yaml)):
-
-```yaml
-endpoints:
-  custom:
-    - name: 'WFO agent'
-      apiKey: 'unused'            # the Authorization header below takes precedence
-      baseURL: 'http://orchestrator-agent:8080/v1'
-      models: { default: ['wfo'], fetch: false }
-      titleConvo: false           # otherwise LibreChat asks this agent for a chat title first
-      headers:
-        X-Conversation-Id: '{{LIBRECHAT_BODY_CONVERSATIONID}}'
-        X-Agent-Client: 'librechat' # required: only a caller that says it is LibreChat gets a form
-        Authorization: 'Bearer {{LIBRECHAT_OPENID_ACCESS_TOKEN}}'
-modelSpecs:
-  list:
-    - name: 'wfo'
-      label: 'WFO'
-      askUserQuestion: true       # offers the ask-user tool: without it no form is opened
-      preset: { endpoint: 'WFO agent', model: 'wfo' }
-```
-
-A pending card survives a browser reload; it survives a LibreChat restart only when LibreChat runs with
-Redis (`USE_REDIS=true`).
-
-**AG-UI forms and chats.** A client whose `protocolVersion` supports interrupts can show the same skill's
-questions and approval. A stop ends the run with an interrupt outcome; the next run answers it with a matching
-resume entry. The agent replays stored history for the `threadId` and ignores client-supplied state. AG-UI and
-its `/chats/` API check the authenticated subject against the thread owner and refuse threads from other
-protocols. With authentication off, threads are unowned and shared. A2A and chat completions still trust their
-clients to isolate conversation identifiers. See [Endpoints and protocols](docs/reference/endpoints.md#ag-ui).
-
-The interrupts use reason `ask_user` for a page's questions or `tool_call` for the `create_workflow` call to
-approve. A matching resume entry supplies selected choice positions or typed answers, or an `approved` JSON
-boolean for the start. A cancelled entry cancels the form. `adapters/ag_ui/interrupts.py` maps these inputs
-and streams the skill's reply in the person's words through `adapters/words.py`.
 
 The **A2A adapter** uses [a2a-sdk](https://github.com/a2aproject/a2a-python) server primitives (`AgentExecutor`, `DefaultRequestHandler`, and the route factories). The SDK handles JSON-RPC routing, SSE streaming, task lifecycle, and agent card serving. The adapter implements a single `WFOAgentExecutor.execute()` method that drives the pydantic-ai event stream and publishes A2A events via `TaskUpdater`. The `AgentCard.skills` list is projected from the advertised capability specs (`skills_from_specs`), keeping the advertised skills in sync with the configured capabilities.

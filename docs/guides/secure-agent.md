@@ -81,8 +81,8 @@ For client details, see [Connect LibreChat](librechat.md), [Use the agent with M
 5. Restrict direct access to the agent to trusted clients. Have A2A and chat-completions clients generate and isolate
    their conversation identifiers; those adapters do not check user ownership. AG-UI and its chats API check the
    authenticated subject against the stored owner. With authentication off, its threads are unowned and shared.
-6. Configure `WFO_CORE_API_URL` only when form options need a different base URL from Core's MCP origin. Add a host
-   to `WFO_OPTIONS_HOSTS` only if it may receive the user's or service account's bearer token. See
+6. Configure `WFO_CORE_API_URL` only when export downloads need a different base URL from Core's MCP origin. That
+   destination receives the user's or service account's bearer token. See
    [Configuration](../reference/configuration.md#connection).
 
 Restart the source process with `uv run --env-file .env uvicorn orchestrator_agent.app:app --host 127.0.0.1 --port 8080`,
@@ -95,8 +95,8 @@ or recreate your container so it receives the updated environment. For limits an
   A2A agent card stay open for monitoring and discovery.
 - Call it with a valid token. A 403 with a decision id means OPA denied the request. A 503 can mean OPA could not be
   reached, `OPA_URL` is unset, or OIDC discovery returned a non-200 response; check the service logs to distinguish them.
-- Use a user-token request to query Core and confirm its recorded identity. Through a configured LibreChat or A2A
-  client, complete and approve a workflow form and confirm the start was attributed to that user.
+- Use a user-token request to query Core and confirm its recorded identity. Through an AG-UI
+  frontend, complete and approve a workflow form and confirm the start was attributed to that user.
 - For an MCP request, confirm Core sees the intended service account.
 
 ## Reference

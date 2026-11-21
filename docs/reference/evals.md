@@ -49,6 +49,7 @@ Run from `evals/` after completing the [guide setup](../guides/evals.md#1-prepar
 | `uv run python run_eval.py --fail-under 0.7` | Exit non-zero when the aggregate is below the floor |
 | `uv run python run_eval.py --baseline baseline_report.json` | Fail when a case regresses against the committed baseline |
 | `uv run python run_eval.py --save-report baseline_report.json` | Save a report; review it before accepting it as a baseline |
+| `uv run python run_eval.py --summary-file <path>` | Append the result table and any gate failure to a file as Markdown |
 
 ## Reports
 
@@ -75,7 +76,8 @@ Without gates, failed assertions and low scores do not cause a non-zero exit. Ca
 `--fail-under`, the runner averages the per-score averages together with the assertion pass rate (when present).
 This aggregate is not a task-success percentage, and the floor does not require every assertion to pass.
 
-The report metadata records the model entry, its model settings and the host of its API endpoint. Only settings that
+The report metadata records the model entry, its model settings and the name of the variable that holds its endpoint,
+never the URL itself. Only settings that
 cannot carry a credential are recorded with their values (`temperature`, `top_p`, `max_tokens`, `thinking`, `seed`,
 `timeout`, `parallel_tool_calls`); any other key, such as `extra_headers`, is listed by name only, because saved reports
 can be committed as baselines. It does not record the Core image, the domain context or the git revision; note those
@@ -83,22 +85,26 @@ yourself next to a saved report.
 
 ## Settings
 
-Real environment variables override `evals/.env`. The harness reads `OPENAI_API_KEY` and `ANTHROPIC_API_KEY` for the
-`openai:` and `anthropic:` entries of `eval-models.json`, plus `WFO_CORE_MCP_URL`, `OAUTH2_ACTIVE` and `DATASET_FILE`.
-An entry whose provider has no key shows `no key` in the summary and is skipped.
+Real environment variables override `evals/.env`. The harness reads `WFO_CORE_MCP_URL`, `OAUTH2_ACTIVE` and
+`DATASET_FILE`, plus the variables the entries of `eval-models.json` name.
 
-An `agent:<model>` entry evaluates an open-weight or self-hosted model behind an OpenAI-compatible endpoint, such as a
-LiteLLM proxy, the way the server would run it. Export `AGENT_API_BASE` and `AGENT_API_KEY` (both are required) and,
-optionally, `AGENT_MODEL_SETTINGS` in the shell; the harness does not read them from its `.env`. The model in the
-entry name replaces `AGENT_MODEL`, so one environment can evaluate several models:
+Each entry of `eval-models.json` is one model:
 
-```shell
-AGENT_API_BASE=https://llms.example.org/v1 AGENT_API_KEY=... \
-AGENT_MODEL_SETTINGS='{"temperature": 0.6, "top_p": 0.95}' \
-  uv run python run_eval.py --models agent:Qwen3.8-27B-FP8 --repeat 5
+| Field | Meaning |
+|---|---|
+| `model` | `provider:model`, or the bare model name on an OpenAI-compatible endpoint |
+| `api_key` | Name of the variable that holds the key. The file is committed, so never the key itself |
+| `api_base` | Optional. Name of the variable that holds the endpoint's URL; without it the provider's own URL is used |
+| `settings` | Optional. Model settings sent with every request to this model, in the form of `AGENT_MODEL_SETTINGS` |
+
+```json
+{"model": "Qwen3.8-27B-FP8", "api_key": "LLMS_API_KEY", "api_base": "LLMS_API_BASE",
+ "settings": {"temperature": 0.6, "top_p": 0.95}}
 ```
 
-Runs go through the agent's own `AGENT_MODEL_SETTINGS`, so what is measured is what the server would send.
+An entry with an unset variable shows `no key` in the summary and is skipped. An entry with `api_base` evaluates an
+open-weight or self-hosted model behind an OpenAI-compatible endpoint, such as a LiteLLM proxy. Every model except an
+`anthropic:` one is built by the agent's own settings, so what is measured is what the server would send.
 Baselines are per model: with `--save-report baseline_report.json` the model is in the file name.
 
 ## Baseline
@@ -114,8 +120,9 @@ The comparator does not check model or configuration identity. The
 
 ## CI
 
-`.github/workflows/eval.yml` runs the benchmark on demand, nightly and on pull requests labelled `eval`. It starts
-`evals/docker-compose.yml`, runs `run_eval.py --repeat 5 --baseline baseline_report.json --fail-under 0.7`, and gates on
-the committed baselines and the floor. Each entry of `eval-models.json` runs when its provider key is set: the
-`OPENAI_API_KEY` and `ANTHROPIC_API_KEY` repository secrets. The `agent:` entry is skipped unless `AGENT_API_BASE` and
-`AGENT_API_KEY` are also provided to the job, and it is not compared to a baseline until one is committed.
+`.github/workflows/eval.yml` runs the benchmark on demand and on pull requests labelled `eval`. It reads
+`eval-models.json` and starts one job per entry. Each job starts `evals/docker-compose.yml`, runs
+`run_eval.py --models <entry> --repeat 5 --baseline baseline_report.json --fail-under 0.7`, and gates on the committed
+baseline and the floor. Its result table and any gate failure are on the run's summary page. A job gets only the repository secrets its entry names and is skipped with a notice when one of
+them is not set, so adding a model needs no change to the workflow. An entry is not compared to a baseline until one is
+committed.

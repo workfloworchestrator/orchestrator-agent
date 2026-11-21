@@ -58,8 +58,8 @@ read-only. Conversation persistence and stored search results also write to Post
 
 !!! danger "Write tools without approval"
     Where the write tools are not hidden, the model can change your inventory without the approval of a person. This
-    holds for the agent `/mcp`, and for your own agent or MCP client when you connect it to Core. Use A2A,
-    LibreChat or an interrupt-capable AG-UI client for the built-in approval flow, or have the calling client obtain
+    holds for the agent `/mcp`, and for your own agent or MCP client when you connect it to Core. Use an
+    interrupt-capable AG-UI client for the built-in approval flow, or have the calling client obtain
     confirmation. The tools carry hints for this: `abort_workflow_process` is marked destructive,
     and none of the three is marked read-only.
 
@@ -95,39 +95,47 @@ do not deliver Core's standard export URL after the plugin strips it from the mo
 
 ## Workflow forms
 
-The model selects a workflow through the workflow plugin. A form-fill skill then handles the form and approval:
+The model selects a workflow through the workflow plugin and fills its form with the person. Code keeps the form's
+state, and a workflow starts only after a person approved the start:
 
-1. **Route.** The model decides that a request starts a workflow and which one, from the list of workflows, and hands
-   over with the key of the workflow.
-2. **Walk the form.** The skill fetches the form page by page from Orchestrator Core, using the answers so far. Pages
-   are dynamic, so the walk starts again from the first page every turn.
-3. **Ask.** The skill asks about missing answers or fields Core rejected. It can also stop before submission for
-   consent, optional fields or unresolved option choices. Questions carry the available choices and Core's errors
-   where present. Consent fields require an explicit answer from the person.
-4. **Confirm.** When the form is complete, the person approves the exact call that will be made. Approve starts the
-   workflow and reject cancels it.
-5. **Start.** The approved branch makes one start attempt with exactly the validated pages. Core validation errors
-   reopen the form; other failures close it because the outcome may be unknown. This is not an exactly-once
-   execution guarantee across concurrent requests or workers; see [Conversation persistence](#conversation-persistence).
+1. **Open.** The model decides that a request starts a workflow and which one, from the list of workflows, and calls
+   `start_workflow_form` with the key of the workflow, plus a subscription id for a workflow on an existing
+   subscription. One form is open at a time.
+2. **Fill.** While a form is open the model has the page tools. `submit_page` takes the current page's fields as its
+   parameters, from the JSON Schema Orchestrator Core gives for that page. `search_options` finds the options of a
+   field with a long list. `restart_from_page` reopens an accepted page, and drops the pages after it because they
+   may change. `cancel_form` ends the form. The model asks the person in its own words for what is missing.
+3. **Validate.** Core judges every submitted page. A rejected page comes back with Core's errors, for the model to
+   fix or to ask about. The agent validates nothing itself. Consent fields and a required choice with one option
+   are filled by code: the person's consent is the approval at the end.
+4. **Approve.** When Core has accepted every page, the model calls `start_workflow`. The call stops the run and the
+   person is shown the start to approve: the workflow, the values of the accepted pages and the labels of the ids
+   among them.
+5. **Start.** After approval, code calls Core's `create_workflow` once, with exactly the accepted pages. If Core
+   rejects a page at that point, that page is open again. Any other failure closes the form, because the outcome
+   may be unknown. This is not an exactly-once execution guarantee across concurrent requests or workers; see
+   [Conversation persistence](#conversation-persistence).
 
-No chat text is read as an answer: a person who types *yes* has not approved anything. The questions and the approval
-travel through kagent's human-in-the-loop extension over A2A, LibreChat's ask-user tool, or AG-UI interrupts.
-For ordinary fields, Core rejects invalid text before the agent interprets it into a value for Core to validate
-again. Fields with `optionsSource` instead fetch their choices over HTTP and resolve typed words against those
-choices before submission. Ambiguous or unmatched words are re-asked. Core validates every submitted page.
+A person who does not approve can reject, which closes the form, or write what they want changed. Those words go to
+the model as the result of the `start_workflow` call: it corrects the form or answers the question, and asks for
+approval again. Chat text is never an approval: a person who types *yes* has not approved anything.
 
-Core supplies each page as a self-contained JSON Schema with structured validation verdicts. The agent reads it
-into `FieldSpec` records for questions and labels. Its interpreter uses an optional-field variant of that schema
-through pydantic-ai's `StructuredDict`, rather than generating a Pydantic model per page. Form-option requests use
-the same outbound token selection as MCP; their permitted destinations are configured by
-[`WFO_CORE_API_URL` and `WFO_OPTIONS_HOSTS`](configuration.md#connection).
+AG-UI carries the approval as an [interrupt](endpoints.md#workflow-interrupts). `/v1` carries it through
+LibreChat's ask-user tool, when the chat offers it; see
+[OpenAI chat completions](endpoints.md#openai-chat-completions). A2A carries it through kagent's human-in-the-loop
+extension, when the caller activates it; see [A2A](endpoints.md#workflow-approval-over-a2a). For any other caller a
+form can be filled and validated, but `start_workflow` then only reports that the form is prepared and nothing
+starts.
+
+Core supplies each page as a self-contained JSON Schema with structured validation verdicts. A field whose options
+come from elsewhere (`optionsSource`) is read by Core: a short list arrives as choices in the schema, a long one is
+searched with Core's `get_workflow_form_options`, and Core rejects a value that is not among the options. The agent
+makes no option requests of its own.
 
 Approval is a structured response matching the pending request. The agent trusts its calling client to obtain
 that response from a person; the protocol response itself does not prove human interaction.
 
-The MCP endpoint runs without this skill, workflow plugin or write tool gate. A client that cannot show native
-pauses on A2A, `/v1` or AG-UI gets no form, but those interfaces still hide the three workflow mutations.
-The skill's internal reply text is JSON; LibreChat and AG-UI render it as Markdown alongside their structured stops.
+The MCP endpoint runs without this skill, workflow plugin or write tool gate.
 
 ## Conversation persistence
 
@@ -155,8 +163,8 @@ A2A and chat adapters serialize turns with in-memory locks within their process.
 lock: clients should serialize requests for each thread. Database persistence does not provide cross-process
 locking or workflow-start deduplication for concurrent workers or replicas.
 
-The [chats API](endpoints.md#chats-api) lists, reads and deletes AG-UI threads, searches pending form options and
-proxies exports prepared in that chat. Chat deletion removes the thread's snapshots and run records, so the
+The [chats API](endpoints.md#chats-api) lists, reads and deletes AG-UI threads and proxies exports prepared in
+that chat. Chat deletion removes the thread's snapshots and run records, so the
 database role needs `DELETE` on `graph_snapshots` and `agent_runs` as well as the permissions used for persistence.
 
 See [Configuration](configuration.md) for the database connection setting and

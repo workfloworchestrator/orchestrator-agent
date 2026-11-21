@@ -15,18 +15,16 @@
 
 Core's ``get_workflow_form`` describes a page as one JSON Schema: every reference inlined, ``readOnly`` on a
 field that is only shown, a choice's values in ``enum`` with their labels in ``options``, consent as
-``format: "accept"``. ``fields_of`` reads that schema into one ``FieldSpec`` per field, which every stop of
-the skill works from. ``form_schema`` is the walked pages' askable fields as one schema again, the page as
-core defined it: what the interpreter hands its model as the output type. No pydantic model is rebuilt from
-the schema anywhere; core's validation is the only validation.
+``format: "accept"``. ``fields_of`` reads that schema into one ``FieldSpec`` per field, which the page tools,
+the instructions and the approval work from (``pages``). No pydantic model is rebuilt from the schema
+anywhere; core's validation is the only validation.
 """
 
 from __future__ import annotations
 
 import json
-from collections.abc import Mapping, Sequence
+from collections.abc import Mapping
 from functools import lru_cache
-from itertools import chain
 from typing import Any
 
 from orchestrator.core.schemas.mcp_tools import WorkflowFormPage
@@ -36,8 +34,7 @@ from pydantic import BaseModel, ConfigDict, Field
 ACCEPT = "accept"  # consent, given once per page by picking its one option
 SUMMARY = "summary"  # a table of the workflow's own recap: shown, never filled
 ACCEPTED = "ACCEPTED"  # the one value of an accept field that core's validation passes
-HINTS = ("uniforms", "extraProperties")  # pydantic-forms' widget hints: a widget reads them, a model never does
-WIDGET_MARK = "x-widget"  # what the agent's own widget wrote on a field (``widgets.enrich``): its id, size, step
+HINTS = ("uniforms", "extraProperties")  # pydantic-forms' widget hints: a frontend reads them, a model never does
 
 _TYPES = {"string": "string", "integer": "integer", "number": "number", "boolean": "boolean"}
 _TYPES |= {"array": "list", "object": "object"}
@@ -71,7 +68,6 @@ class FieldSpec(BaseModel):
     fields: list[FieldSpec] | None = None  # of a nested object: its own fields
     read_only: bool = False  # shown, never submitted
     data: Any = None  # of a summary: its table
-    widget: dict[str, Any] | None = None  # what the agent's widget wrote on it, if one did (``widgets.enrich``)
 
 
 # --- the page schema -> its fields ---------------------------------------------------------------------------
@@ -120,13 +116,7 @@ def _spec(name: str, prop: Mapping[str, Any], *, required: bool) -> FieldSpec:
         fields=fields_in(shape) if kind == "object" and shape.get("properties") else None,
         read_only=bool(shape.get("readOnly")),
         data=hints.get("data") if shape.get("format") == SUMMARY else None,
-        widget=shape[WIDGET_MARK] if isinstance(shape.get(WIDGET_MARK), dict) else None,
     )
-
-
-def shape_of(prop: Mapping[str, Any]) -> dict[str, Any]:
-    """The field's shape with a nullable field's ``anyOf`` unwrapped: what a widget is matched on."""
-    return _shape(prop)[0]
 
 
 def _shape(prop: Mapping[str, Any]) -> tuple[dict[str, Any], bool]:
@@ -184,41 +174,16 @@ def label_of(field: FieldSpec, value: Any) -> Any:
     return shown.get(str(value))
 
 
-# --- the walked pages as one schema ---------------------------------------------------------------------------
-
-
-def form_schema(pages: Sequence[WorkflowFormPage]) -> dict[str, Any]:
-    """The askable fields of the walked pages as one object schema (a later page wins a name).
-
-    What a reading of the form works from: the properties as core sent them, less the fields that are only
-    shown and pydantic-forms' widget hints. Nothing is required, since a reading may leave any field out.
-    """
-    properties = dict(chain.from_iterable(_askable_properties(page) for page in pages))
-    return {"type": "object", "properties": properties, "additionalProperties": False}
-
-
-def _askable_properties(page: WorkflowFormPage) -> list[tuple[str, dict[str, Any]]]:
-    properties = (page.schema_ or {}).get("properties") or {}
-    return [
-        (field.name, {key: value for key, value in properties[field.name].items() if key not in (*HINTS, WIDGET_MARK)})
-        for field in fields_of(page)
-        if askable(field)
-    ]
-
-
 __all__ = [
     "ACCEPT",
     "ACCEPTED",
     "HINTS",
     "SUMMARY",
-    "WIDGET_MARK",
     "FieldSpec",
     "Option",
     "askable",
     "fields_in",
     "fields_of",
-    "form_schema",
     "label_of",
     "options_of",
-    "shape_of",
 ]

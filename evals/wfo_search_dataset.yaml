@@ -273,6 +273,71 @@ cases:
       excludes:
       - node rtd003 (terminated)
       - node utr004 (provisioning)
+- name: form-fill-create-node
+  inputs: create a new Cisco node named ams005
+  metadata:
+    failure_modes:
+    - form-fill
+    curation_note: A create request is a workflow start, and it names every required
+      field of the one-page form, so the route is list, open, submit, start with no
+      question in between. Nothing starts; the eval caller cannot approve, so the start
+      call only reports the form as prepared.
+  expected_output: null
+  evaluators:
+  - TrajectoryMatch:
+      expected_trajectory:
+      - list_workflows
+      - start_workflow_form
+      - submit_page
+      - start_workflow
+      order: exact
+  - ArgumentCorrectness:
+      tool_name: submit_page
+      expected_arguments:
+        node_name: ams005
+        vendor: Cisco
+- name: form-fill-unnamed-task
+  inputs: run the product validation
+  metadata:
+    failure_modes:
+    - form-fill
+    - workflow-handoff
+    curation_note: The workflow is a system task, and the request names neither a target
+      nor the word task, so a listing filtered on a guess finds nothing and costs a second
+      listing. The task's one page has nothing to ask; nothing starts, the eval caller
+      cannot approve.
+  expected_output: null
+  evaluators:
+  - TrajectoryMatch:
+    - list_workflows
+    - start_workflow_form
+    - submit_page
+    - start_workflow
+  - ArgumentCorrectness:
+      tool_name: start_workflow_form
+      expected_arguments:
+        workflow_key: task_validate_products
+- name: form-fill-searched-option
+  inputs: create a 10G port for Testaccount
+  metadata:
+    failure_modes:
+    - form-fill
+    curation_note: The customer is one of thirty behind a route that searches and never
+      gives its whole list, so its id is found with the options search before the page
+      is submitted; a name is never submitted as the value.
+  expected_output: null
+  evaluators:
+  - TrajectoryMatch:
+    - list_workflows
+    - start_workflow_form
+    - search_options
+    - submit_page
+    - start_workflow
+  - ArgumentCorrectness:
+      tool_name: submit_page
+      expected_arguments:
+        customer_id: cust-07
+        speed: 10G
 evaluators:
 - MaxToolCalls: 8
 report_evaluators: []

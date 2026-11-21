@@ -56,7 +56,7 @@ message. If OPA decision logging is enabled without masking that input, its logs
 ## Outbound: who the agent acts as
 
 The agent calls the MCP server of Orchestrator Core for searching, reading subscriptions and starting workflows.
-It also makes HTTP requests to fetch form-field options and, on AG-UI, download exports. These use the same
+On AG-UI it also makes HTTP requests to download exports. These use the same
 token selection as the MCP client. Orchestrator Core runs its own authentication and authorization checks on
 the requests it receives. So the question that matters
 most for safety is not "may this user call the agent?" but "whose token does the agent send to Orchestrator Core?".
@@ -89,10 +89,9 @@ service account when that fallback is enabled. On the agent's MCP endpoint the u
 all: the caller is checked inbound, but Core sees the service account, or an unauthenticated request when outbound
 authentication is disabled.
 
-Form-option URLs can point outside Core. Relative URLs use `WFO_CORE_API_URL`, or Core's MCP origin when it is
-unset. Absolute URLs must use that base's host and port or an entry in `WFO_OPTIONS_HOSTS`. An allowed destination
-receives the selected bearer token, so this list also determines where credentials may be sent. See
-[Configuration](../reference/configuration.md#connection).
+Export downloads go to `WFO_CORE_API_URL`, or Core's MCP origin when it is unset, and that destination receives the
+selected bearer token. The options of a form field are read by Core itself, so the agent sends no token anywhere
+else. See [Configuration](../reference/configuration.md#connection).
 
 <a id="why-the-users-token-is-better-than-a-service-account"></a>
 

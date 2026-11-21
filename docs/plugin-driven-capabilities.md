@@ -22,7 +22,7 @@ tools are blocked. The policy trusts the configured Core server and its authors 
 it does not inspect endpoint implementations. Known workflow write tools stay hidden during discovery even if mislabeled.
 Local orchestration tools remain available without MCP annotations. The `workflow` plugin owns the form-fill
 handoff and is only enabled where the form-fill skill runs: `build_capabilities(form_fill=True)`.
-The deterministic form handler can start workflows after structured approval; conversation and query
+The form-fill skill can start workflows after structured approval; conversation and query
 persistence still write operational data.
 
 Trusted Python capabilities may explicitly expose selected local or Core mutations with

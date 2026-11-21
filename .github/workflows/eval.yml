@@ -2,44 +2,90 @@ name: Eval
 
 # Golden-set behavior benchmark (pydantic-evals) of the agent code on this
 # branch, run in-process against a live orchestrator-core MCP server. Each run
-# invokes a real LLM (the provider keys in secrets) so it does not run per-push:
-# manually, nightly, or on PRs labeled 'eval'.
+# invokes a real LLM so it does not run per-push: manually, or on PRs labeled
+# 'eval'.
+#
+# eval-models.json decides what runs: one job per entry, and each job is given
+# only the secrets its entry names. Adding a model is an entry in that file
+# plus the repository secrets it names; this workflow stays as it is.
 on:
   workflow_dispatch:
-  schedule:
-    - cron: '30 3 * * *'
   pull_request:
     types: [labeled, synchronize, reopened]
 
+# The jobs only read the repository; the token can write nothing.
+permissions:
+  contents: read
+
 jobs:
-  eval:
-    name: Golden-set benchmark
+  models:
+    name: Read eval-models.json
     runs-on: ubuntu-latest
     if: >-
       github.event_name != 'pull_request' ||
       contains(github.event.pull_request.labels.*.name, 'eval')
-    env:
-      # A model in eval-models.json runs when its provider's key is set.
-      OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
-      ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+    outputs:
+      entries: ${{ steps.read.outputs.entries }}
+    steps:
+      - uses: actions/checkout@v6
+
+      - id: read
+        run: echo "entries=$(jq -c . eval-models.json)" >> "$GITHUB_OUTPUT"
+
+  eval:
+    name: Golden-set benchmark (${{ matrix.entry.model }})
+    needs: models
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        entry: ${{ fromJSON(needs.models.outputs.entries) }}
 
     steps:
       - uses: actions/checkout@v6
 
+      # Only whether the secrets exist leaves this step, never their values. A
+      # pull request from a fork gets no secrets, so every entry is skipped there.
+      - name: Check that the entry's secrets are set
+        id: secrets
+        env:
+          MODEL: ${{ matrix.entry.model }}
+          READY: >-
+            ${{ secrets[matrix.entry.api_key] != ''
+            && (!matrix.entry.api_base || secrets[matrix.entry.api_base] != '') }}
+        run: |
+          echo "ready=$READY" >> "$GITHUB_OUTPUT"
+          if [ "$READY" != "true" ]; then
+            echo "::notice::$MODEL: skipped, a secret its entry names is not set"
+          fi
+
       - name: Install uv
+        if: steps.secrets.outputs.ready == 'true'
         uses: astral-sh/setup-uv@v7
         with:
           version: "0.10.8"
           python-version: "3.13"
 
       - name: Start backing services (orchestrator-core MCP + seeded database)
+        if: steps.secrets.outputs.ready == 'true'
         run: docker compose -f evals/docker-compose.yml up -d --wait --wait-timeout 300
 
+      # The only step that holds the secrets, exported under the names the entry gives them.
       - name: Run the golden-set benchmark
+        if: steps.secrets.outputs.ready == 'true'
         working-directory: evals
+        env:
+          MODEL: ${{ matrix.entry.model }}
+          KEY_NAME: ${{ matrix.entry.api_key }}
+          KEY_VALUE: ${{ secrets[matrix.entry.api_key] }}
+          BASE_NAME: ${{ matrix.entry.api_base }}
+          BASE_VALUE: ${{ matrix.entry.api_base && secrets[matrix.entry.api_base] || '' }}
         run: |
+          export "$KEY_NAME=$KEY_VALUE"
+          if [ -n "$BASE_NAME" ]; then export "$BASE_NAME=$BASE_VALUE"; fi
           uv sync
-          uv run python run_eval.py --repeat 5 --baseline baseline_report.json --fail-under 0.7
+          uv run python run_eval.py --models "$MODEL" --repeat 5 --baseline baseline_report.json --fail-under 0.7 \
+            --summary-file "$GITHUB_STEP_SUMMARY"
 
       - name: Service logs on failure
         if: failure()

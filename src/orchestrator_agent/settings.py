@@ -35,13 +35,8 @@ class AgentSettings(BaseSettings):
     )
     WFO_CORE_API_URL: str | None = Field(
         default=None,
-        description="Base URL a form field's relative options source (``optionsSource.url``) is fetched from. "
+        description="Base URL of core's REST API, where a chat's export file is fetched from. "
         "Unset: the origin of WFO_CORE_MCP_URL.",
-    )
-    WFO_OPTIONS_HOSTS: list[str] = Field(
-        default_factory=list,
-        description="Hosts besides core's that a form field's absolute options source may be fetched from, "
-        "with the person's token.",
     )
     AGENT_MODEL: str = Field(default="openai:gpt-4o", description="LLM model for the agent")
     AGENT_API_BASE: str | None = Field(

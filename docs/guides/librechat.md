@@ -5,7 +5,7 @@ render_macros: false
 # How to connect LibreChat
 
 This guide shows you how to run [LibreChat](https://www.librechat.ai/) with the Orchestrator Agent as a chat model,
-including workflow forms. It sets up the smallest setup that works: LibreChat and its database, with the agent as the
+including the approval of a workflow start. It sets up the smallest setup that works: LibreChat and its database, with the agent as the
 only model. For file uploads, search, other models and production settings, see the
 [LibreChat documentation](https://www.librechat.ai/docs/local).
 
@@ -73,7 +73,6 @@ endpoints:
       modelDisplayLabel: 'WFO agent'
       headers:
         X-Conversation-Id: '{% raw %}{{LIBRECHAT_BODY_CONVERSATIONID}}{% endraw %}'
-        X-Agent-Client: 'librechat'
         # With OpenID sign-in, forward the signed-in user's token (step 3):
         # Authorization: 'Bearer {% raw %}{{LIBRECHAT_OPENID_ACCESS_TOKEN}}{% endraw %}'
 
@@ -87,8 +86,8 @@ modelSpecs:
         model: 'wfo'
 ```
 
-Use LibreChat 0.8.8 or later: older versions cannot show workflow forms. Keep `X-Agent-Client`, `X-Conversation-Id`,
-`askUserQuestion` and `titleConvo` as shown. For what each key does, see
+Use LibreChat 0.8.8 or later: older versions have no ask-user tool, so they cannot show the approval of a workflow
+start. Keep `X-Conversation-Id`, `askUserQuestion` and `titleConvo` as shown. For what each key does, see
 [Configuration: LibreChat](../reference/configuration.md#librechat), or the commented copy in
 `examples/librechat.yaml` of the agent repository.
 
@@ -167,7 +166,8 @@ answer with a chart. Then ask *Find all active subscriptions* to get a table.
 - **The agent cannot be reached.** Check `baseURL` (step 2) and look for the error in `docker compose logs librechat`.
 - **The agent answers 401.** The `Authorization` header is missing, or the agent does not accept the token. Check
   step 3.
-- **No workflow form opens.** Check the LibreChat version, `askUserQuestion: true` and the `X-Agent-Client` header.
+- **No approval card is shown and the form is only "prepared".** Check the LibreChat version and
+  `askUserQuestion: true`. See [Workflow forms](../reference/runtime.md#workflow-forms).
 
 ## Next steps
 

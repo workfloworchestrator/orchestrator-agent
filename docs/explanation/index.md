@@ -10,7 +10,7 @@ The agent brings these parts together and returns an answer to the person or sys
 flowchart LR
     C[Chat applications, web frontends<br/>and other agents] --> A[Orchestrator Agent]
     A <-->|Interpret requests<br/>and compose answers| L[Language model]
-    A <-->|Tools over MCP<br/>Form options and exports over HTTP| O[Orchestrator Core]
+    A <-->|Tools over MCP<br/>Exports over HTTP| O[Orchestrator Core]
     O --> S[Search and workflows]
     A <-->|Conversation memory| D[(WFO database)]
 ```
@@ -78,10 +78,10 @@ code or what an abbreviation of a product means. Add that knowledge to the syste
 ## The database stores the conversations
 
 The agent also needs a direct connection to the WFO PostgreSQL database. It stores conversation history and state,
-including an open workflow form, so a later message can continue the same conversation. For example, answering the
-next form question requires remembering the workflow and the answers already supplied.
+including an open workflow form, so a later message can continue the same conversation. For example, filling the
+next page of a form requires remembering the workflow and the pages already accepted.
 
-These connections serve different purposes: MCP provides access to WFO operations, HTTP supplies form options and
+These connections serve different purposes: MCP provides access to WFO operations, HTTP supplies
 export files, and the database stores the
 agent's conversation memory. The database connection does not give the model a SQL interface to your inventory.
 The storage details are in [Conversation persistence](../reference/runtime.md#conversation-persistence).
@@ -101,8 +101,8 @@ hooks that run around a model request or a tool call. The agent uses three kinds
 - **Guards.** Guards are rules written in Python that constrain the model and its tools: the filter path guard, the
   deferred tool gate, history trimming and, wherever the form-fill skill runs, the write tool gate. See
   [Plugins and guards](../reference/runtime.md#plugins-and-guards).
-- **The form-fill skill.** This Python capability intercepts messages before they reach the model and guides the
-  person through a workflow form, one page at a time. See [Workflow forms](../reference/runtime.md#workflow-forms).
+- **The form-fill skill.** This Python capability gives the model the tools to fill a workflow form with the
+  person, one page at a time, and stops the start until the person approved it. See [Workflow forms](../reference/runtime.md#workflow-forms).
 
 A plugin is either always on or deferred, controlled by `defer_loading` in its frontmatter. The model sees an
 always-on plugin's instructions and tools from the start. A deferred plugin stays hidden until the model calls the
@@ -146,7 +146,7 @@ raw tools. It misses what the Orchestrator Agent adds on top:
   workflows, and map results to tables, charts and export metadata. Download delivery currently requires
   [AG-UI](../reference/endpoints.md#export-delivery);
 - the guards, such as the filter path guard that stops the model from guessing filter paths, and history trimming;
-- the [form-fill skill](../reference/runtime.md#workflow-forms), which walks a workflow form with the person and
+- the [form-fill skill](../reference/runtime.md#workflow-forms), which fills a workflow form with the person and
   starts the workflow only after approval. Without it, the model can call the write tools of Core directly, see
   [Read tools and write tools](../reference/runtime.md#read-tools-and-write-tools);
 - your [domain context](../guides/domain-context.md).
@@ -169,21 +169,22 @@ a person to approve before they are carried out.
 
 The model can select a workflow. Where the form-fill skill runs, on A2A, the OpenAI-compatible `/v1` endpoint
 that LibreChat uses, and AG-UI, Core's three workflow write tools are hidden from the model.
-A separate form-handling path
-collects the person's answers, has Core validate them and asks for explicit approval before starting the workflow.
+The model fills the workflow's form with the person through the skill's own tools, Core validates every page, and
+the start waits for the person's explicit approval.
 This is the agent's human-in-the-loop (HITL) boundary. Core continues to own the validation and execution; the agent
 helps the person through the interaction.
 
 This restriction applies to the model's control over services and workflows. The service itself still writes
-conversation history and query results, and the form handler can start a workflow after receiving approval.
+conversation history and query results, and the form-fill skill can start a workflow after receiving approval.
 The calling client is responsible for collecting that approval from a person and forwarding it faithfully.
 
 The agent's own MCP endpoint runs without the form-fill skill, so this boundary does not apply there: its model
 can call Core's write tools directly, without a built-in approval step. See
 [Read tools and write tools](../reference/runtime.md#read-tools-and-write-tools).
 
-This requires a client that can present questions and approval: LibreChat, an A2A planner with support for human
-input, or an AG-UI frontend that supports interrupts. The MCP interface does not offer workflow forms. See
+This requires a client that can present the approval: an AG-UI frontend that supports interrupts, LibreChat with
+its ask-user tool, or an A2A caller with kagent's human-in-the-loop extension. For any other
+caller a form can be filled, but nothing is started. The MCP interface does not offer workflow forms. See
 [Start workflows from chat](https://workfloworchestrator.org/learn/orchestrator-agent/use-cases/workflows-from-chat/) for setup and
 [Runtime behaviour](../reference/runtime.md#workflow-forms) for the form-handling details.
 

@@ -34,7 +34,7 @@ Development Work Package (WP6) of the GN5-2 project.__
 
 The agent runs alongside [Orchestrator Core](https://workfloworchestrator.org/orchestrator-core/). It searches your
 subscriptions, products, workflows and processes, looks up details, counts and groups results, and prepares exports.
-It can also guide a person through a workflow form and ask for approval before starting the workflow, using a client
+It can also fill a workflow form with a person and ask for approval before starting the workflow, using a client
 that supports this interaction.
 
 ### An agent and its harness
@@ -53,7 +53,7 @@ workflow logic. See [How the agent fits on top of Orchestrator Core](explanation
 - **Search and analyse WFO data**: find records, count and group results, look up an entity by id and export results
   as CSV through AG-UI. Tables and charts are built in code from tool results. See the [plugins reference](reference/plugins.md).
 - **Start workflows with approval**: collect and validate form inputs, then ask the person to approve the start
-  through LibreChat, an A2A client with human-in-the-loop support, or an AG-UI frontend with interrupts. See
+  through an AG-UI frontend with interrupts, LibreChat's ask-user tool or kagent's human-in-the-loop extension. See
   [Start workflows from chat](https://workfloworchestrator.org/learn/orchestrator-agent/use-cases/workflows-from-chat/).
 - **Connect your clients**: use the agent from [LibreChat](guides/librechat.md),
   [MCP clients](guides/mcp-clients.md) or [other agents over A2A](guides/a2a-planner.md).
@@ -79,9 +79,9 @@ and can also be run from source. One service exposes the agent over several prot
 | `/mcp` | MCP | MCP clients such as Claude Code or an agent framework |
 
 Search, aggregation, entity lookup and export preparation are available through all four interfaces; built-in
-[export downloads](reference/endpoints.md#export-delivery) currently require AG-UI. Workflow forms require
-LibreChat configured with its ask-user tool, an A2A client with the human-in-the-loop extension, or an AG-UI frontend
-that supports interrupts. MCP does not offer these forms. See [Endpoints and protocols](reference/endpoints.md) for client support and
+[export downloads](reference/endpoints.md#export-delivery) currently require AG-UI. Starting a workflow requires an AG-UI frontend
+that supports interrupts, LibreChat with its ask-user tool, or an A2A caller with kagent's
+human-in-the-loop extension: any other caller can have a form filled but not started. MCP does not offer these forms. See [Endpoints and protocols](reference/endpoints.md) for client support and
 [Read tools and write tools](reference/runtime.md#read-tools-and-write-tools) for the write-tool policy on each
 interface.
 
