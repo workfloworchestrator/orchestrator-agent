@@ -94,9 +94,11 @@ class AgentSettings(BaseSettings):
             return self.AGENT_MODEL
 
         from pydantic_ai.models.openai import OpenAIChatModel
+        from pydantic_ai.profiles.openai import OpenAIModelProfile
 
         model_name = self.AGENT_MODEL
         provider_prefix = None
+        profile: OpenAIModelProfile | None = None
         if ":" in model_name:
             provider_prefix, model_name = model_name.split(":", 1)
 
@@ -112,8 +114,11 @@ class AgentSettings(BaseSettings):
             from pydantic_ai.providers.openai import OpenAIProvider
 
             provider = OpenAIProvider(base_url=self.AGENT_API_BASE, api_key=self.AGENT_API_KEY)  # type: ignore[assignment]
+            # The agent's instructions arrive as several system messages; strict backends (some vLLM/LiteLLM
+            # chat templates, e.g. Qwen3.8-Flash-Next) reject that with a 422, so send them as one.
+            profile = OpenAIModelProfile(openai_chat_supports_multiple_system_messages=False)
 
-        return OpenAIChatModel(model_name, provider=provider)
+        return OpenAIChatModel(model_name, provider=provider, profile=profile)
 
 
 agent_settings = AgentSettings()

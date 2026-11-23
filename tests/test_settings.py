@@ -14,6 +14,10 @@
 from unittest.mock import patch
 
 import pytest
+from openai.resources.chat.completions import AsyncCompletions
+from openai.types.chat import ChatCompletion, ChatCompletionMessage
+from openai.types.chat.chat_completion import Choice
+from pydantic_ai import Agent
 from pydantic_ai.models.openai import OpenAIChatModel
 from pydantic_ai.providers.azure import AzureProvider
 from pydantic_ai.providers.openai import OpenAIProvider
@@ -109,6 +113,52 @@ def test_create_model_openai_provider_when_no_azure():
     result = settings.create_model()
     assert isinstance(result, OpenAIChatModel)
     assert isinstance(result._provider, OpenAIProvider)
+
+
+@pytest.mark.parametrize(
+    "configured, multiple_system_messages",
+    [
+        pytest.param(
+            {"AGENT_MODEL": "openai:gpt-4o", "AGENT_API_BASE": "https://proxy.example.com/v1", "AGENT_API_KEY": "sk"},
+            False,
+            id="openai-compatible-endpoint-merges",
+        ),
+        pytest.param(
+            {
+                "AGENT_MODEL": "azure:gpt-4o",
+                "AGENT_API_BASE": "https://my-resource.openai.azure.com/",
+                "AGENT_API_KEY": "azure-key",
+                "AGENT_API_VERSION": "2024-12-01-preview",
+            },
+            True,
+            id="azure-keeps-the-default",
+        ),
+    ],
+)
+def test_create_model_system_message_support(configured, multiple_system_messages):
+    model = AgentSettings(**configured).create_model()
+    assert model.profile.get("openai_chat_supports_multiple_system_messages", True) is multiple_system_messages
+
+
+async def test_openai_compatible_endpoint_receives_a_single_system_message(monkeypatch):
+    sent: list[list[dict]] = []
+
+    async def fake_create(self, **kwargs):
+        sent.append(kwargs["messages"])
+        message = ChatCompletionMessage(role="assistant", content="ok")
+        choice = Choice(index=0, finish_reason="stop", message=message)
+        return ChatCompletion(id="chat", created=0, model="m", object="chat.completion", choices=[choice])
+
+    monkeypatch.setattr(AsyncCompletions, "create", fake_create)
+    model = AgentSettings(
+        AGENT_MODEL="Qwen3.8-Flash-Next-NVFP4", AGENT_API_BASE="https://proxy.example.com/v1", AGENT_API_KEY="sk"
+    ).create_model()
+    agent = Agent(model, system_prompt="Persona.", instructions=["First rule.", "Second rule."])
+
+    await agent.run("hello")
+
+    assert [message["role"] for message in sent[0]] == ["system", "user"]
+    assert all(text in sent[0][0]["content"] for text in ("Persona.", "First rule.", "Second rule."))
 
 
 @pytest.mark.parametrize(
