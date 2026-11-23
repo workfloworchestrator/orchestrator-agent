@@ -104,7 +104,8 @@ jobs:
   deploy:
     name: Push container image (${{ matrix.variant }})
     needs: build
-    # push only: the registry login needs a write token, which fork PRs do not get.
+    # The ref condition already excludes pull_request refs; requiring a push as well keeps the
+    # write-token publish tied to pushes.
     if: github.event_name == 'push' && (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/'))
     runs-on: ubuntu-latest
     permissions:

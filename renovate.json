@@ -22,9 +22,9 @@
       "enabled": false
     },
     {
-      "description": "[disable] Keep the Dockerfile on the Python versions that requires-python (>=3.11,<3.14) and the CI test matrix support; patch updates still arrive. A matchDatasources: [docker] rule does NOT match dockerfile dependencies (verified in a dry-run), so match the package name alone",
+      "description": "[disable] Keep the Docker images on the Python versions that requires-python (>=3.11,<3.14) and the CI matrix support. With the 3.11-slim tag this freezes major and minor updates: it does not offer patch updates either, so bump the tag by hand",
+      "matchManagers": ["dockerfile", "docker-compose"],
       "matchPackageNames": ["python"],
-      "matchUpdateTypes": ["major", "minor"],
       "enabled": false
     }
   ]

@@ -1,11 +1,9 @@
 name: Test mkdocs build
 
 on:
-  # Called by ci.yml so the docs build is part of the single 'CI result' check.
+  # Called by ci.yml only, so the docs build is part of the single 'CI result'
+  # check and does not run twice on a PR.
   workflow_call:
-  # Keep the standalone check as well: it runs on PRs that ci.yml does not cover yet.
-  pull_request:
-    branches: ["main"]
 
 env:
   UV_LOCKED: true

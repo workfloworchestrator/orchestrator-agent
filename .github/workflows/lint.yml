@@ -1,12 +1,9 @@
 name: Linting
 
 on:
-  # Called by ci.yml so lint is part of the single 'CI result' check.
+  # Called by ci.yml only, so lint is part of the single 'CI result' check and
+  # does not run twice on a PR.
   workflow_call:
-  # Keep the standalone check as well: it runs on PRs that ci.yml does not cover yet.
-  push:
-    branches: [main]
-  pull_request:
 
 env:
   UV_LOCKED: true
