@@ -2,5 +2,6 @@
   "openai:gpt-4o-mini",
   "anthropic:claude-haiku-5-5",
   "anthropic:claude-opus-5-5",
-  "agent:Qwen3.8-27B-FP8"
+  "agent:Qwen3.8-27B-FP8",
+  "agent:Qwen3.8-Flash-Next-NVFP4"
 ]
