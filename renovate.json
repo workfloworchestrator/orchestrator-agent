@@ -1,0 +1,31 @@
+{
+  "$schema": "https://docs.renovatebot.com/renovate-schema.json",
+  "description": "Renovate for orchestrator-agent: the shared WFO presets plus the rules this application needs. The root uv.lock is copied into the published images and evals/uv.lock runs the benchmark, so dependency updates and lock file maintenance need a review.",
+  "extends": [
+    "local>workfloworchestrator/renovate-config",
+    "local>workfloworchestrator/renovate-config//languages/python",
+    "local>workfloworchestrator/renovate-config//projects/application",
+    "local>workfloworchestrator/renovate-config//extras/security-alerts"
+  ],
+  "packageRules": [
+    {
+      "description": "[automerge] httpx is a runtime dependency and in the dev group; review it and propose it nightly",
+      "matchManagers": ["pep621"],
+      "matchPackageNames": ["httpx"],
+      "automerge": false,
+      "schedule": ["* 22-23 * * *", "* 0-5 * * *"]
+    },
+    {
+      "description": "[disable] mkdocs-redirects 1.2.3 depends on properdocs, a MkDocs fork that injects a 'switch away from mkdocs' banner into the built docs; 1.2.2 depends only on mkdocs. Re-enable once a release drops properdocs or the banner",
+      "matchManagers": ["pep621"],
+      "matchPackageNames": ["mkdocs-redirects"],
+      "enabled": false
+    },
+    {
+      "description": "[disable] Keep the Dockerfile on the Python versions that requires-python (>=3.11,<3.14) and the CI test matrix support; patch updates still arrive. A matchDatasources: [docker] rule does NOT match dockerfile dependencies (verified in a dry-run), so match the package name alone",
+      "matchPackageNames": ["python"],
+      "matchUpdateTypes": ["major", "minor"],
+      "enabled": false
+    }
+  ]
+}

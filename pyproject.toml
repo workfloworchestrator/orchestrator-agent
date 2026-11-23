@@ -36,6 +36,8 @@ dev = [
 docs = [
     "mkdocs-material>=9.5",
     "mkdocs-embed-external-markdown>=3.0.2",
+    # Pinned to 1.2.2: 1.2.3 adds a dependency on "properdocs", a MkDocs fork that injects a
+    # "switch away from mkdocs" banner into the build. 1.2.2 depends only on mkdocs.
     "mkdocs-redirects==1.2.2",
 ]
 
@@ -135,6 +137,9 @@ disallow_incomplete_defs = false
 
 [tool.uv]
 index-url = "https://pypi.org/simple"
+# Keep equal to the Renovate minimumReleaseAge (3 days) so a lock refresh cannot pick a release the
+# next Renovate run rejects. A security fix younger than this needs an `exclude-newer-package` entry.
+exclude-newer = "3 days"
 # orchestrator-core (prod) requires pydantic~=2.13.0 / pydantic-settings~=2.15.0: keep every
 # dependency on the prod-supported versions.
 override-dependencies = [

@@ -1,5 +1,9 @@
 name: CI
 
+# Single PR/push entry point for CI.
+# The final 'CI result' job is the one required check: it fails when the tests,
+# the container builds, lint or the docs build fail, so a ruleset only has to
+# require 'CI result'.
 on:
   push:
     branches: [main]
@@ -25,7 +29,7 @@ jobs:
       - name: Install uv and set the python version
         uses: astral-sh/setup-uv@v7
         with:
-          version: "0.10.8"
+          version: "0.13.9"
           python-version: ${{ matrix.python-version }}
 
       - name: Install the project
@@ -70,10 +74,38 @@ jobs:
           build-args: |
             UV_EXTRA_ARGS=${{ matrix.extra_args }}
 
+  lint:
+    name: Lint
+    uses: ./.github/workflows/lint.yml
+
+  docs:
+    name: Test mkdocs build
+    uses: ./.github/workflows/run-mkdocs-build.yml
+
+  # The eval workflow (eval.yml) needs a live LLM and the orchestrator-core stack, so it is not
+  # part of CI and not in this job's needs.
+  ci-result:
+    name: CI result
+    needs:
+      - test
+      - build
+      - lint
+      - docs
+    runs-on: ubuntu-slim
+    if: always()
+    steps:
+      - name: Decide whether the needed jobs succeeded or failed
+        uses: re-actors/alls-green@b5b5b37504aa4183270bd3d855c52a67f212be35 # v1.3.0
+        with:
+          jobs: ${{ toJSON(needs) }}
+
+  # Publishing the image is not part of CI: it only runs on main and release tags,
+  # and it stays out of the 'CI result' needs so a PR never depends on it.
   deploy:
     name: Push container image (${{ matrix.variant }})
     needs: build
-    if: github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/')
+    # push only: the registry login needs a write token, which fork PRs do not get.
+    if: github.event_name == 'push' && (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/'))
     runs-on: ubuntu-latest
     permissions:
       contents: read
