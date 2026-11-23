@@ -81,8 +81,9 @@ Artifact-bearing `TOOL_CALL_RESULT` events contain a JSON-encoded reference:
 Query rows can be fetched from Core's `GET /api/search/queries/{id}/results` endpoint with the caller's Core
 credentials. A `rendered_block` contains a `type` (`markdown` or `mermaid`) and `content`; this frontend is responsible
 for displaying it. Unlike the A2A and chat adapters, the AG-UI adapter does not append these blocks to the final text.
-An aggregate can also carry `chart` data: `kind` (`pie`, `bar` or `line`), `title`, `metric` and `points` containing
-`label`/`value` pairs. A frontend can draw a chart from that data instead of rendering Mermaid.
+An aggregate that was asked to be charted (its `aggregate` call set `visualization_type`) also carries `chart`
+data: `kind` (`pie`, `bar` or `line`), `title`, `metric` and `points` containing `label`/`value` pairs; otherwise its
+`rendered_block` is a Markdown table and there is no `chart`. A frontend can draw a chart from that data instead of rendering Mermaid.
 
 An AG-UI export's `download_url` is `exports/{query_id}`, relative to `/chats/{thread_id}/`. The agent's chats API
 fetches the file from Core with the caller's bearer token, or the configured service fallback, and returns the CSV.

@@ -29,7 +29,7 @@ from orchestrator_agent.capabilities.hooks import (
 )
 from orchestrator_agent.capabilities.spec import PluginSpec
 from orchestrator_agent.rendering.charts import aggregate_to_chart, aggregate_to_mermaid
-from orchestrator_agent.rendering.tables import search_to_markdown
+from orchestrator_agent.rendering.tables import aggregate_to_markdown, search_to_markdown
 from orchestrator_agent.tool_names import (
     AGGREGATE_TOOL,
     CREATE_WORKFLOW_TOOL,
@@ -40,19 +40,21 @@ from orchestrator_agent.tool_names import (
 )
 
 
-def _artifact_for(tool: str, result):
+def _artifact_for(tool: str, result, args=None):
     """Dispatch a tool result to its plugin's artifact builder — mirrors the behavior classes.
 
     The real per-tool mapping now lives in ``behavior/artifacts.py`` (one builder per artifact type);
     this helper keeps the mapping assertions below tool-keyed and exercises those builders directly.
+    ``args`` are the arguments the model called the tool with.
     """
     payload = result.return_value if isinstance(result, ToolReturn) else result
+    call_args = args if args is not None else {}
     if tool in (SEARCH_TOOL, AGGREGATE_TOOL):
-        return query_artifact(tool, payload)
+        return query_artifact(tool, call_args, payload)
     if tool == EXPORT_QUERY_TOOL:
-        return export_artifact(tool, payload)
+        return export_artifact(tool, call_args, payload)
     if tool == RESOLVE_ENTITY_TOOL:
-        return data_artifact(tool, payload)
+        return data_artifact(tool, call_args, payload)
     return None
 
 
@@ -128,6 +130,37 @@ class TestPluginCapabilityBehavior:
         )
         assert isinstance(out, ToolReturn)
         assert isinstance(out.metadata, QueryArtifact)
+
+    @pytest.mark.parametrize(
+        ("args", "block_type"),
+        [
+            pytest.param({"group_by": ["status"]}, "markdown", id="no-chart-asked"),
+            pytest.param({"group_by": ["status"], "visualization_type": "pie"}, "mermaid", id="chart-asked"),
+        ],
+    )
+    async def test_real_loaded_aggregate_plugin_charts_only_on_request(self, args, block_type):
+        from orchestrator_agent.capabilities.behavior import build_plugin_capability
+        from orchestrator_agent.capabilities.loader import load_plugin_specs
+
+        cap = build_plugin_capability({s.id: s for s in load_plugin_specs()}["aggregate"])
+        result = {
+            "query_id": "q-agg",
+            "total_results": 2,
+            "visualization": "pie",
+            "results": [
+                {"group_values": {"status": "active"}, "aggregations": {"count": 7}},
+                {"group_values": {"status": "terminated"}, "aggregations": {"count": 2}},
+            ],
+        }
+        out = await cap.after_tool_execute(
+            SimpleNamespace(),
+            call=ToolCallPart(tool_name=AGGREGATE_TOOL, args=args),
+            tool_def=ToolDefinition(name=AGGREGATE_TOOL, parameters_json_schema={"properties": {}}),
+            args=args,
+            result=result,
+        )
+        assert isinstance(out.metadata, QueryArtifact)
+        assert out.metadata.rendered_block.type == block_type
 
 
 class TestArtifactDeclaration:
@@ -339,8 +372,8 @@ class TestArtifactMapping:
 class TestAggregateChart:
     """Deterministic Mermaid rendering of grouped aggregations (charts.aggregate_to_mermaid)."""
 
-    # Core's `visualization` hint is one of pie/line/table; a "table" hint on a grouped result
-    # still becomes a chart (default xychart bar) — that's the whole point of forcing the chart.
+    # Core's `visualization` hint is one of pie/line/table; when a chart was asked for, a "table" hint
+    # on a grouped result still renders (default xychart bar).
     GROUPED = {
         "visualization": "table",
         "results": [
@@ -380,18 +413,42 @@ class TestAggregateChart:
         assert RenderedBlock(type="mermaid", content="pie\n  x : 1").to_markdown() == "```mermaid\npie\n  x : 1\n```"
         assert RenderedBlock(type="markdown", content="| a |\n| - |").to_markdown() == "| a |\n| - |"
 
-    def test_artifact_for_upgrades_grouped_aggregate_to_chart(self):
-        payload = {"query_id": "q-agg", "total_results": 2, **self.GROUPED}
-        artifact = _artifact_for(AGGREGATE_TOOL, payload)
+    def test_grouped_aggregate_is_a_table_unless_a_chart_was_asked_for(self):
+        # Core fills `visualization` from its own heuristic even when nobody asked for a chart, so the
+        # hint alone is not a request: without `visualization_type` in the call, the result is a table.
+        payload = {"query_id": "q-agg", "total_results": 2, **self.GROUPED, "visualization": "bar"}
+        artifact = _artifact_for(AGGREGATE_TOOL, payload, args={"group_by": ["status"]})
+        assert artifact.query_id == "q-agg"  # still a QueryArtifact (export keeps working)
+        assert artifact.rendered_block is not None
+        assert artifact.rendered_block.type == "markdown"
+        assert artifact.rendered_block.content == aggregate_to_markdown(payload)
+        assert artifact.chart is None
+
+    @pytest.mark.parametrize("kind", ["bar", "pie", "line"])
+    def test_grouped_aggregate_is_charted_when_the_call_asks_for_a_chart(self, kind):
+        payload = {"query_id": "q-agg", "total_results": 2, **self.GROUPED, "visualization": kind}
+        artifact = _artifact_for(AGGREGATE_TOOL, payload, args={"visualization_type": kind})
         assert artifact.rendered_block is not None
         assert artifact.rendered_block.type == "mermaid"
-        assert artifact.query_id == "q-agg"  # still a QueryArtifact (export keeps working)
-        assert "xychart-beta" in artifact.rendered_block.content
+        assert artifact.rendered_block.content == aggregate_to_mermaid(payload)
         # The same chart as data, for a client that draws it itself (the popup).
         assert artifact.chart is not None
-        assert artifact.chart.kind == "bar"
+        assert artifact.chart.kind == kind
         assert artifact.chart.title == "count by status"
         assert [(p.label, p.value) for p in artifact.chart.points] == [("active", 7), ("inactive", 2)]
+
+    @pytest.mark.parametrize(
+        "args",
+        [
+            pytest.param({"visualization_type": None}, id="explicit-none"),
+            pytest.param("not-a-dict", id="unparsed-args"),
+        ],
+    )
+    def test_no_chart_request_without_a_chart_type(self, args):
+        payload = {"query_id": "q-agg", "total_results": 2, **self.GROUPED}
+        artifact = _artifact_for(AGGREGATE_TOOL, payload, args=args)
+        assert artifact.rendered_block is not None
+        assert artifact.rendered_block.type == "markdown"
 
     def test_chart_data_keeps_the_visualization_hint_and_the_metric(self):
         line = aggregate_to_chart({**self.GROUPED, "visualization": "line"})
@@ -410,6 +467,47 @@ class TestAggregateChart:
         artifact = _artifact_for(AGGREGATE_TOOL, payload)
         assert isinstance(artifact, QueryArtifact)
         assert artifact.rendered_block is None
+
+
+class TestAggregateTable:
+    """Deterministic Markdown table for grouped aggregations (tables.aggregate_to_markdown)."""
+
+    def test_one_column_per_group_key_and_aggregation(self):
+        payload = {
+            "results": [
+                {"group_values": {"customer": "TNO", "node": "dt011a-jnx-03"}, "aggregations": {"count": 12}},
+                {"group_values": {"customer": "TU Delft", "node": "dt010a-jnx-01"}, "aggregations": {"count": 3}},
+            ]
+        }
+        assert aggregate_to_markdown(payload) == (
+            "| customer | node | count |\n"
+            "| --- | --- | --- |\n"
+            "| TNO | dt011a-jnx-03 | 12 |\n"
+            "| TU Delft | dt010a-jnx-01 | 3 |"
+        )
+
+    def test_every_row_is_kept(self):
+        # Grouping is the uncapped way to list a population; a table that drops rows would be wrong.
+        rows = [{"group_values": {"n": f"node-{i}"}, "aggregations": {"count": i}} for i in range(500)]
+        table = aggregate_to_markdown({"results": rows})
+        assert table is not None
+        assert table.count("\n") == 501  # header + separator + 500 rows
+
+    def test_cells_cannot_break_the_row(self):
+        payload = {"results": [{"group_values": {"name": "a|b\nc"}, "aggregations": {"count": 1}}]}
+        assert "| a\\|b c | 1 |" in aggregate_to_markdown(payload)
+
+    @pytest.mark.parametrize(
+        "payload",
+        [
+            pytest.param({"results": [{"group_values": {}, "aggregations": {"count": 7}}]}, id="scalar"),
+            pytest.param({"results": []}, id="no-rows"),
+            pytest.param({}, id="no-results"),
+            pytest.param("nope", id="not-a-dict"),
+        ],
+    )
+    def test_nothing_to_tabulate_returns_none(self, payload):
+        assert aggregate_to_markdown(payload) is None
 
 
 class TestSearchTable:

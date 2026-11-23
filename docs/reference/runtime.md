@@ -87,7 +87,8 @@ of Markdown:
 - **History trimming** keeps a sliding window of the conversation.
 
 Tables and charts are **rendered blocks**: the agent builds a Markdown table or a Mermaid chart from the result in
-code. The A2A and chat adapters append these blocks to the answer, so the rendered rows and numbers are not retyped
+code. A grouped aggregation is a table unless the `aggregate` call set `visualization_type` (the model sets it only
+when the request asks for a chart); search results are always a table. The A2A and chat adapters append these blocks to the answer, so the rendered rows and numbers are not retyped
 by the model. AG-UI exposes the blocks as artifact metadata for the frontend to render. MCP returns the raw result
 JSON alongside the model's answer. Export download metadata is delivered through AG-UI; the other interfaces
 do not deliver Core's standard export URL after the plugin strips it from the model-visible payload. See

@@ -13,12 +13,12 @@
 
 """Deterministic Mermaid rendering for aggregate results.
 
-A grouped aggregation is always a distribution, so it should always be charted — but
-prompt-driven rendering is unreliable (the model tables some results and charts others).
-This module builds the ```mermaid block straight from the ``aggregate`` tool result instead,
-using core's own ``visualization`` hint to pick the diagram type. Adapters inject the result
-into the answer when the model didn't already include a chart, so charting is guaranteed for
-every text-only client (kagent, native LibreChat) regardless of model behaviour.
+Prompt-driven rendering is unreliable (the model tables some results and charts others), so
+this module builds the ```mermaid block straight from the ``aggregate`` tool result instead,
+using core's own ``visualization`` hint to pick the diagram type. A grouped aggregation is only
+charted when the call asked for one (core's ``visualization_type`` argument); otherwise it is a
+Markdown table (``tables.aggregate_to_markdown``). Adapters inject whichever block was built into
+the answer, so text-only clients (kagent, native LibreChat) get it regardless of model behaviour.
 
 The chart is first read as data (``aggregate_to_chart``: a ``ChartData`` a client such as the popup draws
 itself) from the ``AggregateToolResponse`` JSON shape: ``{visualization: str, results: [{group_values:

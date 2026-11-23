@@ -42,8 +42,9 @@ from orchestrator_agent.tool_names import TOOL_NAME_PLACEHOLDERS
 
 logger = structlog.get_logger(__name__)
 
-# A builder maps a tool's raw result payload to an artifact (or None when there is nothing to attach).
-ArtifactBuilder = Callable[[str, Any], "ToolArtifact | None"]
+# A builder maps a tool's name, call arguments and raw result payload to an artifact (or None when
+# there is nothing to attach).
+ArtifactBuilder = Callable[[str, Any, Any], "ToolArtifact | None"]
 
 
 def owned_tool_names(spec: PluginSpec) -> set[str]:
@@ -102,7 +103,7 @@ class PluginCapability(AbstractCapability[Any]):
         if tool_def.name not in self._tools:
             return result
         try:
-            artifact = self._builder(tool_def.name, _result_payload(result))
+            artifact = self._builder(tool_def.name, args, _result_payload(result))
         except Exception:  # noqa: BLE001 - artifact mapping must never break tool execution
             logger.exception("Artifact mapping failed; returning raw result", tool=tool_def.name)
             return result

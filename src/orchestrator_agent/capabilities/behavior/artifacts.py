@@ -13,7 +13,8 @@
 
 """Artifact builders: map a tool's raw result payload to a rich artifact.
 
-Each builder follows the shared protocol ``(tool_name, payload) -> ToolArtifact | None``. They are
+Each builder follows the shared protocol ``(tool_name, args, payload) -> ToolArtifact | None``, where
+``args`` are the arguments the model called the tool with. They are
 the reusable, testable units; a plugin selects one via its frontmatter ``artifact:`` declaration
 (see ``behavior/__init__.py``), and ``PluginCapability`` calls it (handling ownership filtering,
 error isolation, and ToolReturn wrapping).
@@ -32,23 +33,44 @@ from orchestrator_agent.artifacts import (
     RenderedBlock,
 )
 from orchestrator_agent.rendering.charts import aggregate_to_chart, chart_to_mermaid
-from orchestrator_agent.rendering.tables import search_to_markdown
+from orchestrator_agent.rendering.tables import aggregate_to_markdown, search_to_markdown
 from orchestrator_agent.tool_names import AGGREGATE_TOOL, SEARCH_TOOL
 
 # --- Shared artifact builders (raw MCP payload -> artifact, or None) ------------------------
 
 
-def query_artifact(tool_name: str, payload: Any) -> QueryArtifact | None:
-    """Build a QueryArtifact for a search/aggregate payload, upgraded with a chart or table block."""
+def query_artifact(tool_name: str, args: Any, payload: Any) -> QueryArtifact | None:
+    """Build a QueryArtifact for a search/aggregate payload, upgraded with a table or chart block.
+
+    A grouped aggregation is a Markdown table unless the call asked for a chart. The request is core's
+    ``visualization_type`` argument, not the ``visualization`` field of the result: core fills that from a
+    heuristic on every grouped result, so it says which chart would fit, not that anyone wants one.
+    """
     if not isinstance(payload, dict):
         return None
     query = _base_query_artifact(tool_name, payload)
     if query is None:
         return None
-    if tool_name == AGGREGATE_TOOL and (chart := aggregate_to_chart(payload)):
+    if tool_name == AGGREGATE_TOOL:
+        return _with_aggregate_block(query, payload, chart_requested=_chart_requested(args))
+    if tool_name == SEARCH_TOOL and (markdown := search_to_markdown(payload)):
+        return query.model_copy(update={"rendered_block": RenderedBlock(type="markdown", content=markdown)})
+    return query
+
+
+def _chart_requested(args: Any) -> bool:
+    match args:
+        case {"visualization_type": str(kind)} if kind:
+            return True
+        case _:
+            return False
+
+
+def _with_aggregate_block(query: QueryArtifact, payload: dict[str, Any], *, chart_requested: bool) -> QueryArtifact:
+    if chart_requested and (chart := aggregate_to_chart(payload)):
         block = RenderedBlock(type="mermaid", content=chart_to_mermaid(chart))
         return query.model_copy(update={"rendered_block": block, "chart": chart})
-    if tool_name == SEARCH_TOOL and (markdown := search_to_markdown(payload)):
+    if markdown := aggregate_to_markdown(payload):
         return query.model_copy(update={"rendered_block": RenderedBlock(type="markdown", content=markdown)})
     return query
 
@@ -75,11 +97,11 @@ def _base_query_artifact(tool_name: str, payload: dict[str, Any]) -> QueryArtifa
     return QueryArtifact(**kwargs)
 
 
-def data_artifact(tool_name: str, payload: Any) -> DataArtifact | None:
+def data_artifact(tool_name: str, args: Any, payload: Any) -> DataArtifact | None:
     """Build a DataArtifact for a resolve_entity payload (a concrete entity), or None.
 
-    ``tool_name`` is part of the shared builder protocol (``(tool_name, payload) -> artifact``) but
-    unused here — entity results map the same way regardless of which tool produced them.
+    ``tool_name`` and ``args`` are part of the shared builder protocol (``(tool_name, args, payload) ->
+    artifact``) but unused here — entity results map the same way regardless of how they were asked for.
     """
     if not isinstance(payload, dict):
         return None
@@ -94,10 +116,10 @@ def data_artifact(tool_name: str, payload: Any) -> DataArtifact | None:
     )
 
 
-def export_artifact(tool_name: str, payload: Any) -> ExportArtifact | None:
+def export_artifact(tool_name: str, args: Any, payload: Any) -> ExportArtifact | None:
     """Build an ExportArtifact for an export_query payload (a prepared download), or None.
 
-    ``tool_name`` is part of the shared builder protocol but unused here.
+    ``tool_name`` and ``args`` are part of the shared builder protocol but unused here.
     """
     if not isinstance(payload, dict):
         return None
