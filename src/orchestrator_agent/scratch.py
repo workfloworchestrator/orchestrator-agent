@@ -29,18 +29,19 @@ import re
 import tempfile
 import uuid
 from dataclasses import dataclass
-from itertools import chain
+from itertools import chain, islice
 from pathlib import Path
 from typing import Any
 
 import structlog
 
-from orchestrator_agent.rendering.tables import _ordered_keys
+from orchestrator_agent.rendering.tables import TOTAL_LABEL, _ordered_keys
 
 logger = structlog.get_logger(__name__)
 
 SEARCH_COLUMNS = ("entity_id", "entity_type", "title", "score")
 _SAFE_QUERY_ID = re.compile(r"[A-Za-z0-9_-]+")
+_TOTALS_PREFIX = f"| {TOTAL_LABEL} |"
 
 
 @dataclass(frozen=True)
@@ -139,6 +140,38 @@ def save_result(folder: Path, tool_name: str, payload: Any, max_bytes: int) -> S
     return SavedFile(name=name, rows=len(rows), columns=columns)
 
 
+def file_line(conversation: str, virtual_dir: str, saved: SavedFile) -> str:
+    """The reply line that tells the calling agent where the rows of a result are, in its own sandbox."""
+    return (
+        f"Saved for run_python: conversation={conversation} file={virtual_dir}/{saved.name} "
+        f"({saved.rows} rows; columns: {', '.join(saved.columns)})"
+    )
+
+
+def not_saved_line(skipped: Skipped) -> str:
+    """The reply line for a result that is too large to save."""
+    return f"Not saved for run_python: {skipped.rows} rows exceed the scratch file limit"
+
+
+def cut_down(block: str, saved: SavedFile, virtual_dir: str, max_rows: int, preview_rows: int) -> str:
+    """A rendered table of more than ``max_rows`` data rows, cut down to a preview of ``preview_rows`` rows.
+
+    The preview is the header, the separator, the first rows, the totals row (if there is one) and a line that
+    says where all the rows are. A data row is a table row other than the header, the separator and a totals row.
+    A block with fewer data rows, and a block that is not a table (a chart), is returned as it is.
+    """
+    lines = block.splitlines()
+    if len(lines) < 2 or not lines[0].startswith("|") or not lines[1].startswith("| ---"):
+        return block
+    body = [line for line in lines[2:] if line.startswith("|")]
+    data = [line for line in body if not line.startswith(_TOTALS_PREFIX)]
+    if len(data) <= max_rows:
+        return block
+    totals = [line for line in body if line.startswith(_TOTALS_PREFIX)]
+    table = "\n".join(chain(lines[:2], islice(data, preview_rows), totals))
+    return f"{table}\n\n… {saved.rows} rows in total; all rows are in {virtual_dir}/{saved.name}"
+
+
 def _file_name(tool_name: str, payload: Any) -> str:
     """``q-<query_id>.csv``, or ``<tool>-<random>.csv`` without a usable query id.
 
@@ -157,4 +190,13 @@ def _cell(value: Any) -> Any:
     return "" if value is None else value
 
 
-__all__ = ["SavedFile", "Skipped", "conversation_folder", "rows_of", "save_result"]
+__all__ = [
+    "SavedFile",
+    "Skipped",
+    "conversation_folder",
+    "cut_down",
+    "file_line",
+    "not_saved_line",
+    "rows_of",
+    "save_result",
+]

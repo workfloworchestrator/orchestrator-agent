@@ -55,6 +55,8 @@ from orchestrator_agent.adapters.hitl import HumanInTheLoop
 from orchestrator_agent.capabilities.spec import skills_from_specs
 from orchestrator_agent.offload import off_loop
 from orchestrator_agent.persistence import PostgresStatePersistence
+from orchestrator_agent.scratch import conversation_folder
+from orchestrator_agent.settings import agent_settings
 from orchestrator_agent.state import FormInput
 from orchestrator_agent.turn import NO_RESULTS, ConversationLocks, OnArtifact, run_turn
 
@@ -169,6 +171,7 @@ class WFOAgentExecutor(AgentExecutor):
                 form_input=response if isinstance(response, FormInput) else None,
                 auth_token=auth_token,
                 on_artifact=self._publisher(updater),
+                scratch=await off_loop(conversation_folder, conversation, agent_settings.SCRATCH_DIR),
             )
 
             reply = state.form_reply

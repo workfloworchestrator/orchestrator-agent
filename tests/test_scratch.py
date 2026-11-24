@@ -20,7 +20,15 @@ from typing import Any
 import pytest
 from structlog.testing import capture_logs
 
-from orchestrator_agent.scratch import SavedFile, Skipped, conversation_folder, rows_of, save_result
+from orchestrator_agent.scratch import (
+    SavedFile,
+    Skipped,
+    conversation_folder,
+    cut_down,
+    file_line,
+    rows_of,
+    save_result,
+)
 from orchestrator_agent.settings import AgentSettings
 
 CONVERSATION = "2D2900FA-E77A-428C-A385-7F46CF16A457"
@@ -198,3 +206,66 @@ def test_settings_defaults() -> None:
             "SCRATCH_REPLY_PREVIEW_ROWS",
         )
     ] == [None, 20_000_000, "/data", 100, 20]
+
+
+def test_file_line() -> None:
+    saved = SavedFile("q-1.csv", 152, ("customer_id", "count"))
+
+    assert file_line(CANONICAL, "/data", saved) == (
+        "Saved for run_python: conversation=2d2900fa-e77a-428c-a385-7f46cf16a457 "
+        "file=/data/q-1.csv (152 rows; columns: customer_id, count)"
+    )
+
+
+def _table(rows: int, *, totals: bool) -> str:
+    lines = ["| customer | count |", "| --- | --- |", *(f"| c{n} | {n} |" for n in range(rows))]
+    return "\n".join(lines + (["| **Total** | 5050 |"] if totals else []))
+
+
+@pytest.mark.parametrize(
+    ("rows", "totals", "max_rows", "expected_lines"),
+    [
+        pytest.param(100, True, 100, None, id="at-the-limit-unchanged"),
+        pytest.param(
+            101,
+            True,
+            100,
+            [
+                "| customer | count |",
+                "| --- | --- |",
+                *(f"| c{n} | {n} |" for n in range(20)),
+                "| **Total** | 5050 |",
+                "",
+                "… 101 rows in total; all rows are in /data/q-1.csv",
+            ],
+            id="over-the-limit-with-totals",
+        ),
+        pytest.param(
+            101,
+            False,
+            100,
+            [
+                "| customer | count |",
+                "| --- | --- |",
+                *(f"| c{n} | {n} |" for n in range(20)),
+                "",
+                "… 101 rows in total; all rows are in /data/q-1.csv",
+            ],
+            id="over-the-limit-without-totals",
+        ),
+        pytest.param(101, False, 200, None, id="unchanged-when-the-limit-is-raised"),
+    ],
+)
+def test_cut_down(rows: int, totals: bool, max_rows: int, expected_lines: list[str] | None) -> None:
+    block = _table(rows, totals=totals)
+    saved = SavedFile("q-1.csv", rows, ("customer", "count"))
+
+    result = cut_down(block, saved, "/data", max_rows=max_rows, preview_rows=20)
+
+    assert result == (block if expected_lines is None else "\n".join(expected_lines))
+
+
+def test_cut_down_leaves_a_block_that_is_not_a_table() -> None:
+    block = '```mermaid\npie\n  "a" : 1\n```'
+
+    assert cut_down(block, SavedFile("q-1.csv", 500, ("a",)), "/data", max_rows=1, preview_rows=0) == block

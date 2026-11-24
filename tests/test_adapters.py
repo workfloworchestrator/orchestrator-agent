@@ -278,6 +278,34 @@ class TestWFOAgentExecutor:
 
     @pytest.mark.asyncio
     @patch("orchestrator.core.db.db")
+    @pytest.mark.parametrize(
+        "scratch_on",
+        [
+            pytest.param(True, id="scratch-dir-set: the conversation's folder"),
+            pytest.param(False, id="scratch-dir-unset: no folder"),
+        ],
+    )
+    async def test_a2a_passes_the_conversation_folder(self, _mock_db, tmp_path, monkeypatch, scratch_on):
+        conversation = str(uuid.uuid4())
+        monkeypatch.setattr(
+            "orchestrator_agent.adapters.a2a.adapter.agent_settings.SCRATCH_DIR", tmp_path if scratch_on else None
+        )
+        msg = Message(role=Role.ROLE_USER, parts=[Part(text="hi")], message_id=str(uuid.uuid4()))
+        ctx = RequestContext(
+            call_context=ServerCallContext(state={"headers": {"x-kagent-root-context-id": conversation}}),
+            request=SendMessageRequest(message=msg),
+            context_id="ctx-1",
+        )
+        with patch(
+            "orchestrator_agent.adapters.a2a.adapter.run_turn", AsyncMock(return_value=(SearchState(), "ok"))
+        ) as run_turn:
+            await WFOAgentExecutor(MagicMock()).execute(ctx, EventQueueLegacy())
+
+        run_turn.assert_awaited_once()
+        assert run_turn.await_args.kwargs["scratch"] == (tmp_path / conversation if scratch_on else None)
+
+    @pytest.mark.asyncio
+    @patch("orchestrator.core.db.db")
     async def test_a_form_reply_left_by_the_capability_is_the_answer(self, _mock_db):
         """The form-fill capability ends the run with its reply; the executor delivers exactly that text."""
 
