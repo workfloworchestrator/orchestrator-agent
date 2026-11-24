@@ -26,17 +26,24 @@ import asyncio
 from collections import Counter, defaultdict
 from collections.abc import AsyncGenerator, Awaitable, Callable
 from contextlib import asynccontextmanager
+from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
 from uuid import UUID
 
 import structlog
 from orchestrator.core.db.models import AgentRunTable
-from pydantic_ai.messages import FunctionToolResultEvent, ModelMessage, PartDeltaEvent, ToolReturnPart
+from pydantic_ai.messages import (
+    FunctionToolCallEvent,
+    FunctionToolResultEvent,
+    ModelMessage,
+    PartDeltaEvent,
+    ToolReturnPart,
+)
 from pydantic_ai.run import AgentRunResultEvent
 from sqlalchemy.orm import Session
 
 from orchestrator_agent.agent import new_deps
-from orchestrator_agent.artifacts import QueryArtifact, ToolArtifact
+from orchestrator_agent.artifacts import QueryArtifact, RenderedBlock, ToolArtifact
 from orchestrator_agent.mcp_client import bind_outbound_token
 from orchestrator_agent.persistence import dump_messages, load_messages
 from orchestrator_agent.state import FormInput, SearchState
@@ -118,6 +125,37 @@ async def run_turn(
     return deps.state, output
 
 
+@dataclass
+class _ToolRounds:
+    """The rendered blocks of a run's tool results, grouped by tool round.
+
+    A round is the tool results produced between two model responses; the model sees one round before it
+    decides on the next, so a probe (a schema check, an aggregation over every location) and the query
+    it prepared are different rounds. The event stream has no explicit round marker, but a tool call that
+    follows a tool result can only come from a new model response, which is where a round starts.
+    """
+
+    rounds: list[list[str]] = field(default_factory=lambda: [[]])
+    _has_results: bool = False
+
+    def call(self) -> None:
+        """A tool call was made: after results it is the first of a new round."""
+        if self._has_results:
+            self.rounds.append([])
+            self._has_results = False
+
+    def result(self, part: object) -> None:
+        """A tool result arrived; a non-empty query result adds its block to the current round."""
+        self._has_results = True
+        match part:
+            case ToolReturnPart(metadata=QueryArtifact(total_results=n, rendered_block=RenderedBlock() as block)) if n:
+                self.rounds[-1].append(block.to_markdown())
+
+    def final_blocks(self) -> list[str]:
+        """The blocks of the last round that has any, each once, in order."""
+        return next((list(dict.fromkeys(blocks)) for blocks in reversed(self.rounds) if blocks), [])
+
+
 async def _run_model(
     agent: "WFOAgent",
     user_input: str,
@@ -127,26 +165,32 @@ async def _run_model(
 ) -> str:
     """Stream one model run: artifacts go out as they happen; the prose plus rendered blocks is returned."""
     final_output = ""
-    injected_blocks: list[str] = []
+    tool_rounds = _ToolRounds()
     async with agent.run_stream_events(user_input, deps=deps, message_history=message_history) as events:
         async for event in events:
-            if isinstance(event, FunctionToolResultEvent):
-                result = event.part
-                if isinstance(result, ToolReturnPart) and isinstance(result.metadata, ToolArtifact):
+            match event:
+                case FunctionToolCallEvent():
+                    tool_rounds.call()
+                case FunctionToolResultEvent(part=ToolReturnPart(metadata=ToolArtifact()) as result):
                     if on_artifact is not None:
                         await on_artifact(result)
-                    # Collect chart/table blocks to append after the agent's prose. The agent only sees
-                    # raw data (no ToolReturn.content relay), so it just summarises — the adapter
-                    # guarantees the block appears.
-                    if isinstance(result.metadata, QueryArtifact) and result.metadata.rendered_block:
-                        injected_blocks.append(result.metadata.rendered_block.to_markdown())
-            elif isinstance(event, AgentRunResultEvent):
-                final_output = str(event.result.output)
-                deps.state.message_history = dump_messages(event.result.all_messages())
-            elif not isinstance(event, PartDeltaEvent):
-                logger.debug("Agent run: event", event_type=type(event).__name__)
-    if injected_blocks:
-        final_output = final_output.rstrip() + "\n\n" + "\n\n".join(injected_blocks)
+                    tool_rounds.result(result)
+                case FunctionToolResultEvent(part=result):
+                    tool_rounds.result(result)
+                case AgentRunResultEvent():
+                    final_output = str(event.result.output)
+                    deps.state.message_history = dump_messages(event.result.all_messages())
+                case PartDeltaEvent():
+                    pass
+                case _:
+                    logger.debug("Agent run: event", event_type=type(event).__name__)
+    # Append chart/table blocks after the agent's prose. The agent only sees raw data (no ToolReturn.content
+    # relay), so it just summarises — the adapter guarantees the block appears. Only the non-empty blocks of
+    # the last round that produced any are appended: earlier rounds are the model probing (a schema, a
+    # grouping over every location) on its way to the real query, and their tables would bury the answer.
+    # ``on_artifact`` has already seen every artifact, so a client that renders them itself loses nothing.
+    if blocks := tool_rounds.final_blocks():
+        final_output = final_output.rstrip() + "\n\n" + "\n\n".join(blocks)
     return final_output
 
 
