@@ -198,8 +198,12 @@ separator and a `**Total**` row) is cut down when its rows are saved: the answer
 result without a table, still get the file line. A result whose CSV is larger than `SCRATCH_MAX_FILE_BYTES` is not
 written, keeps its whole table, and is followed by `Not saved for run_python: <n> rows exceed the scratch file limit`.
 
-Only the A2A route does this, and only for a conversation whose id is a UUID. Chat completions, AG-UI and MCP never
-write files, and nothing in their answers changes. Saving is best-effort: when the folder cannot be created or a
+Only the A2A route does this, only when an agent calls (the request header `x-kagent-source` is `agent`, which
+kagent's remote-agent tool sets), and only for a conversation whose id is a UUID. A person chatting with this agent
+directly, and any other caller, gets the answer it would get without a scratch folder: whole tables and no file line.
+A scratch-enabled call with a conversation id that is not a UUID is logged once at info level per id and saves nothing.
+Chat completions, AG-UI and MCP never write files, and nothing in their answers changes. A saved file is readable by
+every user (mode `0644`), because the caller's sandbox may run under another uid. Saving is best-effort: when the folder cannot be created or a
 file cannot be written (a read-only or full share), the agent logs an error with the conversation, the tool and the
 reason, and the answer is the one there would be without a scratch folder: whole tables and no file line.
 

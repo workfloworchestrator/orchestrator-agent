@@ -20,6 +20,7 @@ from typing import Any
 import pytest
 from structlog.testing import capture_logs
 
+from orchestrator_agent import scratch
 from orchestrator_agent.scratch import (
     SavedFile,
     Skipped,
@@ -63,6 +64,39 @@ def test_conversation_folder(tmp_path: Path, conversation: str, use_root: bool, 
 
     assert folder == (tmp_path / expected if expected else None)
     assert sorted(os.listdir(tmp_path)) == ([expected] if expected else [])
+
+
+@pytest.fixture
+def fresh_skip_log() -> None:
+    """The once-per-id log of skipped conversations is per process: start each test with it empty."""
+    scratch._log_skipped.cache_clear()
+
+
+@pytest.mark.parametrize(
+    ("conversations", "expected_logs"),
+    [
+        pytest.param(["abc", "abc", "abc"], 1, id="same-id-logged-once"),
+        pytest.param(["abc", "def", "abc"], 2, id="each-id-logged-once"),
+        pytest.param([CONVERSATION, CANONICAL], 0, id="a-uuid-is-not-logged"),
+    ],
+)
+def test_conversation_folder_logs_a_skipped_id_once(
+    tmp_path: Path, fresh_skip_log: None, conversations: list[str], expected_logs: int
+) -> None:
+    with capture_logs() as logs:
+        folders = [conversation_folder(conversation, tmp_path) for conversation in conversations]
+
+    skipped = [log for log in logs if log["log_level"] == "info"]
+    assert len(skipped) == expected_logs
+    assert all(log["conversation"] in conversations and "UUID" in log["event"] for log in skipped)
+    assert [folder is None for folder in folders] == [c not in {CONVERSATION, CANONICAL} for c in conversations]
+
+
+def test_conversation_folder_without_a_root_logs_nothing(fresh_skip_log: None) -> None:
+    with capture_logs() as logs:
+        assert conversation_folder("abc", None) is None
+
+    assert logs == []
 
 
 @pytest.mark.skipif(os.geteuid() == 0, reason="root ignores directory permissions")
@@ -144,6 +178,14 @@ def test_saving_twice_replaces_atomically(tmp_path: Path) -> None:
     assert saved.rows == 3
     assert len(_data_rows(tmp_path / "q-q1.csv")) == 3
     assert sorted(os.listdir(tmp_path)) == ["q-q1.csv"]
+
+
+def test_saved_file_is_readable_by_another_user(tmp_path: Path) -> None:
+    """A temporary file is created 0600; a reader under another uid (the Monty pod) needs the file to be 0644."""
+    saved = save_result(tmp_path, "aggregate", _grouped("A"), max_bytes=1_000_000)
+
+    assert isinstance(saved, SavedFile)
+    assert (tmp_path / saved.name).stat().st_mode & 0o777 == 0o644
 
 
 def test_saved_file_describes_the_csv(tmp_path: Path) -> None:

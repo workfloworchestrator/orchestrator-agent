@@ -94,7 +94,7 @@ See [How to configure authentication and authorization](../guides/secure-agent.m
 
 ## Conversation scratch space
 
-Off unless `SCRATCH_DIR` is set. When it is, the agent saves the rows of the final tool round of an A2A answer as CSV files, in a folder per conversation on a volume shared with the calling agent, so that agent's sandboxed Python can read them instead of having the model retype them. Only a conversation whose id is a UUID gets a folder: `<SCRATCH_DIR>/<conversation id>/`, with the id in lowercase and hyphenated. A file is `q-<query_id>.csv`, or `<tool>-<random>.csv` when the result has no query id.
+Off unless `SCRATCH_DIR` is set. When it is, the agent saves the rows of the final tool round of an A2A answer as CSV files, in a folder per conversation on a volume shared with the calling agent (only when an agent calls: the request header `x-kagent-source` is `agent`), so that agent's sandboxed Python can read them instead of having the model retype them. Only a conversation whose id is a UUID gets a folder: `<SCRATCH_DIR>/<conversation id>/`, with the id in lowercase and hyphenated. A file is `q-<query_id>.csv`, or `<tool>-<random>.csv` when the result has no query id.
 
 | Variable | Default | Description |
 | --- | --- | --- |

@@ -29,6 +29,7 @@ import re
 import tempfile
 import uuid
 from dataclasses import dataclass
+from functools import lru_cache
 from itertools import chain, islice
 from pathlib import Path
 from typing import Any
@@ -63,13 +64,15 @@ class Skipped:
 def conversation_folder(conversation: str, root: Path | None) -> Path | None:
     """The folder of ``conversation`` under ``root``, created when missing; ``None`` when there is no scratch.
 
-    That is: ``root`` is unset, ``conversation`` is not a UUID, or the folder cannot be created (logged).
+    That is: ``root`` is unset, ``conversation`` is not a UUID (logged once per id), or the folder cannot be
+    created (logged).
     """
     if root is None:
         return None
     try:
         folder = root / str(uuid.UUID(conversation))
     except ValueError:
+        _log_skipped(conversation)
         return None
     try:
         folder.mkdir(exist_ok=True)
@@ -77,6 +80,12 @@ def conversation_folder(conversation: str, root: Path | None) -> Path | None:
         logger.error("Cannot create the scratch folder", folder=str(folder), error=str(exc))
         return None
     return folder
+
+
+@lru_cache(maxsize=1024)
+def _log_skipped(conversation: str) -> None:
+    """Say once per process and conversation id that nothing is saved for it (the cache is the memory)."""
+    logger.info("No scratch folder: the conversation id is not a UUID", conversation=conversation)
 
 
 def rows_of(tool_name: str, payload: Any) -> tuple[tuple[str, ...], list[tuple[Any, ...]]] | None:
@@ -132,6 +141,7 @@ def save_result(folder: Path, tool_name: str, payload: Any, max_bytes: int) -> S
         if temporary_path.stat().st_size > max_bytes:
             temporary_path.unlink()
             return Skipped(rows=len(rows))
+        temporary_path.chmod(0o644)  # created 0600; a reader under another uid (the Monty pod) must be able to read it
         os.replace(temporary_path, folder / name)
     except BaseException:
         if temporary_path is not None:

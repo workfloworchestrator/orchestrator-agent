@@ -279,20 +279,25 @@ class TestWFOAgentExecutor:
     @pytest.mark.asyncio
     @patch("orchestrator.core.db.db")
     @pytest.mark.parametrize(
-        "scratch_on",
+        "scratch_on, source, folder",
         [
-            pytest.param(True, id="scratch-dir-set: the conversation's folder"),
-            pytest.param(False, id="scratch-dir-unset: no folder"),
+            pytest.param(True, {"x-kagent-source": "agent"}, True, id="an-agent-calls: the conversation's folder"),
+            pytest.param(True, {}, False, id="no-source-header (a person chatting): no folder"),
+            pytest.param(True, {"x-kagent-source": "user"}, False, id="another-source: no folder"),
+            pytest.param(True, {"x-kagent-source": "Agent"}, False, id="the-value-is-exactly-agent: no folder"),
+            pytest.param(False, {"x-kagent-source": "agent"}, False, id="scratch-dir-unset: no folder"),
         ],
     )
-    async def test_a2a_passes_the_conversation_folder(self, _mock_db, tmp_path, monkeypatch, scratch_on):
+    async def test_a2a_passes_the_conversation_folder_to_agents_only(
+        self, _mock_db, tmp_path, monkeypatch, scratch_on, source, folder
+    ):
         conversation = str(uuid.uuid4())
         monkeypatch.setattr(
             "orchestrator_agent.adapters.a2a.adapter.agent_settings.SCRATCH_DIR", tmp_path if scratch_on else None
         )
         msg = Message(role=Role.ROLE_USER, parts=[Part(text="hi")], message_id=str(uuid.uuid4()))
         ctx = RequestContext(
-            call_context=ServerCallContext(state={"headers": {"x-kagent-root-context-id": conversation}}),
+            call_context=ServerCallContext(state={"headers": {"x-kagent-root-context-id": conversation} | source}),
             request=SendMessageRequest(message=msg),
             context_id="ctx-1",
         )
@@ -302,7 +307,24 @@ class TestWFOAgentExecutor:
             await WFOAgentExecutor(MagicMock()).execute(ctx, EventQueueLegacy())
 
         run_turn.assert_awaited_once()
-        assert run_turn.await_args.kwargs["scratch"] == (tmp_path / conversation if scratch_on else None)
+        assert run_turn.await_args.kwargs["scratch"] == (tmp_path / conversation if folder else None)
+
+    @pytest.mark.asyncio
+    @patch("orchestrator.core.db.db")
+    async def test_a2a_without_call_headers_passes_no_folder(self, _mock_db, tmp_path, monkeypatch):
+        monkeypatch.setattr("orchestrator_agent.adapters.a2a.adapter.agent_settings.SCRATCH_DIR", tmp_path)
+        msg = Message(role=Role.ROLE_USER, parts=[Part(text="hi")], message_id=str(uuid.uuid4()))
+        ctx = RequestContext(
+            call_context=ServerCallContext(state={}),
+            request=SendMessageRequest(message=msg),
+            context_id=str(uuid.uuid4()),
+        )
+        with patch(
+            "orchestrator_agent.adapters.a2a.adapter.run_turn", AsyncMock(return_value=(SearchState(), "ok"))
+        ) as run_turn:
+            await WFOAgentExecutor(MagicMock()).execute(ctx, EventQueueLegacy())
+
+        assert run_turn.await_args.kwargs["scratch"] is None
 
     @pytest.mark.asyncio
     @patch("orchestrator.core.db.db")
