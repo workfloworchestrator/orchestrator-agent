@@ -27,12 +27,15 @@ from orchestrator_agent.agent import build_agent
 from orchestrator_agent.api.api import api_router
 from orchestrator_agent.form_fill import build_form_fill_skill
 from orchestrator_agent.form_fill.widgets import CoreApi
+from orchestrator_agent.logs import configure_logging
 from orchestrator_agent.loop_watchdog import LoopWatchdog
 from orchestrator_agent.mcp_client import build_core_toolset, verify_tool_contract
 from orchestrator_agent.observability import configure_langfuse, shutdown_langfuse
 from orchestrator_agent.security import AuthMiddleware, create_auth_manager
 from orchestrator_agent.settings import agent_settings
 
+# Before anything logs: an exception's frame locals (tool results, message histories) are never rendered.
+configure_logging()
 logger = structlog.get_logger(__name__)
 
 
