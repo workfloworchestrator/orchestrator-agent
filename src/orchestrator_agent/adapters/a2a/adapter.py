@@ -35,6 +35,7 @@ from __future__ import annotations
 import json
 import uuid
 from collections.abc import Sequence
+from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 import structlog
@@ -55,6 +56,8 @@ from orchestrator_agent.adapters.hitl import HumanInTheLoop
 from orchestrator_agent.capabilities.spec import skills_from_specs
 from orchestrator_agent.offload import off_loop
 from orchestrator_agent.persistence import PostgresStatePersistence
+from orchestrator_agent.scratch import conversation_folder
+from orchestrator_agent.settings import agent_settings
 from orchestrator_agent.state import FormInput
 from orchestrator_agent.turn import NO_RESULTS, ConversationLocks, OnArtifact, run_turn
 
@@ -72,6 +75,12 @@ A2AHitl = HumanInTheLoop[RequestContext, dict[str, Any]]
 # the agent calling us). Its remote-agent tool's own A2A context is not that conversation: by default it
 # is one per tool, shared by every chat that tool serves, and with session isolation a new one per call.
 _LINEAGE_HEADERS = ("x-kagent-root-context-id", "x-kagent-parent-context-id")
+
+# kagent's remote-agent tool says who is calling: ``agent`` when another agent is. Only an agent can read a
+# scratch file (through its sandboxed Python) and only it gets the tables cut down; a person chatting with this
+# agent directly keeps whole tables.
+_SOURCE_HEADER = "x-kagent-source"
+_AGENT_SOURCE = "agent"
 
 # Card-level tool description a consuming agent reads. The output-handling note covers only the
 # artifact-bearing replies (a result with a pre-rendered table/chart), not every tool call.
@@ -116,8 +125,17 @@ class WFOAgentExecutor(AgentExecutor):
         A2A context. Keying on the context alone would let one chat continue, or end, another chat's form
         whenever a parent reuses a context across chats, and lose the form when it opens one per call.
         """
-        headers = (context.call_context.state.get("headers") or {}) if context.call_context else {}
+        headers = WFOAgentExecutor._headers(context)
         return next((headers[name] for name in _LINEAGE_HEADERS if headers.get(name)), context.context_id or "")
+
+    @staticmethod
+    def _headers(context: RequestContext) -> dict[str, str]:
+        """The request headers kagent stamps on the call (lowercase names); empty without a call context."""
+        return (context.call_context.state.get("headers") or {}) if context.call_context else {}
+
+    def _scratch_root(self, context: RequestContext) -> Path | None:
+        """The scratch root when an agent is calling, else ``None``: a person gets the answer without files."""
+        return agent_settings.SCRATCH_DIR if self._headers(context).get(_SOURCE_HEADER) == _AGENT_SOURCE else None
 
     async def execute(self, context: RequestContext, event_queue: EventQueue) -> None:
         async with self._locks.turn(self._conversation(context)):
@@ -169,6 +187,7 @@ class WFOAgentExecutor(AgentExecutor):
                 form_input=response if isinstance(response, FormInput) else None,
                 auth_token=auth_token,
                 on_artifact=self._publisher(updater),
+                scratch=await off_loop(conversation_folder, conversation, self._scratch_root(context)),
             )
 
             reply = state.form_reply

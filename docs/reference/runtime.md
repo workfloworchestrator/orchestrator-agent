@@ -175,6 +175,38 @@ The [chats API](endpoints.md#chats-api) lists, reads and deletes AG-UI threads, 
 proxies exports prepared in that chat. Chat deletion removes the thread's snapshots and run records, so the
 database role needs `DELETE` on `graph_snapshots` and `agent_runs` as well as the permissions used for persistence.
 
+## Conversation scratch space
+
+An agent that calls this one over A2A can have its sandboxed Python read the rows of an answer instead of having its
+model retype them. This is off unless `SCRATCH_DIR` is set; see
+[Conversation scratch space](configuration.md#conversation-scratch-space) for the settings and the folder layout.
+
+When the folder exists, the agent saves the rows of the final tool round of a turn: the round whose tables
+(or charts) are appended to the answer, not the probes before it. A `search` or a grouped `aggregate` result becomes one
+CSV file; a scalar aggregate, an empty result and every other tool are not saved. Each saved result adds a line to the
+end of the answer, naming the conversation, the file as the caller sees it (under `SCRATCH_VIRTUAL_DIR`), the number of
+rows and the columns:
+
+```text
+Saved for run_python: conversation=2d2900fa-e77a-428c-a385-7f46cf16a457 file=/data/q-1.csv (152 rows; columns: customer_id, count)
+```
+
+A table with more data rows than `SCRATCH_REPLY_TABLE_MAX_ROWS` (a data row is a table row other than the header, the
+separator and a `**Total**` row) is cut down when its rows are saved: the answer keeps the header, the first
+`SCRATCH_REPLY_PREVIEW_ROWS` rows, the totals row if there is one, and the line
+`… <n> rows in total; all rows are in /data/<file>`, followed by the file line. A table that is not cut down, and a
+result without a table, still get the file line. A result whose CSV is larger than `SCRATCH_MAX_FILE_BYTES` is not
+written, keeps its whole table, and is followed by `Not saved for run_python: <n> rows exceed the scratch file limit`.
+
+Only the A2A route does this, only when an agent calls (the request header `x-kagent-source` is `agent`, which
+kagent's remote-agent tool sets), and only for a conversation whose id is a UUID. A person chatting with this agent
+directly, and any other caller, gets the answer it would get without a scratch folder: whole tables and no file line.
+A scratch-enabled call with a conversation id that is not a UUID is logged once at info level per id and saves nothing.
+Chat completions, AG-UI and MCP never write files, and nothing in their answers changes. A saved file is readable by
+every user (mode `0644`), because the caller's sandbox may run under another uid. Saving is best-effort: when the folder cannot be created or a
+file cannot be written (a read-only or full share), the agent logs an error with the conversation, the tool and the
+reason, and the answer is the one there would be without a scratch folder: whole tables and no file line.
+
 ## Concurrency and the event loop
 
 Every request of a process runs on one asyncio event loop: the model calls and the calls to Core wait on the network

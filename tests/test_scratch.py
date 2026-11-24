@@ -1,0 +1,313 @@
+# Copyright 2019-2026 SURF, GÉANT.
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#    http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+import csv
+import os
+import re
+from pathlib import Path
+from typing import Any
+
+import pytest
+from structlog.testing import capture_logs
+
+from orchestrator_agent import scratch
+from orchestrator_agent.scratch import (
+    SavedFile,
+    Skipped,
+    conversation_folder,
+    cut_down,
+    file_line,
+    rows_of,
+    save_result,
+)
+from orchestrator_agent.settings import AgentSettings
+
+CONVERSATION = "2D2900FA-E77A-428C-A385-7F46CF16A457"
+CANONICAL = "2d2900fa-e77a-428c-a385-7f46cf16a457"
+
+
+def _grouped(*names: Any, query_id: str | None = "q1") -> dict[str, Any]:
+    payload: dict[str, Any] = {
+        "results": [{"group_values": {"customer_name": name}, "aggregations": {"count": 1}} for name in names]
+    }
+    return payload | ({"query_id": query_id} if query_id else {})
+
+
+def _data_rows(path: Path) -> list[dict[str, str]]:
+    with path.open(encoding="utf-8", newline="") as handle:
+        return list(csv.DictReader(handle))
+
+
+@pytest.mark.parametrize(
+    ("conversation", "use_root", "expected"),
+    [
+        pytest.param(CONVERSATION, True, CANONICAL, id="uuid-is-canonicalised"),
+        pytest.param(CANONICAL, True, CANONICAL, id="canonical-uuid-is-kept"),
+        pytest.param("abc", True, None, id="not-a-uuid"),
+        pytest.param("", True, None, id="empty"),
+        pytest.param("../" + CANONICAL, True, None, id="path-traversal"),
+        pytest.param(CONVERSATION, False, None, id="no-root"),
+    ],
+)
+def test_conversation_folder(tmp_path: Path, conversation: str, use_root: bool, expected: str | None) -> None:
+    folder = conversation_folder(conversation, tmp_path if use_root else None)
+
+    assert folder == (tmp_path / expected if expected else None)
+    assert sorted(os.listdir(tmp_path)) == ([expected] if expected else [])
+
+
+@pytest.fixture
+def fresh_skip_log() -> None:
+    """The once-per-id log of skipped conversations is per process: start each test with it empty."""
+    scratch._log_skipped.cache_clear()
+
+
+@pytest.mark.parametrize(
+    ("conversations", "expected_logs"),
+    [
+        pytest.param(["abc", "abc", "abc"], 1, id="same-id-logged-once"),
+        pytest.param(["abc", "def", "abc"], 2, id="each-id-logged-once"),
+        pytest.param([CONVERSATION, CANONICAL], 0, id="a-uuid-is-not-logged"),
+    ],
+)
+def test_conversation_folder_logs_a_skipped_id_once(
+    tmp_path: Path, fresh_skip_log: None, conversations: list[str], expected_logs: int
+) -> None:
+    with capture_logs() as logs:
+        folders = [conversation_folder(conversation, tmp_path) for conversation in conversations]
+
+    skipped = [log for log in logs if log["log_level"] == "info"]
+    assert len(skipped) == expected_logs
+    assert all(log["conversation"] in conversations and "UUID" in log["event"] for log in skipped)
+    assert [folder is None for folder in folders] == [c not in {CONVERSATION, CANONICAL} for c in conversations]
+
+
+def test_conversation_folder_without_a_root_logs_nothing(fresh_skip_log: None) -> None:
+    with capture_logs() as logs:
+        assert conversation_folder("abc", None) is None
+
+    assert logs == []
+
+
+@pytest.mark.skipif(os.geteuid() == 0, reason="root ignores directory permissions")
+def test_conversation_folder_unwritable_root(tmp_path: Path) -> None:
+    tmp_path.chmod(0o500)
+    try:
+        with capture_logs() as logs:
+            folder = conversation_folder(CONVERSATION, tmp_path)
+    finally:
+        tmp_path.chmod(0o700)
+
+    assert folder is None
+    assert [log["log_level"] for log in logs] == ["error"]
+
+
+@pytest.mark.parametrize(
+    ("tool_name", "payload", "expected"),
+    [
+        pytest.param(
+            "aggregate",
+            {"results": [{"group_values": {"customer_name": "A"}, "aggregations": {"count": 2}}]},
+            (("customer_name", "count"), [("A", 2)]),
+            id="grouped-aggregate",
+        ),
+        pytest.param(
+            "aggregate",
+            {"results": [{"group_values": {"customer_name": None}, "aggregations": {"count": 2}}]},
+            (("customer_name", "count"), [("", 2)]),
+            id="none-group-value-is-empty",
+        ),
+        pytest.param(
+            "aggregate",
+            {
+                "results": [
+                    {"group_values": {"customer_name": "A"}, "aggregations": {"count": 2}},
+                    {"group_values": {"customer_name": "B", "site": "X"}, "aggregations": {"sum_bw": 5}},
+                ]
+            },
+            (("customer_name", "site", "count", "sum_bw"), [("A", "", 2, ""), ("B", "X", "", 5)]),
+            id="missing-keys-keep-columns-consistent",
+        ),
+        pytest.param(
+            "aggregate",
+            {"results": [{"group_values": {}, "aggregations": {"count": 2}}]},
+            None,
+            id="scalar-aggregate",
+        ),
+        pytest.param("aggregate", {"results": []}, None, id="zero-rows"),
+        pytest.param("aggregate", "not a payload", None, id="not-a-mapping"),
+        pytest.param(
+            "search",
+            {"results": [{"entity_id": "e1", "entity_type": "SUBSCRIPTION", "title": "T", "score": 0.5}]},
+            (("entity_id", "entity_type", "title", "score"), [("e1", "SUBSCRIPTION", "T", 0.5)]),
+            id="search-rows",
+        ),
+        pytest.param("search", {"results": []}, None, id="search-without-rows"),
+        pytest.param("resolve_entity", {"results": [{"entity_id": "e1"}]}, None, id="other-tool"),
+    ],
+)
+def test_rows_of_payload(tool_name: str, payload: Any, expected: Any) -> None:
+    assert rows_of(tool_name, payload) == expected
+
+
+def test_csv_round_trips_awkward_values(tmp_path: Path) -> None:
+    names = ["Coöperatieve Vereniging, u.a.", 'Say "hi"', "two\nlines", "GÉANT"]
+
+    saved = save_result(tmp_path, "aggregate", _grouped(*names), max_bytes=1_000_000)
+
+    assert isinstance(saved, SavedFile)
+    assert not (tmp_path / saved.name).read_bytes().startswith(b"\xef\xbb\xbf")
+    assert [row["customer_name"] for row in _data_rows(tmp_path / saved.name)] == names
+
+
+def test_saving_twice_replaces_atomically(tmp_path: Path) -> None:
+    save_result(tmp_path, "aggregate", _grouped("A", "B"), max_bytes=1_000_000)
+    saved = save_result(tmp_path, "aggregate", _grouped("A", "B", "C"), max_bytes=1_000_000)
+
+    assert isinstance(saved, SavedFile)
+    assert saved.rows == 3
+    assert len(_data_rows(tmp_path / "q-q1.csv")) == 3
+    assert sorted(os.listdir(tmp_path)) == ["q-q1.csv"]
+
+
+def test_saved_file_is_readable_by_another_user(tmp_path: Path) -> None:
+    """A temporary file is created 0600; a reader under another uid (the Monty pod) needs the file to be 0644."""
+    saved = save_result(tmp_path, "aggregate", _grouped("A"), max_bytes=1_000_000)
+
+    assert isinstance(saved, SavedFile)
+    assert (tmp_path / saved.name).stat().st_mode & 0o777 == 0o644
+
+
+def test_saved_file_describes_the_csv(tmp_path: Path) -> None:
+    saved = save_result(tmp_path, "aggregate", _grouped("A"), max_bytes=1_000_000)
+
+    assert saved == SavedFile(name="q-q1.csv", rows=1, columns=("customer_name", "count"))
+
+
+@pytest.mark.parametrize(
+    ("query_id", "pattern"),
+    [
+        pytest.param("abc", r"^q-abc\.csv$", id="query-id"),
+        pytest.param(None, r"^aggregate-[0-9a-f]{8}\.csv$", id="no-query-id"),
+        pytest.param("../../etc/x", r"^aggregate-[0-9a-f]{8}\.csv$", id="unsafe-query-id"),
+    ],
+)
+def test_file_names(tmp_path: Path, query_id: str | None, pattern: str) -> None:
+    saved = save_result(tmp_path, "aggregate", _grouped("A", query_id=query_id), max_bytes=1_000_000)
+
+    assert isinstance(saved, SavedFile)
+    assert re.match(pattern, saved.name)
+    assert os.listdir(tmp_path) == [saved.name]
+
+
+def test_too_large_is_skipped(tmp_path: Path) -> None:
+    saved = save_result(tmp_path, "aggregate", _grouped("A", "B", "C"), max_bytes=10)
+
+    assert saved == Skipped(rows=3)
+    assert os.listdir(tmp_path) == []
+
+
+def test_not_a_row_result_saves_nothing(tmp_path: Path) -> None:
+    assert save_result(tmp_path, "resolve_entity", {"results": [{"a": 1}]}, max_bytes=1_000_000) is None
+    assert os.listdir(tmp_path) == []
+
+
+def test_failed_write_leaves_no_temporary_file(tmp_path: Path) -> None:
+    class _Unprintable:
+        def __str__(self) -> str:
+            raise RuntimeError("boom")
+
+    payload = {"results": [{"group_values": {"k": _Unprintable()}, "aggregations": {"count": 1}}]}
+
+    with pytest.raises(RuntimeError):
+        save_result(tmp_path, "aggregate", payload, max_bytes=1_000_000)
+
+    assert os.listdir(tmp_path) == []
+
+
+def test_settings_defaults() -> None:
+    fields = AgentSettings.model_fields
+
+    assert [
+        fields[name].default
+        for name in (
+            "SCRATCH_DIR",
+            "SCRATCH_MAX_FILE_BYTES",
+            "SCRATCH_VIRTUAL_DIR",
+            "SCRATCH_REPLY_TABLE_MAX_ROWS",
+            "SCRATCH_REPLY_PREVIEW_ROWS",
+        )
+    ] == [None, 20_000_000, "/data", 100, 20]
+
+
+def test_file_line() -> None:
+    saved = SavedFile("q-1.csv", 152, ("customer_id", "count"))
+
+    assert file_line(CANONICAL, "/data", saved) == (
+        "Saved for run_python: conversation=2d2900fa-e77a-428c-a385-7f46cf16a457 "
+        "file=/data/q-1.csv (152 rows; columns: customer_id, count)"
+    )
+
+
+def _table(rows: int, *, totals: bool) -> str:
+    lines = ["| customer | count |", "| --- | --- |", *(f"| c{n} | {n} |" for n in range(rows))]
+    return "\n".join(lines + (["| **Total** | 5050 |"] if totals else []))
+
+
+@pytest.mark.parametrize(
+    ("rows", "totals", "max_rows", "expected_lines"),
+    [
+        pytest.param(100, True, 100, None, id="at-the-limit-unchanged"),
+        pytest.param(
+            101,
+            True,
+            100,
+            [
+                "| customer | count |",
+                "| --- | --- |",
+                *(f"| c{n} | {n} |" for n in range(20)),
+                "| **Total** | 5050 |",
+                "",
+                "… 101 rows in total; all rows are in /data/q-1.csv",
+            ],
+            id="over-the-limit-with-totals",
+        ),
+        pytest.param(
+            101,
+            False,
+            100,
+            [
+                "| customer | count |",
+                "| --- | --- |",
+                *(f"| c{n} | {n} |" for n in range(20)),
+                "",
+                "… 101 rows in total; all rows are in /data/q-1.csv",
+            ],
+            id="over-the-limit-without-totals",
+        ),
+        pytest.param(101, False, 200, None, id="unchanged-when-the-limit-is-raised"),
+    ],
+)
+def test_cut_down(rows: int, totals: bool, max_rows: int, expected_lines: list[str] | None) -> None:
+    block = _table(rows, totals=totals)
+    saved = SavedFile("q-1.csv", rows, ("customer", "count"))
+
+    result = cut_down(block, saved, "/data", max_rows=max_rows, preview_rows=20)
+
+    assert result == (block if expected_lines is None else "\n".join(expected_lines))
+
+
+def test_cut_down_leaves_a_block_that_is_not_a_table() -> None:
+    block = '```mermaid\npie\n  "a" : 1\n```'
+
+    assert cut_down(block, SavedFile("q-1.csv", 500, ("a",)), "/data", max_rows=1, preview_rows=0) == block

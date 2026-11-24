@@ -13,6 +13,7 @@
 
 from __future__ import annotations
 
+from pathlib import Path
 from typing import TYPE_CHECKING, Any, cast
 
 from pydantic import Field, SecretStr
@@ -79,6 +80,34 @@ class AgentSettings(BaseSettings):
         ge=0,
         description="Log a warning with the stack of the blocking code when the event loop has not turned for this "
         "many seconds, and again for every further period the block lasts. 0 turns the watchdog off.",
+    )
+
+    SCRATCH_DIR: Path | None = Field(
+        default=None,
+        description="Root of the conversation scratch space on a volume shared with the agent that calls this one "
+        "over A2A. The rows of a tool result are saved there as CSV files in a folder per conversation, for that "
+        "agent's sandboxed Python to read. Unset: the scratch space is off.",
+    )
+    SCRATCH_MAX_FILE_BYTES: int = Field(
+        default=20_000_000,
+        ge=0,
+        description="Largest CSV file the scratch space accepts. A larger result is not saved, and the reply says so.",
+    )
+    SCRATCH_VIRTUAL_DIR: str = Field(
+        default="/data",
+        description="The path the scratch folder of a conversation has inside the caller's sandbox. It is only "
+        "written into the reply text, as the location of the saved files.",
+    )
+    SCRATCH_REPLY_TABLE_MAX_ROWS: int = Field(
+        default=100,
+        ge=0,
+        description="A table in the reply with more data rows than this is cut down to a preview, when its rows are "
+        "saved to a scratch file.",
+    )
+    SCRATCH_REPLY_PREVIEW_ROWS: int = Field(
+        default=20,
+        ge=0,
+        description="The number of rows a cut-down table in the reply keeps.",
     )
 
     def create_model_settings(self) -> ModelSettings | None:
