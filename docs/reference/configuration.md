@@ -85,6 +85,13 @@ See [Add domain context](../guides/domain-context.md).
 
 See [How to configure authentication and authorization](../guides/secure-agent.md) and [How to trace the agent](../guides/tracing.md).
 
+## Concurrency
+
+| Variable | Default | Description |
+| --- | --- | --- |
+| `WEB_CONCURRENCY` | `1` | Number of uvicorn worker processes. Read by uvicorn itself, so it applies to the container's default command and to `uvicorn orchestrator_agent.app:app` alike; `--workers` overrides it. The default is one process because of the in-memory state listed under [Worker processes](runtime.md#worker-processes): read it before you raise it |
+| `EVENT_LOOP_STALL_SECONDS` | `5` | Log a warning with the stack of the blocking code when the event loop of a process has not turned for this many seconds, and again for every further period the block lasts. `0` turns the watchdog off. See [Concurrency and the event loop](runtime.md#concurrency-and-the-event-loop) |
+
 ## LibreChat
 
 The keys of `librechat.yaml` that the agent relies on. The full example is `examples/librechat.yaml` in the

@@ -38,6 +38,7 @@ from pydantic_ai.tools import RunContext, ToolDefinition
 
 from orchestrator_agent.artifacts import ExportArtifact, ToolArtifact
 from orchestrator_agent.capabilities.spec import PluginSpec
+from orchestrator_agent.offload import off_loop
 from orchestrator_agent.tool_names import TOOL_NAME_PLACEHOLDERS
 
 logger = structlog.get_logger(__name__)
@@ -103,7 +104,8 @@ class PluginCapability(AbstractCapability[Any]):
         if tool_def.name not in self._tools:
             return result
         try:
-            artifact = self._builder(tool_def.name, args, _result_payload(result))
+            # Rendering a large result (a table or chart of every bucket) is CPU-bound: off the event loop.
+            artifact = await off_loop(self._builder, tool_def.name, args, _result_payload(result))
         except Exception:  # noqa: BLE001 - artifact mapping must never break tool execution
             logger.exception("Artifact mapping failed; returning raw result", tool=tool_def.name)
             return result

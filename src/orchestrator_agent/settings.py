@@ -74,6 +74,13 @@ class AgentSettings(BaseSettings):
         "LANGFUSE_PUBLIC_KEY / LANGFUSE_SECRET_KEY / LANGFUSE_HOST environment variables.",
     )
 
+    EVENT_LOOP_STALL_SECONDS: float = Field(
+        default=5.0,
+        ge=0,
+        description="Log a warning with the stack of the blocking code when the event loop has not turned for this "
+        "many seconds, and again for every further period the block lasts. 0 turns the watchdog off.",
+    )
+
     def create_model_settings(self) -> ModelSettings | None:
         """The pydantic-ai model settings from ``AGENT_MODEL_SETTINGS``; None when none are configured.
 

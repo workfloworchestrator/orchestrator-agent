@@ -65,6 +65,7 @@ from orchestrator_agent.adapters.ag_ui.interrupts import AGUIInterrupts, support
 from orchestrator_agent.adapters.hitl import HumanInTheLoop
 from orchestrator_agent.artifacts import ToolArtifact
 from orchestrator_agent.mcp_client import bind_outbound_token
+from orchestrator_agent.offload import off_loop
 from orchestrator_agent.persistence import PostgresStatePersistence, StoredThread, dump_messages, load_messages
 from orchestrator_agent.state import Reply, SearchState
 
@@ -126,7 +127,7 @@ class AGUIEventStream(_BaseAGUIEventStream[Any, Any]):
     async def handle_run_result(self, event: AgentRunResultEvent) -> AsyncIterator[BaseEvent]:
         # The conversation so far, with this run's messages: the thread's memory, replayed on the next run.
         if (state := self._state) is not None:
-            state.message_history = dump_messages(event.result.all_messages())
+            state.message_history = await off_loop(dump_messages, event.result.all_messages())
         async for agui_event in super().handle_run_result(event):
             yield agui_event
 
@@ -253,7 +254,7 @@ class AGUIWorker:
         )
 
         # The thread's earlier turns are the run's history: the client sends only this run's messages.
-        history = load_messages(state.message_history)
+        history = await off_loop(load_messages, state.message_history)
 
         async def _stream_with_persistence() -> AsyncIterator[str]:
             """Stream AG-UI events, persist, and commit on completion."""

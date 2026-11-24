@@ -7,8 +7,13 @@ DB calls.
 
 from __future__ import annotations
 
+import asyncio
 import json
 import os
+import threading
+import time
+from collections import deque
+from itertools import repeat, takewhile
 from typing import Any, AsyncIterator
 
 # Set required env vars before any orchestrator_agent imports trigger Settings instantiation.
@@ -93,3 +98,32 @@ def parse_sse_events(raw_chunks: list[bytes]) -> list[dict]:
             if line.startswith("data: "):
                 events.append(json.loads(line[6:]))
     return events
+
+
+def spin(stop: threading.Event, limit: float = 3.0) -> None:
+    """Pure-Python CPU work until ``stop`` is set (or ``limit`` seconds pass): what a heavy request does.
+
+    On the event loop it blocks every other request; the limit only keeps a failing test from hanging.
+    """
+    deadline = time.perf_counter() + limit
+    deque(takewhile(lambda _: not stop.is_set() and time.perf_counter() < deadline, repeat(None)), maxlen=0)
+
+
+async def loop_lags(ticks: int = 5, every: float = 0.01) -> list[float]:
+    """How long the event loop took to wake up from each of ``ticks`` sleeps, beyond the sleep itself.
+
+    A loop that is blocked cannot wake the sleeper: the lag is the length of the block. Run it while the heavy
+    work under test is going on and assert on ``max``.
+    """
+
+    async def tick() -> float:
+        started = time.perf_counter()
+        await asyncio.sleep(every)
+        return time.perf_counter() - started - every
+
+    return [await tick() for _ in range(ticks)]
+
+
+# What a request may be held up by another one's heavy work and still count as served promptly. A blocked loop
+# is held up for the whole of the work (the ``spin`` limit), so this is generous, not a timing assertion.
+RESPONSIVE = 1.0

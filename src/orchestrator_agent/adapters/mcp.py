@@ -42,6 +42,7 @@ from orchestrator_agent.agent import new_deps
 from orchestrator_agent.artifacts import ToolArtifact
 from orchestrator_agent.capabilities import load_plugin_specs, needs_form_fill
 from orchestrator_agent.mcp_client import bind_outbound_token
+from orchestrator_agent.offload import off_loop
 
 if TYPE_CHECKING:
     from orchestrator_agent.agent import WFOAgent
@@ -95,7 +96,7 @@ class MCPWorker:
         try:
             with bind_outbound_token(auth_token):
                 result = await self.agent.run(query, deps=deps)
-            return _result_with_data(result)
+            return await off_loop(_result_with_data, result)
         except Exception:
             logger.exception("MCPWorker: run failed", query=query[:100])
             raise

@@ -45,6 +45,7 @@ from sqlalchemy.orm import Session
 from orchestrator_agent.agent import new_deps
 from orchestrator_agent.artifacts import QueryArtifact, RenderedBlock, ToolArtifact
 from orchestrator_agent.mcp_client import bind_outbound_token
+from orchestrator_agent.offload import off_loop
 from orchestrator_agent.persistence import dump_messages, load_messages
 from orchestrator_agent.state import FormInput, SearchState
 
@@ -118,7 +119,7 @@ async def run_turn(
     deps.state.form_fill = prior_state.form_fill if prior_state is not None else None
     deps.state.form_input = form_input
     # Multi-turn memory: the caller only needs to send the latest user turn.
-    message_history = load_messages(prior_state.message_history if prior_state else [])
+    message_history = await off_loop(load_messages, prior_state.message_history if prior_state else [])
 
     with bind_outbound_token(auth_token):
         output = await _run_model(agent, user_input, deps, message_history, on_artifact)
@@ -179,7 +180,7 @@ async def _run_model(
                     tool_rounds.result(result)
                 case AgentRunResultEvent():
                     final_output = str(event.result.output)
-                    deps.state.message_history = dump_messages(event.result.all_messages())
+                    deps.state.message_history = await off_loop(dump_messages, event.result.all_messages())
                 case PartDeltaEvent():
                     pass
                 case _:
