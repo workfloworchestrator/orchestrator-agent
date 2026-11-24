@@ -32,6 +32,7 @@ from sqlalchemy.orm import Session
 from structlog import get_logger
 
 from orchestrator_agent.artifacts import QueryArtifact
+from orchestrator_agent.offload import off_loop
 from orchestrator_agent.state import SearchState
 
 logger = get_logger(__name__)
@@ -214,6 +215,11 @@ def delete_thread(session: Session, thread_id: str) -> int:
     return int(getattr(result, "rowcount", 0) or 0)
 
 
+def snapshot_data(state: SearchState, sequence: int) -> dict[str, Any]:
+    """What a snapshot stores: the state as JSON, with its sequence number. CPU-bound for a long history."""
+    return {"state": state.model_dump(mode="json"), "sequence": sequence}
+
+
 class PostgresStatePersistence:
     """PostgreSQL state persistence for search agent.
 
@@ -234,15 +240,10 @@ class PostgresStatePersistence:
         Args:
             state: Current agent state
         """
-        snapshot_data = {
-            "state": state.model_dump(mode="json"),
-            "sequence": self._sequence_counter,
-        }
-
         db_snapshot = GraphSnapshotTable(
             run_id=self.run_id,
             sequence_number=self._sequence_counter,
-            snapshot_data=snapshot_data,
+            snapshot_data=await off_loop(snapshot_data, state, self._sequence_counter),
         )
 
         self.session.add(db_snapshot)
@@ -281,7 +282,7 @@ class PostgresStatePersistence:
             return None
         db_snapshot, agent_type = row
 
-        state = read_state(db_snapshot.snapshot_data, self.thread_id)
+        state = await off_loop(read_state, db_snapshot.snapshot_data, self.thread_id)
         if state is None:  # the thread starts over rather than never answering again
             return None
 

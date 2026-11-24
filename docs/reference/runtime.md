@@ -175,5 +175,66 @@ The [chats API](endpoints.md#chats-api) lists, reads and deletes AG-UI threads, 
 proxies exports prepared in that chat. Chat deletion removes the thread's snapshots and run records, so the
 database role needs `DELETE` on `graph_snapshots` and `agent_runs` as well as the permissions used for persistence.
 
+## Concurrency and the event loop
+
+Every request of a process runs on one asyncio event loop: the model calls and the calls to Core wait on the network
+without holding it, but work in Python that does not wait holds up every other request until it is done, including the
+agent card that a readiness probe reads. Processing a large tool result is such work: the MCP client checks the
+structured result against the tool's output schema, the agent renders its table or chart, and the stored history of
+the conversation is converted to and from JSON. For an aggregation of 80,000 buckets these steps took a few seconds
+of CPU in total, and a process that processes a larger result is silent for that long.
+
+The agent therefore runs these steps on a small pool of worker threads (`orchestrator_agent.offload.off_loop`, four
+threads, separate from the threads that serve `/health`):
+
+| Step | Where |
+| --- | --- |
+| Check of a tool result against its output schema | The MCP client, for every tool call, including the form-fill skill's |
+| Table and chart rendering of query results | The plugin capability that maps a tool result to its artifact |
+| Conversion of the history to and from JSON | A2A, chat completions, AG-UI |
+| The A2A artifact part of a result | A2A |
+| The snapshot of the state, and reading it back | Conversation persistence |
+| The text of a Core rejection, which embeds what it rejected | The MCP client |
+| The structured data of a result | The agent `/mcp` endpoint |
+
+A thread does not make this work faster. Python's global interpreter lock lets one thread run Python at a time, so
+the work still takes the same CPU time, and two heavy requests in one process share one core. What changes is who
+waits: the interpreter switches between threads every few milliseconds, so the loop gets turns while the work is
+going on and the other requests and the probe are answered, where on the loop itself nothing else would run until
+the work was done. One call into a library that holds the lock for its whole duration (parsing one very large JSON
+document) is not interrupted, so a block of that length remains: about half a second for an aggregation of 80,000
+buckets. The access to PostgreSQL (`db.session`, used by A2A, chat completions and AG-UI to load and store a
+conversation) is synchronous and also runs on the loop.
+
+For parallelism, use more processes: see [Worker processes](#worker-processes).
+
+### Watchdog
+
+A blocked loop cannot report itself, so a thread beside it does (`EVENT_LOOP_STALL_SECONDS`, default 5, `0` turns
+it off). When the loop has not turned for that long it logs `Event loop blocked` with the stack of the loop thread,
+and logs again for every further period the block lasts, so a long block produces a series of samples of where it
+sits. When the loop turns again it logs `Event loop turning again` with the longest block. A call that holds the
+interpreter lock is reported when it returns.
+
+### Worker processes
+
+uvicorn starts several processes when `WEB_CONCURRENCY` (or `--workers`) is above 1. Each has its own event loop, so a
+heavy request holds up only the requests of its own process; the others accept the new connections. The default is
+`1`, because these parts of the agent keep state in the memory of a process:
+
+- **A2A tasks.** The A2A SDK keeps its tasks in memory. A request that names a task (the answer to a paused workflow
+  form is a message on the same task, and so are `GetTask`, `CancelTask` and resubscribing) fails with *task does not
+  exist* when it reaches another process than the one that created the task. Clients cannot be pinned to a worker
+  inside a pod. The same holds for replicas of the agent behind one service without session affinity.
+- **Turn locks.** A2A and chat completions serialize the turns of one conversation with a lock in the memory of the
+  process. Two messages of one conversation in different processes load and store the state without it, and the last
+  one wins. A workflow start is not deduplicated across processes either.
+
+These keep their state in PostgreSQL and are safe with several processes: the AG-UI endpoint and the chats API, the
+chat completions endpoint (apart from the turn lock), and the agent `/mcp` endpoint, which is stateless. A deployment
+that serves only these can raise the number. Each process also costs memory (about 280 MiB when idle, and the peak of
+the largest result it processes: 80,000 buckets took about 600 MiB more), a connection pool to PostgreSQL, its own
+startup check of the Core tools and its own Langfuse client, so size the container and the database for the product.
+
 See [Configuration](configuration.md) for the database connection setting and
 [Endpoints and protocols](endpoints.md) for conversation identifiers and client requirements.

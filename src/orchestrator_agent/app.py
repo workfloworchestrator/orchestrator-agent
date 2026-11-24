@@ -27,6 +27,7 @@ from orchestrator_agent.agent import build_agent
 from orchestrator_agent.api.api import api_router
 from orchestrator_agent.form_fill import build_form_fill_skill
 from orchestrator_agent.form_fill.widgets import CoreApi
+from orchestrator_agent.loop_watchdog import LoopWatchdog
 from orchestrator_agent.mcp_client import build_core_toolset, verify_tool_contract
 from orchestrator_agent.observability import configure_langfuse, shutdown_langfuse
 from orchestrator_agent.security import AuthMiddleware, create_auth_manager
@@ -41,6 +42,13 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     init_database(agent_settings)  # type: ignore[arg-type]  # AgentSettings has DATABASE_URI which is all init_database needs
 
     langfuse_client = configure_langfuse()
+
+    # A blocked event loop logs nothing and serves nothing: a thread beside it says where it is stuck.
+    watchdog = (
+        LoopWatchdog(agent_settings.EVENT_LOOP_STALL_SECONDS) if agent_settings.EVENT_LOOP_STALL_SECONDS else None
+    )
+    if watchdog is not None:
+        watchdog.start()
 
     # Fail loud at startup if the live MCP server's tools have drifted from what the agent expects.
     core_toolset = build_core_toolset()
@@ -87,6 +95,9 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     yield
 
     await stack.__aexit__(None, None, None)
+
+    if watchdog is not None:
+        watchdog.stop()
 
     if langfuse_client is not None:
         shutdown_langfuse(langfuse_client)

@@ -46,12 +46,15 @@ from typing import Any, cast
 
 import httpx
 import structlog
+from mcp import ClientSession
+from mcp.types import CallToolResult
 from pydantic_ai import ModelRetry, RunContext
 from pydantic_ai.mcp import CallToolFunc, MCPToolset, ToolResult
 from pydantic_ai.toolsets import AbstractToolset
 from pydantic_ai.toolsets.abstract import ToolsetTool
 
 from orchestrator_agent.auth import token_manager
+from orchestrator_agent.offload import off_loop
 from orchestrator_agent.settings import agent_settings
 from orchestrator_agent.tool_names import ALL_TOOL_NAMES
 
@@ -81,6 +84,55 @@ def bind_outbound_token(token: str | None) -> Generator[None, None, None]:
         yield
     finally:
         _outbound_token.reset(reset_token)
+
+
+# --- The SDK's check of a tool result, off the event loop ---------------------------------------------------------
+
+
+def _check_structured_content(name: str, content: Any, schema: dict[str, Any]) -> None:
+    """The MCP SDK's check of a tool's structured result against its output schema, with the SDK's errors.
+
+    Pure Python that visits every value of the result: for an aggregation of tens of thousands of buckets it is
+    the largest single piece of CPU work of a tool call (about 25 microseconds a bucket, 2 s for 80,000).
+    """
+    from jsonschema import SchemaError, ValidationError, validate
+    from referencing import Registry
+    from referencing.exceptions import Unresolvable
+
+    try:
+        # An explicit empty registry: `$ref`s resolve within the schema document and the bundled metaschemas.
+        validate(content, schema, registry=Registry())
+    except ValidationError as error:
+        raise RuntimeError(f"Invalid structured content returned by tool {name}: {error}") from error
+    except SchemaError as error:
+        raise RuntimeError(f"Invalid schema for tool {name}: {error}") from error
+    except Unresolvable as error:
+        raise RuntimeError(f"Invalid schema for tool {name}: {error}") from error
+
+
+async def _validate_tool_result(self: ClientSession, name: str, result: CallToolResult) -> None:
+    """``ClientSession._validate_tool_result`` with the check run on a worker thread (see :func:`off_loop`).
+
+    The SDK validates inside the coroutine that receives the result, so the whole check blocks the event loop of
+    every request of the process. The behaviour is the SDK's: the output schemas are refreshed when the tool is
+    not known, a tool without a schema is not checked, and a result that does not match raises ``RuntimeError``.
+    """
+    if name not in self._tool_output_schemas:
+        await self.list_tools()  # refreshes the output schema cache
+    schema = self._tool_output_schemas.get(name)
+    if schema is None:
+        return
+    if result.structuredContent is None:
+        raise RuntimeError(f"Tool {name} has an output schema but did not return structured content")
+    await off_loop(_check_structured_content, name, result.structuredContent, schema)
+
+
+# Replaced on the SDK's session class, as the SDK has no setting for it; the other tool calls of the process
+# (the form-fill skill's, the startup contract check) go through the same session class.
+if hasattr(ClientSession, "_validate_tool_result"):
+    ClientSession._validate_tool_result = _validate_tool_result  # type: ignore[method-assign]
+else:  # a later SDK reorganised its client: the result is checked on the event loop again
+    logger.warning("The MCP SDK has no ClientSession._validate_tool_result to run off the event loop")
 
 
 class _ContextVarBearerAuth(httpx.Auth):
@@ -327,7 +379,8 @@ def build_core_toolset() -> MCPToolset[Any]:
         try:
             return await call_tool(name, decoded)
         except ModelRetry as exc:
-            raise ModelRetry(explain_core_rejection(str(exc), decoded)) from exc
+            # The rejection of a large request embeds the input it rejected, and is parsed here: off the event loop.
+            raise ModelRetry(await off_loop(explain_core_rejection, str(exc), decoded)) from exc
 
     toolset: _CoreToolset = _CoreToolset(
         agent_settings.WFO_CORE_MCP_URL,

@@ -44,7 +44,7 @@ from a2a.server.events import EventQueue
 from a2a.server.request_handlers import DefaultRequestHandler
 from a2a.server.routes import add_a2a_routes_to_fastapi, create_agent_card_routes, create_jsonrpc_routes
 from a2a.server.tasks import InMemoryTaskStore, TaskUpdater
-from a2a.types import AgentCapabilities, AgentCard, AgentExtension, AgentInterface, Message, TaskState
+from a2a.types import AgentCapabilities, AgentCard, AgentExtension, AgentInterface, Message, Part, TaskState
 from a2a.utils.constants import PROTOCOL_VERSION_0_3, PROTOCOL_VERSION_1_0, TransportProtocol
 from fastapi import FastAPI
 from google.protobuf import json_format
@@ -53,6 +53,7 @@ from pydantic_ai.messages import ToolReturnPart
 from orchestrator_agent.adapters.a2a.kagent import HITL_EXTENSION_DESCRIPTION, HITL_EXTENSION_URI, KagentHitl
 from orchestrator_agent.adapters.hitl import HumanInTheLoop
 from orchestrator_agent.capabilities.spec import skills_from_specs
+from orchestrator_agent.offload import off_loop
 from orchestrator_agent.persistence import PostgresStatePersistence
 from orchestrator_agent.state import FormInput
 from orchestrator_agent.turn import NO_RESULTS, ConversationLocks, OnArtifact, run_turn
@@ -201,9 +202,12 @@ class WFOAgentExecutor(AgentExecutor):
     def _publisher(updater: TaskUpdater) -> OnArtifact:
         """Tool results that carry an artifact go out as A2A artifacts (a data part), as they happen."""
 
+        def data_part(result: ToolReturnPart) -> Part:
+            # A large result is parsed and converted to a protobuf value: CPU-bound, so off the event loop.
+            return new_data_part(json.loads(result.model_response_str()))
+
         async def publish(result: ToolReturnPart) -> None:
-            data = json.loads(result.model_response_str())
-            await updater.add_artifact(parts=[new_data_part(data)])
+            await updater.add_artifact(parts=[await off_loop(data_part, result)])
 
         return publish
 
