@@ -25,15 +25,19 @@ relevance ``score`` is omitted as noise.
 A grouped aggregation is a table too: one column per grouping key and one per aggregation, every
 bucket a row. It is not capped — grouping is the uncapped way to list a population, and its rows are
 the answer (an agent caller reads them back as data). It is the default rendering; the chart is only
-for a caller that asked for one (see ``capabilities.behavior.artifacts.query_artifact``).
+for a caller that asked for one (see ``capabilities.behavior.artifacts.query_artifact``). When the
+aggregations are additive (counts and sums) the table ends in a totals row, so the model quotes the
+total instead of adding the buckets up by hand, which it gets wrong.
 """
 
 from __future__ import annotations
 
 from itertools import chain
+from math import fsum
 from typing import Any
 
 ROW_CAP = 10
+TOTAL_LABEL = "**Total**"
 
 
 def aggregate_to_markdown(payload: Any) -> str | None:
@@ -41,6 +45,12 @@ def aggregate_to_markdown(payload: Any) -> str | None:
 
     Columns are the grouping keys, then the aggregations, in first-seen order. A scalar aggregate (no
     ``group_values``) is one number, not a table.
+
+    With at least two buckets and at least one additive aggregation (a name that is ``count`` or starts
+    with ``count``/``sum``, case-insensitive) a final row carries the column totals: ``**Total**`` in the
+    first group column, empty cells in the other group columns and in non-additive aggregation columns
+    (avg, min, max, ...). Ints stay ints; non-numeric cells (missing, ``None``, strings, booleans) are
+    ignored in the sum, that is, counted as 0.
     """
     if not isinstance(payload, dict):
         return None
@@ -56,7 +66,42 @@ def aggregate_to_markdown(payload: Any) -> str | None:
         + [_cell((row.get("aggregations") or {}).get(key)) for key in metric_keys]
         for row in rows
     )
-    return "\n".join(_row(cells) for cells in chain([headers, ["---"] * len(headers)], body))
+    totals = _totals_row(rows, group_keys, metric_keys)
+    return "\n".join(_row(cells) for cells in chain([headers, ["---"] * len(headers)], body, totals))
+
+
+def _totals_row(rows: list[dict[str, Any]], group_keys: list[str], metric_keys: list[str]) -> list[list[str]]:
+    """The totals row as a (zero or one element) list of cells; empty when there is nothing to add up."""
+    if len(rows) < 2 or not any(_is_additive(key) for key in metric_keys):
+        return []
+    group_cells = [TOTAL_LABEL] + [""] * (len(group_keys) - 1)
+    metric_cells = [
+        _cell(_total((row.get("aggregations") or {}).get(key) for row in rows)) if _is_additive(key) else ""
+        for key in metric_keys
+    ]
+    return [group_cells + metric_cells]
+
+
+def _is_additive(name: str) -> bool:
+    """Counts and sums add up across buckets; averages, minima, maxima and anything else do not."""
+    return name.lower().startswith(("count", "sum"))
+
+
+def _total(values: Any) -> int | float:
+    """Sum of the numeric ``values``: stays an int when every value is one, rounds away float noise."""
+    numbers = [_number(value) for value in values]
+    return sum(numbers) if all(isinstance(number, int) for number in numbers) else round(fsum(numbers), 10)
+
+
+def _number(value: Any) -> int | float:
+    """``value`` when it is a real number, else 0 (booleans are flags, not quantities)."""
+    match value:
+        case bool():
+            return 0
+        case int() | float():
+            return value
+        case _:
+            return 0
 
 
 def _ordered_keys(mappings: Any) -> list[str]:
