@@ -527,11 +527,19 @@ class TestAggregateTable:
             ),
             pytest.param(
                 [
-                    {"group_values": {"k": "a"}, "aggregations": {"Count": 1, "COUNT_DISTINCT": 2}},
-                    {"group_values": {"k": "b"}, "aggregations": {"Count": 3, "COUNT_DISTINCT": 4}},
+                    {"group_values": {"k": "a"}, "aggregations": {"Count": 1, "SUM_Speed": 2}},
+                    {"group_values": {"k": "b"}, "aggregations": {"Count": 3, "SUM_Speed": 4}},
                 ],
-                "| k | Count | COUNT_DISTINCT |\n| --- | --- | --- |\n| a | 1 | 2 |\n| b | 3 | 4 |\n| **Total** | 4 | 6 |",
+                "| k | Count | SUM_Speed |\n| --- | --- | --- |\n| a | 1 | 2 |\n| b | 3 | 4 |\n| **Total** | 4 | 6 |",
                 id="additive-names-are-case-insensitive",
+            ),
+            pytest.param(
+                [
+                    {"group_values": {"k": "a"}, "aggregations": {"count": 1, "COUNT_DISTINCT_customer": 2}},
+                    {"group_values": {"k": "b"}, "aggregations": {"count": 3, "COUNT_DISTINCT_customer": 4}},
+                ],
+                "| k | count | COUNT_DISTINCT_customer |\n| --- | --- | --- |\n| a | 1 | 2 |\n| b | 3 | 4 |\n| **Total** | 4 |  |",
+                id="distinct-counts-are-not-summed",
             ),
         ],
     )
@@ -561,6 +569,14 @@ class TestAggregateTable:
                 ],
                 "| k | avg_speed |\n| --- | --- |\n| a | 1 |\n| b | 2 |",
                 id="avg-only",
+            ),
+            pytest.param(
+                [
+                    {"group_values": {"k": "a"}, "aggregations": {"count_distinct": 2}},
+                    {"group_values": {"k": "b"}, "aggregations": {"count_distinct": 4}},
+                ],
+                "| k | count_distinct |\n| --- | --- |\n| a | 2 |\n| b | 4 |",
+                id="distinct-count-only",
             ),
         ],
     )

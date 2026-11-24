@@ -47,7 +47,7 @@ def aggregate_to_markdown(payload: Any) -> str | None:
     ``group_values``) is one number, not a table.
 
     With at least two buckets and at least one additive aggregation (a name that is ``count`` or starts
-    with ``count``/``sum``, case-insensitive) a final row carries the column totals: ``**Total**`` in the
+    with ``count``/``sum``, case-insensitive, and is not a distinct count) a final row carries the column totals: ``**Total**`` in the
     first group column, empty cells in the other group columns and in non-additive aggregation columns
     (avg, min, max, ...). Ints stay ints; non-numeric cells (missing, ``None``, strings, booleans) are
     ignored in the sum, that is, counted as 0.
@@ -83,8 +83,12 @@ def _totals_row(rows: list[dict[str, Any]], group_keys: list[str], metric_keys: 
 
 
 def _is_additive(name: str) -> bool:
-    """Counts and sums add up across buckets; averages, minima, maxima and anything else do not."""
-    return name.lower().startswith(("count", "sum"))
+    """Counts and sums add up across buckets; averages, minima, maxima and anything else do not.
+
+    Neither does a distinct count: a value present in two buckets would be counted twice.
+    """
+    lowered = name.lower()
+    return lowered.startswith(("count", "sum")) and "distinct" not in lowered
 
 
 def _total(values: Any) -> int | float:
