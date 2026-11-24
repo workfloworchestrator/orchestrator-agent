@@ -84,7 +84,8 @@ of Markdown:
 - The **write tool gate**, on A2A, `/v1` and AG-UI (the agent with the form-fill skill), hides Core's three named
   workflow mutations from the model, so built-in workflow starts go
   through the form-fill skill. See [Read tools and write tools](#read-tools-and-write-tools).
-- **History trimming** keeps a sliding window of the conversation.
+- **History trimming** keeps a sliding window of the conversation. A tool result from an earlier call is also
+  bounded; see [Conversation persistence](#conversation-persistence).
 
 Tables and charts are **rendered blocks**: the agent builds a Markdown table or a Mermaid chart from the result in
 code. A grouped aggregation is a table unless the `aggregate` call set `visualization_type` (the model sets it only
@@ -138,6 +139,17 @@ The skill's internal reply text is JSON; LibreChat and AG-UI render it as Markdo
 The agent connects directly to the WFO PostgreSQL database using `DATABASE_URI`. It records runs in `agent_runs`
 and state snapshots in `graph_snapshots`, using the models supplied by Orchestrator Core. A snapshot includes
 message history, query state and any open workflow form. Later turns load the latest snapshot for the conversation.
+
+No tool result in the stored history is larger than 20,000 characters (the JSON text of its content). A larger
+one, such as a grouped aggregation over every subscription, is kept as its first 20,000 characters (marker
+included) with a note of its original size and that the query can be re-run. A tool result's artifact over 10,000
+characters of JSON is bounded too (the client received it whole in the turn that produced it): a query artifact
+keeps its reference (query, description, result count) without the table or chart it rendered, so a reopened chat
+still shows which query a result came from, and any other artifact that large is dropped. This is
+applied when the history is saved and when it is loaded, so threads stored before the limit existed are repaired on
+their next call; each truncated result is logged with its tool name and original size. The call that produced a
+result still gives the model the whole result: only the history replayed to later calls is bounded, so the model
+re-runs a query when it needs rows of an earlier result again.
 
 A2A, OpenAI chat completions and AG-UI replay stored message history. AG-UI takes the new turn's messages from
 the frontend, replaces client-supplied state with stored state, and saves the resulting history. The MCP endpoint records

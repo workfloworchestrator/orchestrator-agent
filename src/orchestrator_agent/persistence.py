@@ -12,31 +12,125 @@
 # limitations under the License.
 
 from collections.abc import Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import datetime
-from typing import Any
+from typing import Any, cast
 from uuid import UUID
 
 from orchestrator.core.db.models import AgentRunTable, GraphSnapshotTable
 from pydantic import ValidationError
-from pydantic_ai.messages import ModelMessage, ModelMessagesTypeAdapter
+from pydantic_ai.messages import (
+    ModelMessage,
+    ModelMessagesTypeAdapter,
+    ModelRequest,
+    ModelRequestPart,
+    ToolReturnPart,
+)
+from pydantic_core import to_json
 from sqlalchemy import delete, select
 from sqlalchemy.orm import Session
 from structlog import get_logger
 
+from orchestrator_agent.artifacts import QueryArtifact
 from orchestrator_agent.state import SearchState
 
 logger = get_logger(__name__)
 
 
+# What one tool result may weigh in a thread's history, as the model reads it (the JSON text of its content).
+# A grouped aggregation over every subscription is hundreds of KB; replayed on every later call of the thread
+# it made each of them run out of memory before doing any work.
+MAX_HISTORY_TOOL_RESULT_CHARS = 20_000
+# The artifact a result carries is for the client, which got it in the turn that made it. Over this size a query
+# artifact keeps only its reference (the rows it rendered go); any other artifact that large is dropped.
+MAX_HISTORY_TOOL_METADATA_CHARS = 10_000
+# What a query artifact carries of its rows: the rendered table or chart, and the chart's points.
+_QUERY_ARTIFACT_ROWS = frozenset({"rendered_block", "chart"})
+
+
+def _truncation_marker(original_chars: int) -> str:
+    return (
+        f"\n[truncated from {original_chars} chars when stored in the conversation history; "
+        "re-run the query to see all rows]"
+    )
+
+
+def _bounded_part(part: ModelRequestPart) -> ModelRequestPart:
+    """A tool result within the limits of the history; any other part, and a result within them, as it is.
+
+    Over the limit the content becomes the start of its JSON text and a marker that says how long it was, the
+    whole no longer than the limit, so bounding what is bounded already changes nothing. The call id and tool
+    name stay: the model's provider wants every call answered.
+    """
+    match part:
+        case ToolReturnPart(metadata=metadata):
+            text = part.model_response_str()
+            kept_metadata = _bounded_metadata(metadata)
+            if len(text) <= MAX_HISTORY_TOOL_RESULT_CHARS:
+                return part if kept_metadata is metadata else replace(part, metadata=kept_metadata)
+            logger.info(
+                "Truncated a large tool result in the conversation history",
+                tool_name=part.tool_name,
+                original_chars=len(text),
+            )
+            marker = _truncation_marker(len(text))
+            # The typed tool parts (a tool search's matches) declare their own content shape; they are small, and
+            # it is only ever the text of a large result that is put in place of its content.
+            plain = cast("ToolReturnPart[Any]", part)
+            return replace(
+                plain, content=text[: MAX_HISTORY_TOOL_RESULT_CHARS - len(marker)] + marker, metadata=kept_metadata
+            )
+        case _:
+            return part
+
+
+def _small(metadata: object) -> bool:
+    return len(to_json(metadata, fallback=repr)) <= MAX_HISTORY_TOOL_METADATA_CHARS
+
+
+def _bounded_metadata(metadata: object) -> object:
+    """A result's artifact within the limit: as it is when small, a query artifact as its reference, else None.
+
+    A reopened chat still shows which query a result came from (``GET /chats/{id}`` reads the artifact back); a
+    stored history holds the artifact as the model it was, or as its JSON once loaded again.
+    """
+    if metadata is None or _small(metadata):
+        return metadata
+    match metadata:
+        case QueryArtifact():
+            lighter: object = metadata.model_copy(update=dict.fromkeys(_QUERY_ARTIFACT_ROWS))
+        case dict() if "query_id" in metadata:
+            lighter = metadata | dict.fromkeys(_QUERY_ARTIFACT_ROWS)
+        case _:
+            lighter = None
+    return lighter if lighter is not None and _small(lighter) else None
+
+
+def _bounded_message(message: ModelMessage) -> ModelMessage:
+    match message:
+        case ModelRequest(parts=parts):  # tool results come back in requests
+            return replace(message, parts=[_bounded_part(part) for part in parts])
+        case _:
+            return message
+
+
+def truncate_tool_results(messages: Sequence[ModelMessage]) -> list[ModelMessage]:
+    """The messages with every tool result bounded (see ``_bounded_part``); the ones given are left as they are."""
+    return [_bounded_message(message) for message in messages]
+
+
 def dump_messages(messages: Sequence[ModelMessage]) -> list[dict[str, Any]]:
-    """Model messages as the JSON the state stores in ``message_history``."""
-    return ModelMessagesTypeAdapter.dump_python(list(messages), mode="json")
+    """Model messages as the JSON the state stores in ``message_history``, no tool result larger than the limit."""
+    return ModelMessagesTypeAdapter.dump_python(truncate_tool_results(messages), mode="json")
 
 
 def load_messages(stored: Sequence[dict[str, Any]]) -> list[ModelMessage] | None:
-    """The stored ``message_history`` back as model messages; None when there is none to replay."""
-    return ModelMessagesTypeAdapter.validate_python(list(stored)) if stored else None
+    """The stored ``message_history`` back as model messages; None when there is none to replay.
+
+    A thread stored before results were bounded is repaired here, on its next call. Validation leaves a
+    result's content as the object it was stored as, so a huge one is not copied before it is cut.
+    """
+    return truncate_tool_results(ModelMessagesTypeAdapter.validate_python(list(stored))) if stored else None
 
 
 @dataclass(frozen=True)
