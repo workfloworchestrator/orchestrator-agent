@@ -92,6 +92,18 @@ See [How to configure authentication and authorization](../guides/secure-agent.m
 | `WEB_CONCURRENCY` | `1` | Number of uvicorn worker processes. Read by uvicorn itself, so it applies to the container's default command and to `uvicorn orchestrator_agent.app:app` alike; `--workers` overrides it. The default is one process because of the in-memory state listed under [Worker processes](runtime.md#worker-processes): read it before you raise it |
 | `EVENT_LOOP_STALL_SECONDS` | `5` | Log a warning with the stack of the blocking code when the event loop of a process has not turned for this many seconds, and again for every further period the block lasts. `0` turns the watchdog off. See [Concurrency and the event loop](runtime.md#concurrency-and-the-event-loop) |
 
+## Conversation scratch space
+
+Off unless `SCRATCH_DIR` is set. When it is, the agent saves the rows of the final tool round of an A2A answer as CSV files, in a folder per conversation on a volume shared with the calling agent, so that agent's sandboxed Python can read them instead of having the model retype them. Only a conversation whose id is a UUID gets a folder: `<SCRATCH_DIR>/<conversation id>/`, with the id in lowercase and hyphenated. A file is `q-<query_id>.csv`, or `<tool>-<random>.csv` when the result has no query id.
+
+| Variable | Default | Description |
+| --- | --- | --- |
+| `SCRATCH_DIR` | unset | Root of the scratch space on the shared volume. Unset turns the feature off |
+| `SCRATCH_MAX_FILE_BYTES` | `20000000` | Largest CSV file that is saved. A larger result is not written, and the reply says so |
+| `SCRATCH_VIRTUAL_DIR` | `/data` | The path of the conversation folder inside the caller's sandbox. Only written into the reply text |
+| `SCRATCH_REPLY_TABLE_MAX_ROWS` | `100` | A table in the reply with more data rows than this is cut down to a preview, when its rows are saved |
+| `SCRATCH_REPLY_PREVIEW_ROWS` | `20` | The number of rows a cut-down table keeps |
+
 ## LibreChat
 
 The keys of `librechat.yaml` that the agent relies on. The full example is `examples/librechat.yaml` in the
