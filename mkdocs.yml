@@ -13,6 +13,7 @@ nav:
       - How to connect LibreChat: guides/librechat.md
       - How to use the agent with MCP: guides/mcp-clients.md
       - How to connect another agent over A2A: guides/a2a-planner.md
+      - How to add the agent chat to the WFO UI or your own portal: guides/chat-popup.md
       - How to change the language model: guides/own-llm.md
       - How to add domain context: guides/domain-context.md
       - How to customise a plugin: guides/customise-plugin.md
