@@ -120,21 +120,22 @@ def save_result(folder: Path, tool_name: str, payload: Any, max_bytes: int) -> S
         return None
     columns, rows = table
     name = _file_name(tool_name, payload)
-    with tempfile.NamedTemporaryFile(
-        "w", dir=folder, suffix=".tmp", delete=False, encoding="utf-8", newline=""
-    ) as temporary:
-        try:
+    temporary_path: Path | None = None
+    try:
+        with tempfile.NamedTemporaryFile(
+            "w", dir=folder, suffix=".tmp", delete=False, encoding="utf-8", newline=""
+        ) as temporary:
+            temporary_path = Path(temporary.name)
             csv.writer(temporary, lineterminator="\n").writerows(chain([columns], rows))
-            temporary.flush()
-            too_large = os.path.getsize(temporary.name) > max_bytes
-            if not too_large:
-                os.replace(temporary.name, folder / name)
-        except BaseException:
-            Path(temporary.name).unlink(missing_ok=True)
-            raise
-    if too_large:
-        Path(temporary.name).unlink(missing_ok=True)
-        return Skipped(rows=len(rows))
+        # Closed before the size check and the rename: a rename of a file that is still open can fail on an SMB share.
+        if temporary_path.stat().st_size > max_bytes:
+            temporary_path.unlink()
+            return Skipped(rows=len(rows))
+        os.replace(temporary_path, folder / name)
+    except BaseException:
+        if temporary_path is not None:
+            temporary_path.unlink(missing_ok=True)
+        raise
     return SavedFile(name=name, rows=len(rows), columns=columns)
 
 
