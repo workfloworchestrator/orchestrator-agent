@@ -8,8 +8,7 @@ This guide shows you how to add the Orchestrator Agent as a chat popup in the bo
 a React portal of your own. The popup is the React component `WfoChat` from the npm package
 [`@orchestrator-ui/orchestrator-agent-chat`](https://github.com/workfloworchestrator/orchestrator-agent-chat). It
 talks to the agent over [AG-UI](https://docs.ag-ui.com/), shows charts and tables, offers exports as downloads, and
-walks through workflow forms. The WFO UI already contains this component, so both routes need the same setup apart
-from one step.
+walks through workflow forms. The example WFO UI already includes this component and its proxy; a custom React portal needs both configured.
 
 For the example stack, follow [Explore the agent inside the WFO UI](https://workfloworchestrator.org/learn/orchestrator-agent/tutorials/example-orchestrator/#part-4-explore-the-agent-inside-the-wfo-ui).
 Its optional Compose overlay builds the companion UI and configures a same-origin proxy for chat, history,
@@ -30,6 +29,9 @@ form options and downloads. The steps below cover a different WFO deployment or 
 <a id="proxy-setup"></a>
 
 ### 1. Forward `/agui/` and `/chats` to the agent
+
+The example UI includes a proxy: follow its [README setup](https://github.com/workfloworchestrator/example-orchestrator-ui#agent-chat-ag-ui)
+instead of adding another one. For another application, configure the proxy below.
 
 The popup uses two routes of the agent: `/agui/` for the conversation and `/chats` for chat history, form options and
 export downloads. By default it calls both on the page's own origin, so forward both routes from the server that
@@ -86,36 +88,12 @@ serves the page to the agent.
     The WFO UI shows the popup on every page once its configuration has `orchestratorAgentUrl`. It passes the
     signed-in person's access token to the agent, and gives the popup the colours of the current theme.
 
-    1. Upgrade `@orchestrator-ui/orchestrator-ui-components` to 11.0.0 or later. Version 11 removes the
-       Search (beta) page; see the
-       [changelog](https://github.com/workfloworchestrator/orchestrator-ui-library/blob/main/CHANGELOG.md)
-       for what to change in your app.
-    2. In the function that builds your `OrchestratorConfig` (`getInitialOrchestratorConfig` in
-       `configuration/configuration.ts` of the example UI), read an environment variable for the agent and set
-       `orchestratorAgentUrl`:
+    Start with the [example UI's Agent chat setup](https://github.com/workfloworchestrator/example-orchestrator-ui#agent-chat-ag-ui).
+    Its README and `.env.example` document the environment settings and bundled proxy. The example app
+    already maps those settings to `orchestratorAgentUrl`; no separate chat component is needed.
 
-        ```ts
-        const {
-            // ...the variables you already read
-            ORCHESTRATOR_AGENT_URL,
-        } = getEnvironmentVariables([
-            // ...
-            'ORCHESTRATOR_AGENT_URL',
-        ]);
-
-        return {
-            // ...the settings you already return
-            orchestratorAgentUrl: ORCHESTRATOR_AGENT_URL || undefined,
-        };
-        ```
-
-        The variable name is your choice. Leaving it empty hides the popup.
-
-    3. Set the variable to the AG-UI route as the browser reaches it, and restart the UI:
-
-        ```shell
-        ORCHESTRATOR_AGENT_URL=/agui/
-        ```
+    If your WFO UI is based on another application, use the example's configuration and proxy as a
+    reference, or follow the custom React portal instructions below.
 
 === "Your own React portal"
 
