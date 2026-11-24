@@ -472,26 +472,124 @@ class TestAggregateChart:
 class TestAggregateTable:
     """Deterministic Markdown table for grouped aggregations (tables.aggregate_to_markdown)."""
 
-    def test_one_column_per_group_key_and_aggregation(self):
-        payload = {
-            "results": [
-                {"group_values": {"customer": "TNO", "node": "dt011a-jnx-03"}, "aggregations": {"count": 12}},
-                {"group_values": {"customer": "TU Delft", "node": "dt010a-jnx-01"}, "aggregations": {"count": 3}},
-            ]
-        }
-        assert aggregate_to_markdown(payload) == (
-            "| customer | node | count |\n"
-            "| --- | --- | --- |\n"
-            "| TNO | dt011a-jnx-03 | 12 |\n"
-            "| TU Delft | dt010a-jnx-01 | 3 |"
-        )
+    @pytest.mark.parametrize(
+        ("results", "expected"),
+        [
+            pytest.param(
+                [
+                    {"group_values": {"customer": "TNO"}, "aggregations": {"count": 12}},
+                    {"group_values": {"customer": "TU Delft"}, "aggregations": {"count": 3}},
+                ],
+                "| customer | count |\n| --- | --- |\n| TNO | 12 |\n| TU Delft | 3 |\n| **Total** | 15 |",
+                id="count-total",
+            ),
+            pytest.param(
+                [
+                    {"group_values": {"status": "active"}, "aggregations": {"sum_bandwidth": 100, "avg_bandwidth": 50}},
+                    {"group_values": {"status": "initial"}, "aggregations": {"sum_bandwidth": 20, "avg_bandwidth": 10}},
+                ],
+                "| status | sum_bandwidth | avg_bandwidth |\n"
+                "| --- | --- | --- |\n"
+                "| active | 100 | 50 |\n"
+                "| initial | 20 | 10 |\n"
+                "| **Total** | 120 |  |",
+                id="sum-total-avg-left-empty",
+            ),
+            pytest.param(
+                [
+                    {"group_values": {"customer": "TNO", "node": "a"}, "aggregations": {"count": 12}},
+                    {"group_values": {"customer": "TU Delft", "node": "b"}, "aggregations": {"count": 3}},
+                ],
+                "| customer | node | count |\n"
+                "| --- | --- | --- |\n"
+                "| TNO | a | 12 |\n"
+                "| TU Delft | b | 3 |\n"
+                "| **Total** |  | 15 |",
+                id="multi-key-total-in-first-key-column-only",
+            ),
+            pytest.param(
+                [
+                    {"group_values": {"k": "a"}, "aggregations": {"count": 0.1, "sum_x": 1.5}},
+                    {"group_values": {"k": "b"}, "aggregations": {"count": 0.2, "sum_x": 2.25}},
+                ],
+                "| k | count | sum_x |\n| --- | --- | --- |\n| a | 0.1 | 1.5 |\n| b | 0.2 | 2.25 |\n| **Total** | 0.3 | 3.75 |",
+                id="floats-without-binary-noise",
+            ),
+            pytest.param(
+                [
+                    {"group_values": {"k": "a"}, "aggregations": {"count": 4}},
+                    {"group_values": {"k": "b"}, "aggregations": {"count": "n/a"}},
+                    {"group_values": {"k": "c"}, "aggregations": {"count": None}},
+                    {"group_values": {"k": "d"}, "aggregations": {"count": True}},
+                ],
+                "| k | count |\n| --- | --- |\n| a | 4 |\n| b | n/a |\n| c |  |\n| d | True |\n| **Total** | 4 |",
+                id="non-numeric-cells-count-as-zero",
+            ),
+            pytest.param(
+                [
+                    {"group_values": {"k": "a"}, "aggregations": {"Count": 1, "SUM_Speed": 2}},
+                    {"group_values": {"k": "b"}, "aggregations": {"Count": 3, "SUM_Speed": 4}},
+                ],
+                "| k | Count | SUM_Speed |\n| --- | --- | --- |\n| a | 1 | 2 |\n| b | 3 | 4 |\n| **Total** | 4 | 6 |",
+                id="additive-names-are-case-insensitive",
+            ),
+            pytest.param(
+                [
+                    {"group_values": {"k": "a"}, "aggregations": {"count": 1, "COUNT_DISTINCT_customer": 2}},
+                    {"group_values": {"k": "b"}, "aggregations": {"count": 3, "COUNT_DISTINCT_customer": 4}},
+                ],
+                "| k | count | COUNT_DISTINCT_customer |\n| --- | --- | --- |\n| a | 1 | 2 |\n| b | 3 | 4 |\n| **Total** | 4 |  |",
+                id="distinct-counts-are-not-summed",
+            ),
+        ],
+    )
+    def test_additive_aggregations_get_a_totals_row(self, results, expected):
+        assert aggregate_to_markdown({"results": results}) == expected
+
+    @pytest.mark.parametrize(
+        ("results", "expected"),
+        [
+            pytest.param(
+                [{"group_values": {"customer": "TNO"}, "aggregations": {"count": 12}}],
+                "| customer | count |\n| --- | --- |\n| TNO | 12 |",
+                id="single-bucket",
+            ),
+            pytest.param(
+                [
+                    {"group_values": {"k": "a"}, "aggregations": {"min_speed": 1, "max_speed": 5}},
+                    {"group_values": {"k": "b"}, "aggregations": {"min_speed": 2, "max_speed": 9}},
+                ],
+                "| k | min_speed | max_speed |\n| --- | --- | --- |\n| a | 1 | 5 |\n| b | 2 | 9 |",
+                id="min-max-only",
+            ),
+            pytest.param(
+                [
+                    {"group_values": {"k": "a"}, "aggregations": {"avg_speed": 1}},
+                    {"group_values": {"k": "b"}, "aggregations": {"avg_speed": 2}},
+                ],
+                "| k | avg_speed |\n| --- | --- |\n| a | 1 |\n| b | 2 |",
+                id="avg-only",
+            ),
+            pytest.param(
+                [
+                    {"group_values": {"k": "a"}, "aggregations": {"count_distinct": 2}},
+                    {"group_values": {"k": "b"}, "aggregations": {"count_distinct": 4}},
+                ],
+                "| k | count_distinct |\n| --- | --- |\n| a | 2 |\n| b | 4 |",
+                id="distinct-count-only",
+            ),
+        ],
+    )
+    def test_no_totals_row_when_nothing_adds_up(self, results, expected):
+        assert aggregate_to_markdown({"results": results}) == expected
 
     def test_every_row_is_kept(self):
         # Grouping is the uncapped way to list a population; a table that drops rows would be wrong.
         rows = [{"group_values": {"n": f"node-{i}"}, "aggregations": {"count": i}} for i in range(500)]
         table = aggregate_to_markdown({"results": rows})
         assert table is not None
-        assert table.count("\n") == 501  # header + separator + 500 rows
+        assert table.count("\n") == 502  # header + separator + 500 rows + totals row
+        assert table.endswith(f"| **Total** | {sum(range(500))} |")
 
     def test_cells_cannot_break_the_row(self):
         payload = {"results": [{"group_values": {"name": "a|b\nc"}, "aggregations": {"count": 1}}]}
