@@ -17,6 +17,11 @@ dependencies = [
 [tool.uv.sources]
 orchestrator-agent = { path = "..", editable = true }
 
+[tool.uv]
+# Keep equal to the Renovate minimumReleaseAge (3 days) so a lock refresh cannot pick a release the
+# next Renovate run rejects.
+exclude-newer = "3 days"
+
 [tool.setuptools]
 py-modules = []
 

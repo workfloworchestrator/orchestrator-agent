@@ -1,9 +1,9 @@
 name: Linting
 
 on:
-  push:
-    branches: [main]
-  pull_request:
+  # Called by ci.yml only, so lint is part of the single 'CI result' check and
+  # does not run twice on a PR.
+  workflow_call:
 
 env:
   UV_LOCKED: true
@@ -23,7 +23,7 @@ jobs:
       - name: Install uv and set the python version
         uses: astral-sh/setup-uv@v7
         with:
-          version: "0.10.8"
+          version: "0.13.9"
           python-version: ${{ matrix.python-version }}
 
       - name: Install the project
